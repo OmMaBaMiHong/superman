@@ -1,15 +1,22 @@
 import ky from 'ky';
 import type {
   Article,
+  Board,
+  BoardItem,
   Category,
   Feed,
+  FeedContentView,
+  Highlight,
+  HighlightColor,
   PersistedSettings,
   SystemLogsPage,
+  Tag,
   UserType,
 } from '@/types';
 import { notifyApiError } from './apiErrorNotifier';
 import { normalizeFeedAutoTriggerFlags } from '@/lib/feeds/feedAutoTriggerPolicy';
 import { AI_DIGEST_ICON_URL } from '@/lib/feeds/feedIcons';
+import { isRssHubUrl } from '@/lib/rsshub/url';
 import { isRecord } from '@/lib/utils';
 
 export interface ApiErrorPayload {
@@ -406,6 +413,21 @@ export async function exportOpml(
   };
 }
 
+export interface RecommendedFeedItem {
+  id: string;
+  title: string;
+  url: string;
+  siteUrl: string | null;
+  iconUrl: string | null;
+  description: string | null;
+  subscriberCount: number;
+  source: 'builtin' | 'aggregated';
+}
+
+export async function getRecommendedFeeds(options?: RequestApiOptions): Promise<RecommendedFeedItem[]> {
+  return requestApi('/api/feeds/recommended', undefined, options);
+}
+
 export type RssValidationErrorCode =
   | 'invalid_url'
   | 'unsafe_url'
@@ -441,7 +463,64 @@ type RssValidationEnvelope =
       error: {
         message: string;
       };
+  };
+
+export interface RssHubSourceResolveResult {
+  resolved: boolean;
+  inputUrl: string;
+  finalUrl?: string;
+  rssHubUrl?: string;
+  routePath?: string;
+  title?: string;
+  sourceDomain?: string;
+  message?: string;
+}
+
+type RssHubSourceResolveEnvelope =
+  | {
+      ok: true;
+      data: RssHubSourceResolveResult;
+    }
+  | {
+      ok: false;
+      error: {
+        message: string;
+      };
     };
+
+export async function resolveRssHubSourceUrl(url: string): Promise<RssHubSourceResolveResult> {
+  try {
+    const endpoint = new URL('/api/rsshub/resolve', getBaseUrl());
+    endpoint.searchParams.set('url', url);
+
+    const res = await api(endpoint.toString(), {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+      timeout: 12_000,
+    });
+
+    const json: unknown = await res.json().catch(() => null);
+    if (typeof json !== 'object' || json === null || !('ok' in json)) {
+      return { resolved: false, inputUrl: url, message: '暂时无法识别该链接。' };
+    }
+
+    const envelope = json as RssHubSourceResolveEnvelope;
+    if (envelope.ok) return envelope.data;
+
+    return {
+      resolved: false,
+      inputUrl: url,
+      message: envelope.error.message,
+    };
+  } catch (err) {
+    const isTimeout = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
+    return {
+      resolved: false,
+      inputUrl: url,
+      message: isTimeout ? '识别超时，请稍后重试。' : '暂时无法识别该链接。',
+    };
+  }
+}
 
 export async function validateRssUrl(url: string): Promise<RssValidationResult> {
   let parsed: URL;
@@ -456,8 +535,12 @@ export async function validateRssUrl(url: string): Promise<RssValidationResult> 
     };
   }
 
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    return { ok: false, errorCode: 'invalid_url', message: '链接必须以 http:// 或 https:// 开头' };
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:' && !isRssHubUrl(url)) {
+    return {
+      ok: false,
+      errorCode: 'invalid_url',
+      message: '链接必须以 http://、https:// 或 rsshub:// 开头',
+    };
   }
 
   try {
@@ -534,6 +617,7 @@ export interface ReaderSnapshotDto {
     titleTranslateEnabled: boolean;
     bodyTranslateEnabled: boolean;
     articleListDisplayMode: 'card' | 'list';
+    view?: FeedContentView;
     categoryId: string | null;
     fetchIntervalMinutes: number;
     lastFetchStatus: number | null;
@@ -598,6 +682,7 @@ export async function createFeed(input: {
   title: string;
   url: string;
   siteUrl?: string | null;
+  view?: FeedContentView;
   categoryId?: string | null;
   categoryName?: string | null;
   fullTextOnOpenEnabled?: boolean;
@@ -772,6 +857,7 @@ export interface FeedRowDto {
   titleTranslateEnabled: boolean;
   bodyTranslateEnabled: boolean;
   articleListDisplayMode: 'card' | 'list';
+  view: FeedContentView;
   categoryId: string | null;
   fetchIntervalMinutes: number;
   isPodcast?: boolean;
@@ -793,6 +879,7 @@ export async function patchFeed(
     url?: string;
     siteUrl?: string | null;
     enabled?: boolean;
+    view?: FeedContentView;
     categoryId?: string | null;
     categoryName?: string | null;
     fullTextOnOpenEnabled?: boolean;
@@ -1410,6 +1497,7 @@ export function mapFeedDto(dto: FeedDtoLike, categories: Category[]): Feed {
     titleTranslateEnabled: dto.titleTranslateEnabled,
     bodyTranslateEnabled: dto.bodyTranslateEnabled,
     articleListDisplayMode: dto.articleListDisplayMode,
+    view: dto.view ?? (dto.kind === 'ai_digest' ? 'digest' : 'article'),
     categoryId: dto.categoryId,
     category: dto.categoryId ? categoryNameById.get(dto.categoryId) ?? null : null,
     fetchStatus: ('lastFetchStatus' in dto ? dto.lastFetchStatus : null) ?? null,
@@ -1446,6 +1534,81 @@ export function mapSnapshotArticleItem(dto: ReaderSnapshotDto['articles']['items
     bodyTranslationBlockedReason: dto.bodyTranslationBlockedReason,
     aiSummarySession: dto.aiSummarySession,
   };
+}
+
+// 知识库问答
+export interface KnowledgeAskRequest {
+  question: string;
+  mode?: 'personal_assistant' | 'content_creation' | 'information_filtering';
+}
+
+export interface KnowledgeSearchResult {
+  articleId: number;
+  chunkIndex: number;
+  chunkText: string;
+  title: string;
+  score: number;
+}
+
+// 流式问答
+export async function askKnowledge(
+  params: KnowledgeAskRequest,
+  onChunk: (content: string) => void,
+  onDone: (sources: Array<{ title: string; articleId: number }>) => void,
+  onError: (error: string) => void,
+  options?: RequestApiOptions,
+): Promise<void> {
+  const response = await fetch('/api/knowledge/ask', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: '请求失败' } }));
+    onError(err?.error?.message || '请求失败');
+    return;
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    onError('无法读取响应流');
+    return;
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const data = line.slice(6);
+      if (data === '[DONE]') continue;
+
+      try {
+        const parsed = JSON.parse(data);
+        if (parsed.done) {
+          onDone(parsed.sources || []);
+        } else if (parsed.content) {
+          onChunk(parsed.content);
+        } else if (parsed.error) {
+          onError(parsed.error);
+        }
+      } catch { /* ignore parse errors */ }
+    }
+  }
+}
+
+// 知识库搜索（非流式）
+export async function searchKnowledge(q: string, options?: RequestApiOptions): Promise<KnowledgeSearchResult[]> {
+  return requestApi(`/api/knowledge/search?q=${encodeURIComponent(q)}`, undefined, options);
 }
 
 export function mapArticleDto(dto: ArticleDto): Article {
@@ -1488,4 +1651,232 @@ export function mapArticleDto(dto: ArticleDto): Article {
       durationSeconds: attachment.durationSeconds,
     })) ?? undefined,
   };
+}
+
+// === Highlights API ===
+
+export async function getArticleHighlights(
+  articleId: number,
+  options?: RequestApiOptions,
+): Promise<Highlight[]> {
+  return requestApi(`/api/articles/${articleId}/highlights`, undefined, options);
+}
+
+export async function createHighlight(
+  articleId: number,
+  params: {
+    text: string;
+    rangeStartSelector: string;
+    rangeStartOffset: number;
+    rangeEndSelector: string;
+    rangeEndOffset: number;
+    color: HighlightColor;
+    note?: string | null;
+  },
+  options?: RequestApiOptions,
+): Promise<Highlight> {
+  return requestApi(
+    `/api/articles/${articleId}/highlights`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(params),
+    },
+    options,
+  );
+}
+
+export async function updateHighlight(
+  highlightId: string,
+  updates: { color?: HighlightColor; note?: string | null },
+  options?: RequestApiOptions,
+): Promise<Highlight> {
+  return requestApi(
+    `/api/highlights/${encodeURIComponent(highlightId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(updates),
+    },
+    options,
+  );
+}
+
+export async function deleteHighlight(
+  highlightId: string,
+  options?: RequestApiOptions,
+): Promise<{ deleted: boolean }> {
+  return requestApi(
+    `/api/highlights/${encodeURIComponent(highlightId)}`,
+    { method: 'DELETE' },
+    options,
+  );
+}
+
+// === Tags API ===
+
+export async function getTags(options?: RequestApiOptions): Promise<Tag[]> {
+  return requestApi('/api/tags', undefined, options);
+}
+
+export async function createTag(
+  name: string,
+  color?: string,
+  options?: RequestApiOptions,
+): Promise<Tag> {
+  return requestApi(
+    '/api/tags',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name, color }),
+    },
+    options,
+  );
+}
+
+export async function updateTag(
+  tagId: string,
+  updates: { name?: string; color?: string },
+  options?: RequestApiOptions,
+): Promise<Tag> {
+  return requestApi(
+    `/api/tags/${encodeURIComponent(tagId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(updates),
+    },
+    options,
+  );
+}
+
+export async function deleteTag(
+  tagId: string,
+  options?: RequestApiOptions,
+): Promise<{ deleted: boolean }> {
+  return requestApi(
+    `/api/tags/${encodeURIComponent(tagId)}`,
+    { method: 'DELETE' },
+    options,
+  );
+}
+
+export async function getArticleTags(
+  articleId: number,
+  options?: RequestApiOptions,
+): Promise<Tag[]> {
+  return requestApi(`/api/articles/${articleId}/tags`, undefined, options);
+}
+
+export async function addTagsToArticle(
+  articleId: number,
+  tagIds: string[],
+  options?: RequestApiOptions,
+): Promise<{ added: boolean }> {
+  return requestApi(
+    `/api/articles/${articleId}/tags`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tagIds }),
+    },
+    options,
+  );
+}
+
+export async function removeTagFromArticle(
+  articleId: number,
+  tagId: string,
+  options?: RequestApiOptions,
+): Promise<{ removed: boolean }> {
+  return requestApi(
+    `/api/articles/${articleId}/tags/${encodeURIComponent(tagId)}`,
+    { method: 'DELETE' },
+    options,
+  );
+}
+
+// === Boards API ===
+
+export async function getBoards(options?: RequestApiOptions): Promise<Board[]> {
+  return requestApi('/api/boards', undefined, options);
+}
+
+export async function createBoard(
+  title: string,
+  options?: { description?: string; icon?: string } & RequestApiOptions,
+): Promise<Board> {
+  const { description, icon, ...requestOptions } = options ?? {};
+  return requestApi(
+    '/api/boards',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title, description, icon }),
+    },
+    requestOptions,
+  );
+}
+
+export async function updateBoard(
+  boardId: string,
+  updates: { title?: string; description?: string; icon?: string; sortOrder?: number },
+  options?: RequestApiOptions,
+): Promise<Board> {
+  return requestApi(
+    `/api/boards/${encodeURIComponent(boardId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(updates),
+    },
+    options,
+  );
+}
+
+export async function deleteBoard(
+  boardId: string,
+  options?: RequestApiOptions,
+): Promise<{ deleted: boolean }> {
+  return requestApi(
+    `/api/boards/${encodeURIComponent(boardId)}`,
+    { method: 'DELETE' },
+    options,
+  );
+}
+
+export async function getBoardItems(
+  boardId: string,
+  options?: RequestApiOptions,
+): Promise<BoardItem[]> {
+  return requestApi(`/api/boards/${encodeURIComponent(boardId)}/items`, undefined, options);
+}
+
+export async function addArticleToBoard(
+  boardId: string,
+  articleId: number,
+  options?: RequestApiOptions,
+): Promise<{ added: boolean }> {
+  return requestApi(
+    `/api/boards/${encodeURIComponent(boardId)}/items`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ articleId }),
+    },
+    options,
+  );
+}
+
+export async function removeArticleFromBoard(
+  boardId: string,
+  articleId: number,
+  options?: RequestApiOptions,
+): Promise<{ removed: boolean }> {
+  return requestApi(
+    `/api/boards/${encodeURIComponent(boardId)}/items/${articleId}`,
+    { method: 'DELETE' },
+    options,
+  );
 }
