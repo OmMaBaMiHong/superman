@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
 import { normalizeUserId } from '@/server/domains/users/userScope';
+import { indexArticle } from '@/server/integrations/knowledge/indexingService';
 
 export type DbClient = Pool | PoolClient;
 
@@ -285,7 +286,16 @@ export async function insertArticleIgnoreDuplicate(
       input.filterErrorMessage ?? null,
     ],
   );
-  return rows[0] ?? null;
+  const article = rows[0] ?? null;
+  if (article) {
+    // 非阻塞异步索引：文章入库后自动生成向量索引，失败不影响入库结果
+    void indexArticle(Number(article.id), article.title, article.contentHtml ?? '').catch(
+      (err) => {
+        console.error(`[knowledge] Failed to index article ${article.id}:`, err);
+      },
+    );
+  }
+  return article;
 }
 
 export async function getArticleByFeedAndDedupeKey(
