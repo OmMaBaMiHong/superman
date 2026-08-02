@@ -118,13 +118,6 @@ export interface GeneralSettings {
   middlePaneWidth: number;
 }
 
-export interface AppearanceSettings {
-  theme: 'light' | 'dark' | 'auto';
-  fontSize: 'small' | 'medium' | 'large';
-  fontFamily: 'sans' | 'serif';
-  lineHeight: 'compact' | 'normal' | 'relaxed';
-}
-
 export interface AIPersistedSettings {
   summaryEnabled: boolean;
   translateEnabled: boolean;
