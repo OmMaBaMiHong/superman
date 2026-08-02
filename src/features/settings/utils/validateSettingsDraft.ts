@@ -53,17 +53,17 @@ function validateRss(draft: SettingsDraft, errors: Record<string, string>) {
     const urlKey = `rss.sources.${index}.url`;
 
     if (!source.name.trim()) {
-      errors[nameKey] = 'Name is required.';
+      errors[nameKey] = '请输入姓名';
     }
 
     const url = source.url.trim();
     if (!url) {
-      errors[urlKey] = 'URL is required.';
+      errors[urlKey] = '请输入 URL';
       return;
     }
 
     if (!isValidHttpUrl(url)) {
-      errors[urlKey] = 'URL must use http or https.';
+      errors[urlKey] = 'URL 必须以 http 或 https 开头';
       return;
     }
 
@@ -76,7 +76,7 @@ function validateAi(draft: SettingsDraft, errors: Record<string, string>) {
   if (!apiBaseUrl) {
     // continue; translation config may still need validation
   } else if (!isValidUrl(apiBaseUrl)) {
-    errors['ai.apiBaseUrl'] = 'API base URL must be a valid URL.';
+    errors['ai.apiBaseUrl'] = 'API 地址格式不正确';
   }
 
   const translation = ai?.translation;
@@ -87,12 +87,12 @@ function validateAi(draft: SettingsDraft, errors: Record<string, string>) {
   const translationApiBaseUrl = translation.apiBaseUrl.trim();
   if (!translationApiBaseUrl) {
     errors['ai.translation.apiBaseUrl'] =
-      'Translation API base URL is required when using dedicated translation settings.';
+      '使用独立翻译设置时，翻译 API 地址不能为空';
     return;
   }
 
   if (!isValidUrl(translationApiBaseUrl)) {
-    errors['ai.translation.apiBaseUrl'] = 'Translation API base URL must be a valid URL.';
+    errors['ai.translation.apiBaseUrl'] = '翻译 API 地址格式不正确';
   }
 }
 

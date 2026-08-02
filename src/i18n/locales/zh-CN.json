@@ -1,0 +1,116 @@
+{
+  "common": {
+    "save": "保存",
+    "cancel": "取消",
+    "delete": "删除",
+    "edit": "编辑",
+    "confirm": "确认",
+    "close": "关闭",
+    "search": "搜索",
+    "loading": "加载中...",
+    "noData": "暂无数据",
+    "error": "操作失败，请重试",
+    "success": "操作成功"
+  },
+  "settings": {
+    "title": "设置",
+    "general": {
+      "title": "通用",
+      "theme": "主题",
+      "fontSize": "字体大小",
+      "fontFamily": "字体风格",
+      "lineHeight": "行高",
+      "autoMarkAsRead": "自动标记已读",
+      "compactMode": "紧凑模式"
+    },
+    "rss": {
+      "title": "RSS",
+      "fetchInterval": "抓取间隔",
+      "maxStoredArticles": "每源最大存储条数",
+      "keywordFilter": "关键词过滤"
+    },
+    "ai": {
+      "title": "AI",
+      "model": "AI 模型",
+      "apiBaseUrl": "API 地址",
+      "apiKey": "API 密钥",
+      "deepThinking": "深度思考",
+      "summaryPrompt": "摘要提示词"
+    },
+    "security": {
+      "title": "账号与安全",
+      "name": "姓名",
+      "password": "密码",
+      "role": "角色"
+    },
+    "validation": {
+      "nameRequired": "请输入姓名",
+      "urlRequired": "请输入 URL",
+      "urlInvalid": "URL 必须以 http 或 https 开头",
+      "apiBaseUrlInvalid": "API 地址格式不正确",
+      "translationApiBaseUrlRequired": "使用独立翻译设置时，翻译 API 地址不能为空",
+      "translationApiBaseUrlInvalid": "翻译 API 地址格式不正确"
+    }
+  },
+  "reader": {
+    "shortcuts": {
+      "title": "快捷键",
+      "nextArticle": "下一篇文章",
+      "prevArticle": "上一篇文章",
+      "markAsRead": "标记已读",
+      "star": "收藏",
+      "summarize": "生成摘要",
+      "translate": "翻译",
+      "refresh": "刷新",
+      "search": "全局搜索",
+      "toggleSidebar": "折叠侧栏"
+    }
+  },
+  "article": {
+    "actions": {
+      "summarize": "生成摘要",
+      "translate": "翻译",
+      "star": "收藏",
+      "unstar": "取消收藏",
+      "export": "导出文章",
+      "fulltextFetch": "抓取全文",
+      "addToBoard": "加入看板",
+      "tag": "标签",
+      "highlight": "高亮",
+      "aiAssistant": "AI 助手"
+    },
+    "highlight": {
+      "colors": {
+        "yellow": "黄色",
+        "green": "绿色",
+        "blue": "蓝色",
+        "pink": "粉色",
+        "purple": "紫色"
+      },
+      "addNote": "添加笔记",
+      "deleteHighlight": "删除高亮",
+      "addToReview": "加入复习"
+    },
+    "tag": {
+      "title": "标签",
+      "create": "新建标签",
+      "suggested": "AI 推荐标签",
+      "noTags": "暂无标签"
+    },
+    "aiAssistant": {
+      "title": "AI 助手",
+      "placeholder": "对这篇文章提问...",
+      "summarize": "总结全文",
+      "keyPoints": "提取要点",
+      "explainTerms": "解释术语",
+      "translateKey": "翻译关键段落"
+    }
+  },
+  "board": {
+    "title": "看板",
+    "create": "新建看板",
+    "empty": "暂无看板",
+    "addArticle": "加入看板",
+    "removeArticle": "移出看板"
+  }
+}
