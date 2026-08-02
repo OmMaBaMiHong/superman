@@ -1,7 +1,7 @@
 -- 0042_article_highlights.sql
 CREATE TABLE article_highlights (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   article_id  BIGINT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
   text        TEXT NOT NULL,
   range_start_selector  TEXT NOT NULL,

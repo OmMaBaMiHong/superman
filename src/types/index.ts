@@ -1,5 +1,6 @@
 export type FeedKind = 'rss' | 'ai_digest';
 export type FeedProvider = 'local_rss' | 'fever';
+export type FeedContentView = 'article' | 'picture' | 'video' | 'social' | 'digest';
 export type UserType = 'initial_admin' | 'admin' | 'member';
 
 export interface Feed {
@@ -23,6 +24,7 @@ export interface Feed {
   titleTranslateEnabled: boolean;
   bodyTranslateEnabled: boolean;
   articleListDisplayMode: 'card' | 'list';
+  view?: FeedContentView;
   categoryId?: string | null;
   category?: string | null;
   fetchStatus: number | null;
@@ -215,3 +217,49 @@ export interface PersistedSettings {
 }
 
 export type ViewType = 'all' | 'unread' | 'starred' | string;
+
+// === Highlights ===
+export type HighlightColor = 'yellow' | 'green' | 'blue' | 'pink' | 'purple';
+
+export interface Highlight {
+  id: string;
+  articleId: number;
+  userId: string;
+  text: string;
+  rangeStartSelector: string;
+  rangeStartOffset: number;
+  rangeEndSelector: string;
+  rangeEndOffset: number;
+  color: HighlightColor;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// === Tags ===
+export interface Tag {
+  id: string;
+  userId: string;
+  name: string;
+  color: string;
+  createdAt: string;
+}
+
+// === Boards ===
+export interface Board {
+  id: string;
+  userId: string;
+  title: string;
+  description: string | null;
+  icon: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BoardItem {
+  boardId: string;
+  articleId: number;
+  sortOrder: number;
+  addedAt: string;
+}
