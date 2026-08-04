@@ -11,5 +11,15 @@
     "noData": "No data",
     "error": "Operation failed",
     "success": "Success"
+  },
+  "article": {
+    "aiAssistant": {
+      "title": "AI Assistant",
+      "placeholder": "Ask about this article...",
+      "summarize": "Summarize",
+      "keyPoints": "Key Points",
+      "explainTerms": "Explain Terms",
+      "translateKey": "Translate Key Paragraphs"
+    }
   }
 }
