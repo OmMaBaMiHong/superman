@@ -19,7 +19,7 @@ const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      'flex h-9 w-full items-center justify-between whitespace-nowrap rounded-md border border-input/90 bg-[color-mix(in_oklab,var(--color-background)_88%,white_12%)] px-3 py-2 text-sm ring-offset-background transition-[background-color,border-color,box-shadow] duration-200 placeholder:text-muted-foreground/80 focus:outline-none focus:border-primary/30 focus:ring-2 focus:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.08] dark:bg-[linear-gradient(180deg,rgba(13,13,17,0.98),rgba(9,9,12,0.94))] dark:focus:border-[rgba(94,106,210,0.38)] dark:focus:ring-[rgba(94,106,210,0.12)] [&>span]:line-clamp-1',
+      'flex h-9 w-full items-center justify-between whitespace-nowrap rounded-md border border-input/90 bg-[color-mix(in_oklab,var(--color-background)_88%,white_12%)] px-3 py-2 text-sm ring-offset-background transition-[background-color,border-color,box-shadow] duration-200 placeholder:text-muted-foreground/80 focus:outline-none focus:border-primary/30 focus:ring-2 focus:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.08] dark:bg-card dark:focus:border-primary/38 dark:focus:ring-primary/12 [&>span]:line-clamp-1',
       className,
     )}
     {...props}
@@ -42,7 +42,7 @@ const SelectContent = React.forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       className={cn(
-        'relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-2xl border border-border/70 bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 dark:border-white/[0.06] dark:bg-[linear-gradient(180deg,rgba(12,12,16,0.98),rgba(8,8,11,1))]',
+        'relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-2xl border border-border/70 bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 dark:border-white/[0.06]',
         position === 'popper' &&
           'data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1',
         className,

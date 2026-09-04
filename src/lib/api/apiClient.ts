@@ -6,9 +6,19 @@ import type {
   Category,
   Feed,
   FeedContentView,
+  GithubArticleMeta,
+  GithubContentType,
+  GithubRepoSubscription,
+  GithubTokenStatus,
   Highlight,
   HighlightColor,
+  OAuthAuthorizeResult,
+  OAuthConnectionView,
+  OAuthProviderConfigStatus,
+  OAuthProviderId,
   PersistedSettings,
+  RssHubCookieProvider,
+  RssHubCookieView,
   SystemLogsPage,
   Tag,
   UserType,
@@ -647,6 +657,7 @@ export interface ReaderSnapshotDto {
       bodyTranslationEligible?: boolean;
       bodyTranslationBlockedReason?: string | null;
       aiSummarySession?: ArticleAiSummarySessionSnapshotDto | null;
+      githubMeta?: GithubArticleMeta | null;
     }>;
     nextCursor: string | null;
     totalCount: number;
@@ -1109,6 +1120,270 @@ export async function syncFeverAccountNow(
   );
 }
 
+// === GitHub 订阅 ===
+
+export interface CreateGithubRepoInput {
+  repoInput: string;
+  title?: string;
+  contentTypes?: GithubContentType[];
+  includePrerelease?: boolean;
+  fetchIntervalMinutes?: number;
+  categoryId?: string | null;
+  categoryName?: string | null;
+}
+
+export interface UpdateGithubRepoInput {
+  title?: string;
+  enabled?: boolean;
+  fetchIntervalMinutes?: number;
+  includePrerelease?: boolean;
+  contentTypes?: GithubContentType[];
+  categoryId?: string | null;
+  categoryName?: string | null;
+}
+
+export async function listGithubRepos(
+  options?: RequestApiOptions,
+): Promise<GithubRepoSubscription[]> {
+  return requestApi('/api/github/repos', undefined, options);
+}
+
+export async function createGithubRepo(
+  input: CreateGithubRepoInput,
+  options?: RequestApiOptions,
+): Promise<GithubRepoSubscription> {
+  return requestApi(
+    '/api/github/repos',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    },
+    options,
+  );
+}
+
+export async function patchGithubRepo(
+  feedId: string,
+  input: UpdateGithubRepoInput,
+  options?: RequestApiOptions,
+): Promise<GithubRepoSubscription> {
+  return requestApi(
+    `/api/github/repos/${encodeURIComponent(feedId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    },
+    options,
+  );
+}
+
+export async function deleteGithubRepo(
+  feedId: string,
+  options?: RequestApiOptions,
+): Promise<{ id: string }> {
+  return requestApi(
+    `/api/github/repos/${encodeURIComponent(feedId)}`,
+    {
+      method: 'DELETE',
+    },
+    options,
+  );
+}
+
+export async function refreshGithubRepo(
+  feedId: string,
+  options?: RequestApiOptions,
+): Promise<{ enqueued: boolean; feedId: string; reason?: 'already_enqueued' }> {
+  return requestApi(
+    `/api/github/repos/${encodeURIComponent(feedId)}/refresh`,
+    {
+      method: 'POST',
+    },
+    options,
+  );
+}
+
+export async function getGithubTokenStatus(
+  options?: RequestApiOptions,
+): Promise<GithubTokenStatus> {
+  return requestApi('/api/settings/github/token', undefined, options);
+}
+
+export async function putGithubToken(
+  token: string,
+  options?: RequestApiOptions,
+): Promise<GithubTokenStatus> {
+  return requestApi(
+    '/api/settings/github/token',
+    {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token }),
+    },
+    options,
+  );
+}
+
+export async function deleteGithubToken(
+  options?: RequestApiOptions,
+): Promise<GithubTokenStatus> {
+  return requestApi(
+    '/api/settings/github/token',
+    {
+      method: 'DELETE',
+    },
+    options,
+  );
+}
+
+// === OAuth 三方授权中心 ===
+
+/**
+ * 保存平台应用配置的入参。
+ *
+ * `clientSecret` 省略（`undefined`）表示保留服务端已有的 secret，
+ * 传空串表示显式清空。明文 secret 只在本次请求体中出现一次，
+ * 服务端落库前即 `seal()`，响应体永远只回打码值。
+ */
+export interface SaveOAuthProviderConfigInput {
+  clientId: string;
+  clientSecret?: string;
+  enabled?: boolean;
+}
+
+export async function listOAuthProviders(
+  options?: RequestApiOptions,
+): Promise<OAuthProviderConfigStatus[]> {
+  return requestApi('/api/oauth/providers', undefined, options);
+}
+
+export async function putOAuthProviderConfig(
+  provider: OAuthProviderId,
+  input: SaveOAuthProviderConfigInput,
+  options?: RequestApiOptions,
+): Promise<OAuthProviderConfigStatus> {
+  return requestApi(
+    `/api/oauth/providers/${encodeURIComponent(provider)}`,
+    {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    },
+    options,
+  );
+}
+
+export async function deleteOAuthProviderConfig(
+  provider: OAuthProviderId,
+  options?: RequestApiOptions,
+): Promise<OAuthProviderConfigStatus> {
+  return requestApi(
+    `/api/oauth/providers/${encodeURIComponent(provider)}`,
+    {
+      method: 'DELETE',
+    },
+    options,
+  );
+}
+
+/**
+ * 发起授权。
+ *
+ * 返回的 `authorizeUrl` 由服务端拼装（含 state 与 PKCE challenge），
+ * 前端只负责跳转，不参与任何参数构造。
+ */
+export async function startOAuthAuthorization(
+  provider: OAuthProviderId,
+  returnTo?: string,
+  options?: RequestApiOptions,
+): Promise<OAuthAuthorizeResult> {
+  return requestApi(
+    '/api/oauth/authorize',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(returnTo === undefined ? { provider } : { provider, returnTo }),
+    },
+    options,
+  );
+}
+
+export async function listOAuthConnections(
+  options?: RequestApiOptions,
+): Promise<OAuthConnectionView[]> {
+  return requestApi('/api/oauth/connections', undefined, options);
+}
+
+export async function deleteOAuthConnection(
+  id: string,
+  options?: RequestApiOptions,
+): Promise<{ id: string }> {
+  return requestApi(
+    `/api/oauth/connections/${encodeURIComponent(id)}`,
+    {
+      method: 'DELETE',
+    },
+    options,
+  );
+}
+
+export async function refreshOAuthConnection(
+  id: string,
+  options?: RequestApiOptions,
+): Promise<OAuthConnectionView> {
+  return requestApi(
+    `/api/oauth/connections/${encodeURIComponent(id)}/refresh`,
+    {
+      method: 'POST',
+    },
+    options,
+  );
+}
+
+// === RSSHub 平台 Cookie 授权 ===
+
+export async function listRssHubCookies(
+  options?: RequestApiOptions,
+): Promise<RssHubCookieView[]> {
+  return requestApi('/api/rsshub/cookies', undefined, options);
+}
+
+export interface SaveRssHubCookieInput {
+  cookie: string;
+  remark?: string;
+}
+
+export async function putRssHubCookie(
+  provider: RssHubCookieProvider,
+  input: SaveRssHubCookieInput,
+  options?: RequestApiOptions,
+): Promise<RssHubCookieView> {
+  return requestApi(
+    `/api/rsshub/cookies/${encodeURIComponent(provider)}`,
+    {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    },
+    options,
+  );
+}
+
+export async function deleteRssHubCookie(
+  provider: RssHubCookieProvider,
+  options?: RequestApiOptions,
+): Promise<RssHubCookieView> {
+  return requestApi(
+    `/api/rsshub/cookies/${encodeURIComponent(provider)}`,
+    {
+      method: 'DELETE',
+    },
+    options,
+  );
+}
+
 export interface ArticleDto {
   id: string;
   feedId: string;
@@ -1533,6 +1808,7 @@ export function mapSnapshotArticleItem(dto: ReaderSnapshotDto['articles']['items
     bodyTranslationEligible: dto.bodyTranslationEligible,
     bodyTranslationBlockedReason: dto.bodyTranslationBlockedReason,
     aiSummarySession: dto.aiSummarySession,
+    githubMeta: dto.githubMeta ?? null,
   };
 }
 

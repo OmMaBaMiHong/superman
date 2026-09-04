@@ -5,25 +5,31 @@ import { Button } from '@/components/ui/button';
 import { DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import type { Category } from '../../../types';
+import type { Category, FeedContentView } from '../../../types';
 import CreatableCategoryField from './CreatableCategoryField';
+import FeedViewSelector from './FeedViewSelector';
+import type { FeedDiscoveryInputType } from '../hooks/useFeedDialogForm';
 
 interface FeedDialogFormProps {
   badgeText: string;
   badgeVariant: 'default' | 'secondary' | 'destructive' | 'outline';
+  canResolveSourceUrl: boolean;
   canSave: boolean;
   categoryInput: string;
   categoryOptions: Category[];
   categoryDisabled?: boolean;
   fieldIdPrefix: string;
+  detectedInputType: FeedDiscoveryInputType;
   messageTone: string;
   onCancel: () => void;
   onCategoryChange: (value: string) => void;
+  onResolveSourceUrl: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onTitleBlur: () => void;
   onTitleChange: (value: string) => void;
   onUrlBlur: (value: string) => void;
   onUrlChange: (value: string) => void;
+  onViewChange: (value: FeedContentView) => void;
   sectionLabel: string;
   submitError: string | null;
   submitLabel: string;
@@ -40,24 +46,29 @@ interface FeedDialogFormProps {
   validationIcon?: LucideIcon;
   validationIconClassName?: string;
   validationMessage: string | null;
+  view: FeedContentView;
 }
 
 export default function FeedDialogForm({
   badgeText,
   badgeVariant,
+  canResolveSourceUrl,
   canSave,
   categoryInput,
   categoryOptions,
   categoryDisabled = false,
   fieldIdPrefix,
+  detectedInputType,
   messageTone,
   onCancel,
   onCategoryChange,
+  onResolveSourceUrl,
   onSubmit,
   onTitleBlur,
   onTitleChange,
   onUrlBlur,
   onUrlChange,
+  onViewChange,
   sectionLabel,
   submitError,
   submitLabel,
@@ -74,6 +85,7 @@ export default function FeedDialogForm({
   validationIcon: ValidationIcon,
   validationIconClassName,
   validationMessage,
+  view,
 }: FeedDialogFormProps) {
   const urlInputId = `${fieldIdPrefix}-url`;
   const urlLabelId = `${fieldIdPrefix}-url-label`;
@@ -81,6 +93,7 @@ export default function FeedDialogForm({
   const titleLabelId = `${fieldIdPrefix}-title-label`;
   const categoryInputId = `${fieldIdPrefix}-category`;
   const categoryLabelId = `${fieldIdPrefix}-category-label`;
+  const viewLabelId = `${fieldIdPrefix}-view-label`;
   const urlMessageId = `${fieldIdPrefix}-url-message`;
   const titleMessageId = `${fieldIdPrefix}-title-message`;
   const categoryHintId = `${fieldIdPrefix}-category-hint`;
@@ -103,24 +116,35 @@ export default function FeedDialogForm({
             <Label id={urlLabelId} className="text-xs">
               URL
             </Label>
-            <Input
-              ref={urlInputRef}
-              id={urlInputId}
-              name="url"
-              type="url"
-              inputMode="url"
-              autoComplete="off"
-              spellCheck={false}
-              value={url}
-              disabled={urlDisabled}
-              onChange={(event) => onUrlChange(event.target.value)}
-              onBlur={(event) => onUrlBlur(event.currentTarget.value)}
-              placeholder="例如：https://example.com/feed.xml…"
-              aria-labelledby={urlLabelId}
-              aria-invalid={urlFieldError ? 'true' : 'false'}
-              aria-describedby={urlMessageId}
-              aria-errormessage={urlFieldError ? urlMessageId : undefined}
-            />
+            <div className="flex gap-2">
+              <Input
+                ref={urlInputRef}
+                id={urlInputId}
+                name="url"
+                type="url"
+                inputMode="url"
+                autoComplete="off"
+                spellCheck={false}
+                value={url}
+                disabled={urlDisabled}
+                onChange={(event) => onUrlChange(event.target.value)}
+                onBlur={(event) => onUrlBlur(event.currentTarget.value)}
+                placeholder="RSS、rsshub:// 或平台主页/短链…"
+                aria-labelledby={urlLabelId}
+                aria-invalid={urlFieldError ? 'true' : 'false'}
+                aria-describedby={urlMessageId}
+                aria-errormessage={urlFieldError ? urlMessageId : undefined}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                className="shrink-0 px-3 text-xs"
+                onClick={onResolveSourceUrl}
+                disabled={urlDisabled || !canResolveSourceUrl}
+              >
+                识别 RSSHub 订阅
+              </Button>
+            </div>
             <p
               id={urlMessageId}
               role={urlFieldError ? 'alert' : 'status'}
@@ -136,6 +160,12 @@ export default function FeedDialogForm({
                 </span>
               ) : null}
             </p>
+            {detectedInputType === 'rsshub' ? (
+              <div className="rounded-xl border border-primary/15 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">
+                <p className="font-medium text-primary">已识别为内置 RSSHub 路由</p>
+                <p className="mt-0.5">保存后会通过本地 RSSHub 转换为可阅读 RSS。</p>
+              </div>
+            ) : null}
           </div>
 
           <div className="grid gap-1.5">
@@ -166,6 +196,13 @@ export default function FeedDialogForm({
           </div>
 
           <div className="grid gap-1.5">
+            <Label id={viewLabelId} className="text-xs">
+              视图
+            </Label>
+            <FeedViewSelector labelId={viewLabelId} value={view} onChange={onViewChange} />
+          </div>
+
+          <div className="grid gap-1.5">
             <Label id={categoryLabelId} className="text-xs">
               分类
             </Label>
@@ -191,7 +228,7 @@ export default function FeedDialogForm({
         </p>
       ) : null}
 
-      <DialogFooter className="pt-1">
+      <DialogFooter className="sticky bottom-0 -mx-1 border-t border-border/60 bg-background/95 px-1 pt-3 backdrop-blur dark:border-white/[0.06] dark:bg-background/95">
         <Button type="button" variant="outline" onClick={onCancel} disabled={submitting}>
           取消
         </Button>

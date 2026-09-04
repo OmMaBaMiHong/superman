@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const parseStringMock = vi.fn();
 const isSafeExternalUrlMock = vi.fn();
 const fetchRssXmlMock = vi.fn();
+const fetchFeedXmlMock = vi.fn();
 
 vi.mock('rss-parser', () => {
   class MockParser {
@@ -22,11 +23,16 @@ vi.mock('@/server/infra/http/externalHttpClient', () => ({
   fetchRssXml: (...args: unknown[]) => fetchRssXmlMock(...args),
 }));
 
+vi.mock('@/server/integrations/rss/fetchFeedXml', () => ({
+  fetchFeedXml: (...args: unknown[]) => fetchFeedXmlMock(...args),
+}));
+
 describe('/api/rss/validate', () => {
   beforeEach(() => {
     parseStringMock.mockReset();
     isSafeExternalUrlMock.mockReset();
     fetchRssXmlMock.mockReset();
+    fetchFeedXmlMock.mockReset();
     vi.restoreAllMocks();
     isSafeExternalUrlMock.mockResolvedValue(true);
   });
@@ -57,6 +63,43 @@ describe('/api/rss/validate', () => {
     expect(isSafeExternalUrlMock).toHaveBeenCalledWith('https://example.com/rss.xml', {
       allowUnresolvedHostname: true,
     });
+  });
+
+  it('validates rsshub urls through embedded RSSHub feed fetch', async () => {
+    parseStringMock.mockResolvedValue({
+      title: 'Andrej Karpathy - YouTube',
+      link: 'https://www.youtube.com/channel/UCXUPKJO5MZQN11PqgIvyuvQ',
+    });
+    fetchFeedXmlMock.mockResolvedValue({
+      status: 200,
+      xml: '<?xml version="1.0"?><rss><channel><title>Andrej Karpathy - YouTube</title></channel></rss>',
+      etag: null,
+      lastModified: null,
+    });
+
+    const mod = await import('../../../../../app/api/rss/validate/route');
+    const response = await mod.GET(
+      new Request(
+        'http://localhost/api/rss/validate?url=rsshub%3A%2F%2Fyoutube%2Fuser%2F%40AndrejKarpathy',
+      ),
+    );
+    const json = await response.json();
+
+    expect(json.ok).toBe(true);
+    expect(json.data).toMatchObject({
+      valid: true,
+      title: 'Andrej Karpathy - YouTube',
+      siteUrl: 'https://www.youtube.com/channel/UCXUPKJO5MZQN11PqgIvyuvQ',
+    });
+    expect(fetchFeedXmlMock).toHaveBeenCalledWith('rsshub://youtube/user/@AndrejKarpathy', {
+      timeoutMs: 10_000,
+      userAgent: 'FeedFuse RSS Validator',
+    });
+    expect(fetchRssXmlMock).not.toHaveBeenCalled();
+    expect(isSafeExternalUrlMock).not.toHaveBeenCalledWith(
+      'rsshub://youtube/user/@AndrejKarpathy',
+      expect.anything(),
+    );
   });
 
   it('returns success without siteUrl when feed.link missing', async () => {

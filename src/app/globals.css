@@ -14,7 +14,7 @@
     --color-popover: hsl(0 0% 100%);
     --color-popover-foreground: hsl(222 47% 11%);
 
-    --color-primary: hsl(221 100% 50%);
+    --color-primary: hsl(152 60% 50%);
     --color-primary-foreground: hsl(0 0% 100%);
 
     --color-secondary: hsl(210 40% 96%);
@@ -43,7 +43,7 @@
 
     --color-border: hsl(214 32% 90%);
     --color-input: hsl(214 28% 88%);
-    --color-ring: hsl(221 100% 50%);
+    --color-ring: hsl(152 60% 50%);
     --color-overlay: hsl(222 47% 11% / 0.4);
     --shadow-button: none;
     --shadow-button-hover: none;
@@ -84,6 +84,34 @@
       var(--color-primary) 16%,
       var(--color-card)
     );
+
+    /* ── 玻璃体系 token（浅色主题同结构适配）──
+       颜色值只允许出现在 globals.css，组件仅消费 var(--glass-*) 或语义类。 */
+    --glass-bg: rgba(255, 255, 255, 0.55);
+    --glass-bg-strong: rgba(255, 255, 255, 0.72);
+    --glass-bg-light: rgba(255, 255, 255, 0.42);
+    --glass-border: rgba(15, 23, 42, 0.08);
+    --glass-blur: 16px;
+    --glass-blur-strong: 24px;
+    --glass-saturate: 140%;
+    --glass-highlight: rgba(255, 255, 255, 0.85);
+    --glass-topline: rgba(255, 255, 255, 0.9);
+    --shadow-glass: 0 8px 32px rgba(15, 23, 42, 0.1);
+    --shadow-glass-hover: 0 12px 32px rgba(15, 23, 42, 0.14);
+    --shadow-glow:
+      0 0 0 1px rgba(16, 185, 129, 0.25),
+      0 8px 24px rgba(16, 185, 129, 0.12);
+    --font-mono:
+      ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+      monospace;
+
+    /* ── 总览粒子仪表盘分区色（浅色主题；canvas 在运行时读取后拼透明度）── */
+    --overview-accent-inbox: rgb(16 185 129);
+    --overview-accent-unread: rgb(2 132 199);
+    --overview-accent-read: rgb(124 58 237);
+    --overview-accent-stale: rgb(217 119 6);
+    --overview-scrim: rgba(255, 255, 255, 0.62);
+    --overview-glare: rgba(255, 255, 255, 0.55);
   }
 
   html {
@@ -101,7 +129,7 @@
     --color-popover: hsl(240 11% 8%);
     --color-popover-foreground: hsl(240 14% 93%);
 
-    --color-primary: hsl(234 56% 60%);
+    --color-primary: hsl(152 60% 50%);
     --color-primary-foreground: hsl(240 20% 98%);
 
     --color-secondary: hsl(240 8% 14%);
@@ -130,7 +158,7 @@
 
     --color-border: hsl(240 7% 22%);
     --color-input: hsl(240 7% 22%);
-    --color-ring: hsl(234 56% 60%);
+    --color-ring: hsl(152 60% 50%);
     --color-overlay: hsl(240 20% 2% / 0.76);
     --shadow-button: none;
     --shadow-button-hover: none;
@@ -156,6 +184,35 @@
       var(--color-primary) 24%,
       var(--color-card)
     );
+
+    /* ── 玻璃体系 token（深色主题，按用户铁律 + prototype .glass）── */
+    --glass-bg: rgba(255, 255, 255, 0.04);
+    --glass-bg-strong: rgba(255, 255, 255, 0.055);
+    --glass-bg-light: rgba(255, 255, 255, 0.03);
+    --glass-border: rgba(255, 255, 255, 0.08);
+    --glass-blur: 16px;
+    --glass-blur-strong: 24px;
+    --glass-saturate: 140%;
+    --glass-highlight: rgba(255, 255, 255, 0.06);
+    --glass-topline: rgba(255, 255, 255, 0.13);
+    --shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.35);
+    --shadow-glass-hover:
+      0 12px 40px rgba(0, 0, 0, 0.4),
+      0 0 24px rgba(16, 185, 129, 0.06);
+    --shadow-glow:
+      0 0 0 1px rgba(16, 185, 129, 0.25),
+      0 8px 24px rgba(16, 185, 129, 0.12);
+    --font-mono:
+      ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+      monospace;
+
+    /* ── 总览粒子仪表盘分区色（深色主题；提亮以保证 canvas 粒子在暗底可见）── */
+    --overview-accent-inbox: rgb(52 211 153);
+    --overview-accent-unread: rgb(56 189 248);
+    --overview-accent-read: rgb(167 139 250);
+    --overview-accent-stale: rgb(251 191 36);
+    --overview-scrim: rgba(8, 12, 16, 0.5);
+    --overview-glare: rgba(255, 255, 255, 0.18);
   }
 
   * {
@@ -164,6 +221,13 @@
 
   body {
     @apply bg-background text-foreground antialiased font-sans;
+    /* 浅色主题同样保留一层极淡 emerald 顶部光斑，让玻璃面板有可模糊的底。 */
+    background-image: radial-gradient(
+      circle at top,
+      rgb(16 185 129 / 0.08),
+      transparent 34%
+    );
+    background-attachment: fixed;
   }
 
   /* Layered ambient lighting keeps dark mode from reading as a flat black fill. */
@@ -172,20 +236,20 @@
     background-image:
       radial-gradient(
         circle at top,
-        rgb(94 106 210 / 0.16),
+        rgb(16 185 129 / 0.14),
         transparent 34%
       ),
       radial-gradient(
         circle at 18% 18%,
-        rgb(86 96 188 / 0.12),
+        rgb(13 148 136 / 0.1),
         transparent 24%
       ),
       radial-gradient(
         circle at 82% 12%,
-        rgb(66 76 164 / 0.1),
+        rgb(5 150 105 / 0.08),
         transparent 22%
       ),
-      linear-gradient(180deg, rgb(10 10 15 / 0.96), rgb(2 2 3 / 1));
+      linear-gradient(180deg, rgb(8 12 14 / 0.96), rgb(2 4 5 / 1));
     background-attachment: fixed;
   }
 
@@ -196,6 +260,56 @@
   :where(a, button) {
     touch-action: manipulation;
     -webkit-tap-highlight-color: rgb(15 23 42 / 0.14);
+  }
+}
+
+/* ── 玻璃语义类（纯 CSS，含 -webkit- 前缀）──
+   组件只消费这些语义类，不再手写 blur/border/shadow 组合。
+   每个面板/容器最多 1 层 backdrop-filter；列表行禁止逐项 blur。 */
+@layer components {
+  .glass-surface {
+    position: relative;
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--shadow-glass), inset 0 1px 0 var(--glass-highlight);
+    border-radius: 1rem;
+  }
+
+  /* 顶部渐变高光线（::before 伪元素，比 inset shadow 更细腻） */
+  .glass-surface::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 16%;
+    right: 16%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--glass-topline), transparent);
+    border-radius: 1rem 1rem 0 0;
+    pointer-events: none;
+  }
+
+  /* 导航/固定区：更实 */
+  .glass-surface-strong {
+    position: relative;
+    background: var(--glass-bg-strong);
+    -webkit-backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
+    backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--shadow-glass), inset 0 1px 0 var(--glass-highlight);
+    border-radius: 1rem;
+  }
+
+  /* 卡片 hover / 通透小容器 */
+  .glass-surface-light {
+    position: relative;
+    background: var(--glass-bg-light);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(130%);
+    backdrop-filter: blur(var(--glass-blur)) saturate(130%);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--shadow-glass), inset 0 1px 0 var(--glass-highlight);
+    border-radius: 0.75rem;
   }
 }
 

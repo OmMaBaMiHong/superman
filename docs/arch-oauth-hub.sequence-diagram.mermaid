@@ -1,0 +1,222 @@
+%% FeedFuse 三方授权中心（OAuth Hub）— 程序调用流程时序图
+%% 覆盖：① 授权发起 ② 平台回调 ③ 撤销 ④ Token 刷新
+%% 参与者命名与 docs/arch-oauth-hub.class-diagram.mermaid 一一对应
+
+sequenceDiagram
+    autonumber
+    actor U as 用户浏览器
+    participant P as OAuthSettingsPanel<br/>features/oauth
+    participant AR as GET /api/oauth/authorize
+    participant CR as GET /api/oauth/callback/[provider]
+    participant NR as /api/oauth/connections*
+    participant S as requireApiSession
+    participant AS as oauthAuthorizeService
+    participant CS as oauthCallbackService
+    participant NS as oauthConnectionService
+    participant CFG as oauthConfigService
+    participant REG as oauthProviderRegistry
+    participant PK as pkce
+    participant RU as redirectUri
+    participant SR as oauthAuthStatesRepo
+    participant CNR as oauthConnectionsRepo
+    participant SB as secretBox + secretKeyProvider
+    participant HTTP as oauthHttp / fetchExternalJson
+    participant PLT as 三方平台<br/>GitHub / 微信 / 抖音 / 小红书
+
+    %% ============================================================
+    rect rgb(235, 244, 255)
+    Note over U, PLT: ① 授权发起（R02）— 服务端生成 state 与 code_verifier，浏览器只负责跳转
+
+    U->>P: 点击「授权」按钮
+    P->>AR: GET /api/oauth/authorize?provider=github&returnTo=/
+    AR->>S: requireApiSession()
+    S-->>AR: { userId, role }
+    Note over AR: 未登录直接 fail(UnauthorizedError)，不产生任何 state
+
+    AR->>AS: startAuthorization({ userId, provider, returnTo, headers })
+    AS->>REG: getProvider('github')
+    REG-->>AS: OAuthProviderDefinition（含 capabilities.supportsPkce）
+    Note over AS, REG: provider 不存在 → OAuthError(kind=provider_error)
+
+    AS->>CFG: resolveClientCredentials(pool, provider)
+    CFG->>SB: open(clientSecretEncrypted, key)
+    SB-->>CFG: clientSecret 明文（仅驻留内存）
+    CFG-->>AS: { clientId, clientSecret, enabled }
+    Note over AS, CFG: clientId 为空或 enabled=false<br/>→ OAuthError(kind=not_configured)，UI 显示「未配置」引导态
+
+    AS->>PK: createState()
+    PK-->>AS: state（32 字节随机 base64url）
+
+    alt capabilities.supportsPkce 为 true（GitHub）
+        AS->>PK: createCodeVerifier()
+        PK-->>AS: codeVerifier
+        AS->>PK: deriveCodeChallenge(codeVerifier)
+        PK-->>AS: codeChallenge（S256 + base64url 无填充）
+        AS->>SB: seal(codeVerifier, key)
+        SB-->>AS: codeVerifierEncrypted
+    else 不支持 PKCE（微信 / 抖音 / 小红书 保守默认）
+        Note over AS: 跳过 PKCE，codeVerifierEncrypted 置 null<br/>仅依赖 state 防 CSRF
+    end
+
+    AS->>RU: buildRedirectUri(headers, provider)
+    RU-->>AS: redirectUri（env 优先，回落 x-forwarded-proto + host）
+    Note over AS, RU: 此处推导出的 redirectUri 会随 state 一起落库，<br/>回调换 token 时原样回传，杜绝两侧推导不一致（微信最高频故障点，AQ-6）
+
+    AS->>SR: purgeExpiredAuthStates(db) 惰性清理
+    AS->>SR: insertAuthState({ state, provider, userId,<br/>codeVerifierEncrypted, redirectUri, returnTo,<br/>expiresAt = now + 10min })
+    SR-->>AS: ok
+
+    AS->>REG: buildAuthorizeUrl({ clientId, redirectUri, scope, state, codeChallenge })
+    Note over REG: 各平台差异在此收敛：<br/>微信 appid + snsapi_login + 结尾 #wechat_redirect；<br/>抖音 client_key；GitHub 追加 code_challenge_method=S256
+    REG-->>AS: authorizeUrl
+    AS-->>AR: OAuthAuthorizeTicket { authorizeUrl }
+    AR-->>P: ok({ authorizeUrl })
+    P->>U: window.location.assign(authorizeUrl)
+    U->>PLT: 顶层导航至平台授权页
+    end
+
+    %% ============================================================
+    rect rgb(240, 250, 240)
+    Note over U, PLT: ② 平台回调（R03 + R04）— 校验 state、换 token、加密落库
+
+    PLT->>U: 302 回跳 redirectUri?code=...&state=...
+    U->>CR: GET /api/oauth/callback/github?code&state
+    Note over U, CR: session cookie 为 SameSite=Lax，<br/>跨站顶层 GET 导航仍会携带，会话不丢
+
+    alt 平台回传 error（用户点了「取消」）
+        CR-->>U: 302 /?settings=oauth&oauth=denied&provider=github
+        Note over CR: OAuthError(kind=user_denied)，不写入任何数据
+    end
+
+    CR->>S: requireApiSession()
+    S-->>CR: { userId }
+    CR->>CS: handleCallback({ sessionUserId, provider, code, state })
+
+    CS->>SR: consumeAuthState(db, state)
+    Note over SR: DELETE FROM oauth_auth_states WHERE state=$1 RETURNING *<br/>单条 SQL 原子完成「校验 + 一次性删除」，重放必然落空
+    SR-->>CS: OAuthAuthStateRow 或 null
+
+    alt state 不存在 / 已被消费
+        CS-->>CR: OAuthError(kind=invalid_state)
+        CR-->>U: 302 ...&oauth=failed&reason=invalid_state
+    else state 已过期（expiresAt < now）
+        CS-->>CR: OAuthError(kind=state_expired)
+        CR-->>U: 302 ...&oauth=failed&reason=state_expired
+    else state.userId !== sessionUserId
+        CS-->>CR: OAuthError(kind=invalid_state)
+        Note over CS: 会话与授权发起者不一致，视为攻击，拒绝并丢弃
+    end
+
+    CS->>REG: getProvider(state.provider)
+    REG-->>CS: OAuthProviderDefinition
+    CS->>CFG: resolveClientCredentials(pool, provider)
+    CFG->>SB: open(clientSecretEncrypted, key)
+    SB-->>CFG: clientSecret
+    CFG-->>CS: { clientId, clientSecret }
+
+    alt state.codeVerifierEncrypted 非空
+        CS->>SB: open(codeVerifierEncrypted, key)
+        SB-->>CS: codeVerifier
+    end
+
+    CS->>REG: buildTokenRequest({ code, codeVerifier,<br/>redirectUri: state.redirectUri, clientId, clientSecret })
+    Note over REG: redirectUri 取自 state 表而非重新推导 —— 与授权发起逐字节一致
+    REG-->>CS: OAuthTokenRequest { url, method, headers, form }
+
+    CS->>HTTP: requestToken(provider, request)
+    Note over HTTP: 复用 fetchExternalJson：逐跳 SSRF 校验 + allowedHosts 白名单；<br/>POST 强制 maxRedirects=0；redactResponseBody=true 使响应体不进日志
+    HTTP->>PLT: POST/GET token endpoint
+    PLT-->>HTTP: token JSON
+
+    alt HTTP 非 2xx 或 网络失败
+        HTTP-->>CS: OAuthError(kind=token_exchange_failed / network)
+        CS-->>CR: 归一错误
+        CR-->>U: 302 ...&oauth=failed&reason=token_exchange_failed
+    end
+
+    HTTP->>REG: parseTokenResponse(raw)
+    Note over REG: 微信 / 抖音 HTTP 200 仍可能是业务错误<br/>（errcode!==0 / data.error_code!==0），必须在此判定并抛错
+    REG-->>HTTP: OAuthTokenBundle
+    HTTP-->>CS: OAuthTokenBundle
+
+    opt 平台支持 userInfoEndpoint（P2 元信息 R21 预留）
+        CS->>HTTP: fetchProfile(accessToken)
+        HTTP->>PLT: GET userinfo
+        PLT-->>HTTP: profile JSON
+        HTTP-->>CS: OAuthProfile { providerAccountId, displayName, avatarUrl }
+        Note over CS: 拉取失败不阻断主流程，降级为空快照
+    end
+
+    CS->>SB: seal(accessToken, key) / seal(refreshToken, key)
+    SB-->>CS: 密文
+    CS->>CNR: upsertConnection({ userId, provider, providerAccountId,<br/>accessTokenEncrypted, refreshTokenEncrypted,<br/>expiresAt, scope, profileSnapshot, status='active' })
+    Note over CNR: MVP 单账号：同 (userId, provider) 先删旧行再插入，<br/>天然覆盖「重新授权」R14，不产生脏数据
+    CNR-->>CS: OAuthConnectionRow
+    CS-->>CR: OAuthCallbackOutcome { provider, returnTo }
+    CR-->>U: 302 {returnTo}?settings=oauth&oauth=success&provider=github
+    U->>P: 前端读取 query → 打开设置抽屉「三方授权」分区<br/>→ runImmediateSuccess → history.replaceState 清除 query
+    end
+
+    %% ============================================================
+    rect rgb(255, 245, 235)
+    Note over U, PLT: ③ 连接列表与撤销（R05 + R06）
+
+    P->>NR: GET /api/oauth/connections
+    NR->>S: requireApiSession()
+    S-->>NR: { userId }
+    NR->>NS: listConnectionViews(pool, userId)
+    NS->>CNR: listConnectionsByUser(db, userId)
+    CNR-->>NS: List~OAuthConnectionRow~
+    Note over NS: 仅映射为 OAuthConnectionView：<br/>status / 授权时间 / 昵称头像。<br/>token 字段一律不进 DTO，接口响应绝无凭据
+    NS-->>NR: List~OAuthConnectionView~
+    NR-->>P: ok(connections)
+
+    U->>P: 点击「撤销」→ AlertDialog 二次确认
+    P->>NR: DELETE /api/oauth/connections/{id}
+    NR->>NS: revokeConnection(pool, userId, id)
+    NS->>CNR: deleteConnection(db, userId, id)
+    Note over CNR: WHERE user_id=$1 AND id=$2 —— 用户隔离由 SQL 兜底，<br/>越权删除在数据层即失败。<br/>平台侧远程 revoke 为 P2（R23），本期只清本地
+    CNR-->>NS: ok
+    NS-->>NR: ok
+    NR-->>P: ok({ id })
+    P->>U: runImmediateSuccess + 卡片变为「未连接」
+    end
+
+    %% ============================================================
+    rect rgb(250, 240, 250)
+    Note over U, PLT: ④ Token 刷新（R11）— 手动 / 惰性触发，本期不做后台调度
+
+    P->>NR: POST /api/oauth/connections/{id}/refresh
+    NR->>NS: refreshConnection(pool, userId, id)
+    NS->>CNR: getConnectionById(db, userId, id)
+    CNR-->>NS: OAuthConnectionRow
+
+    alt refreshToken 为空 或 capabilities.supportsRefresh=false
+        NS-->>NR: OAuthError(kind=refresh_failed)
+        Note over NS: 提示用户「请重新授权」，卡片置「已过期」
+    end
+
+    NS->>SB: open(refreshTokenEncrypted, key)
+    SB-->>NS: refreshToken
+    NS->>REG: buildRefreshRequest({ refreshToken, clientId, clientSecret })
+    REG-->>NS: OAuthTokenRequest
+    NS->>HTTP: requestToken(provider, request)
+    HTTP->>PLT: 刷新端点
+    PLT-->>HTTP: 新 token 或 业务错误
+
+    alt 刷新成功
+        HTTP-->>NS: OAuthTokenBundle
+        NS->>SB: seal(新 accessToken / refreshToken, key)
+        SB-->>NS: 密文
+        NS->>CNR: updateConnectionTokens(status='active', lastRefreshedAt=now)
+        CNR-->>NS: OAuthConnectionRow
+        NS-->>NR: OAuthConnectionView
+        NR-->>P: ok(connection) → 用户无感
+    else 刷新失败（refresh_token 过期 / 被平台撤销）
+        HTTP-->>NS: OAuthError(kind=refresh_failed)
+        NS->>CNR: markConnectionExpired(db, userId, id)
+        Note over CNR: 保留连接行但 status='expired'，<br/>UI 显示「已过期」+「重新授权」强调态按钮
+        NS-->>NR: OAuthError
+        NR-->>P: fail(refresh_failed)
+    end
+    end

@@ -162,6 +162,75 @@ describe('podcast feed ingestion', () => {
     );
   });
 
+  it('fetches rsshub feeds through the embedded RSSHub path without external URL checks', async () => {
+    const boss = { send: vi.fn().mockResolvedValue('job-1') };
+    const deps = {
+      getPool: () => ({ query: vi.fn() }),
+      getFeedForFetch: vi.fn().mockResolvedValue({
+        id: 'feed-rsshub',
+        userId: '1',
+        url: 'rsshub://youtube/user/@AndrejKarpathy',
+        enabled: true,
+        etag: null,
+        lastModified: null,
+        lastFetchedAt: null,
+        fetchIntervalMinutes: 30,
+        fullTextOnFetchEnabled: false,
+        aiSummaryOnFetchEnabled: false,
+        bodyTranslateOnFetchEnabled: false,
+        titleTranslateEnabled: false,
+      }),
+      isSafeExternalUrl: vi.fn().mockResolvedValue(false),
+      getAppSettings: vi.fn().mockResolvedValue({
+        rssTimeoutMs: 10000,
+        rssUserAgent: 'FeedFuse/1.0',
+      }),
+      getUiSettings: vi.fn().mockResolvedValue({}),
+      fetchFeedXml: vi.fn().mockResolvedValue({
+        status: 200,
+        etag: null,
+        lastModified: null,
+        xml: '<rss />',
+      }),
+      parseFeed: vi.fn().mockResolvedValue({
+        title: 'Andrej Karpathy - YouTube',
+        link: 'https://www.youtube.com/channel/UCXUPKJO5MZQN11PqgIvyuvQ',
+        language: 'en',
+        items: [
+          {
+            title: 'How I use LLMs',
+            link: 'https://www.youtube.com/watch?v=EWvNQjAaOHw',
+            guid: 'https://www.youtube.com/watch?v=EWvNQjAaOHw',
+            author: null,
+            publishedAt: new Date('2025-07-04T00:00:00Z'),
+            contentHtml: '<p>Video</p>',
+            previewImage: null,
+            summary: null,
+            mediaAttachments: [],
+          },
+        ],
+      }),
+      sanitizeContent: vi.fn((html: string | null) => html),
+      insertArticleIgnoreDuplicate: vi.fn().mockResolvedValue({ id: 'article-1' }),
+      insertArticleMediaAttachments: vi.fn().mockResolvedValue(undefined),
+      pruneFeedArticlesToLimit: vi.fn().mockResolvedValue({ deletedCount: 0 }),
+      recordFeedFetchResult: vi.fn().mockResolvedValue(undefined),
+      isFeedDue: vi.fn().mockReturnValue(true),
+    };
+
+    const { fetchAndIngestFeed } = await import('../../worker/index');
+    const result = await fetchAndIngestFeed(boss as never, 'feed-rsshub', { deps });
+
+    expect(result).toEqual({ inserted: 1, errorMessage: null });
+    expect(deps.isSafeExternalUrl).not.toHaveBeenCalled();
+    expect(deps.fetchFeedXml).toHaveBeenCalledWith(
+      'rsshub://youtube/user/@AndrejKarpathy',
+      expect.objectContaining({
+        userId: '1',
+      }),
+    );
+  });
+
   it('records unsafe URL failures against the feed owner', async () => {
     const boss = { send: vi.fn().mockResolvedValue('job-1') };
     const deps = {

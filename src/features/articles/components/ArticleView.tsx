@@ -1,181 +1,86 @@
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type MouseEvent,
-  type UIEvent,
-} from "react";
-import {
-  Download,
-  FileText,
-  Languages,
-  Search,
-  Settings as SettingsIcon,
-  Sparkles,
-  Star,
-} from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type UIEvent } from "react";
 import { getSelectedArticleFromState, useAppStore } from "../../../store/appStore";
 import { useSettingsStore } from "../../../store/settingsStore";
 import type { ArticleAiDigestSource } from "../../../types";
-import {
-  enqueueArticleFulltext,
-  getArticleTasks,
-  type ArticleTasksDto,
-} from "@/lib/api/apiClient";
+import { enqueueArticleFulltext, getArticleTasks, type ArticleTasksDto } from "@/lib/api/apiClient";
 import { pollWithBackoff } from "@/lib/api/polling";
 import { useRenderTimeSnapshot } from "../../../hooks";
-import { formatRelativeTime } from "../../../utils/date";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import {
-  useAnimatedAiSummaryText,
-  useImmersiveTranslation,
-  useStreamingAiSummary,
-} from "../hooks";
-import { getFilteredReasonLabel } from "../utils";
+import { useAnimatedAiSummaryText, useImmersiveTranslation, useStreamingAiSummary } from "../hooks";
 import { buildImmersiveHtml } from "../utils";
-import {
-  buildArticleMarkdownDocument,
-  sanitizeArticleMarkdownFilename,
-  triggerArticleMarkdownDownload,
-} from "../utils";
+import { buildArticleMarkdownDocument, sanitizeArticleMarkdownFilename, triggerArticleMarkdownDownload } from "../utils";
 import ArticleScrollAssist from "./ArticleScrollAssist";
 import ArticleImagePreview from "./ArticleImagePreview";
-import ReaderToolbarIconButton from "../../reader/components/ReaderToolbarIconButton";
 import { READER_RESIZE_DESKTOP_MIN_WIDTH } from "../../reader/utils";
 import { highlightHtmlByQuery } from "../../reader/utils";
 import { toast } from "../../toast/toast";
+import { getArticleVideoMeta } from "@/lib/media/video";
+import ArticleHeader from "./ArticleHeader";
+import ArticleMediaSection from "./ArticleMediaSection";
+import ArticleFulltextStatus from "./ArticleFulltextStatus";
+import ArticleAiSummary from "./ArticleAiSummary";
+import ArticleErrorCard from "./ArticleErrorCard";
+import ArticleTranslationStatus from "./ArticleTranslationStatus";
+import ArticleBody from "./ArticleBody";
+import ArticleDigestSources from "./ArticleDigestSources";
+import DouyinVideoStats from "./DouyinVideoStats";
 
 const FLOATING_TITLE_SCROLL_THRESHOLD_PX = 96;
-const AI_DIGEST_SOURCES_VISIBLE_LIMIT = 3;
-const AI_DIGEST_SOURCES_SCROLL_MAX_HEIGHT_CLASS = "max-h-[13.5rem]";
-const ARTICLE_STATUS_CARD_CLASS_NAME =
-  "mb-4 rounded-2xl border border-border/65 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--color-muted)_78%,white_22%),color-mix(in_oklab,var(--color-background)_86%,white_14%))] px-4 py-3 dark:border-white/[0.06] dark:bg-[linear-gradient(180deg,rgba(15,15,19,0.96),rgba(10,10,13,0.92))]";
-const ARTICLE_SUMMARY_CARD_CLASS_NAME =
-  "relative mb-4 cursor-pointer rounded-2xl border border-border/60 border-l-[3px] border-l-primary/45 bg-[color-mix(in_oklab,var(--color-primary)_6%,var(--color-background)_94%)] px-4 py-3 transition-[border-color,box-shadow,transform,background-color] duration-200 hover:-translate-y-px hover:border-primary/55 hover:bg-[color-mix(in_oklab,var(--color-primary)_8%,var(--color-background)_92%)] dark:border-white/[0.06] dark:border-l-[rgba(94,106,210,0.38)] dark:bg-[linear-gradient(135deg,color-mix(in_oklab,var(--color-primary)_12%,var(--color-card)_88%),rgba(10,10,13,0.96))]";
-const ARTICLE_SUMMARY_BADGE_CLASS_NAME =
-  "inline-flex items-center gap-1.5 rounded-full bg-background/78 px-2 py-0.5 text-[11px] font-medium tracking-wide text-[color-mix(in_oklab,var(--color-primary)_40%,var(--color-muted-foreground)_60%)] ring-1 ring-[color-mix(in_oklab,var(--color-primary)_14%,var(--color-border)_86%)] dark:bg-[rgba(10,10,14,0.82)] dark:text-[color-mix(in_oklab,var(--color-primary)_54%,white_46%)] dark:ring-[rgba(94,106,210,0.24)]";
-const ARTICLE_SOURCE_BUTTON_CLASS_NAME =
-  "flex w-full items-start justify-between gap-3 rounded-xl border border-border/60 bg-[color-mix(in_oklab,var(--color-background)_84%,white_16%)] px-3 py-2 text-left transition-[background-color,border-color,box-shadow,transform] duration-200 hover:-translate-y-px hover:border-primary/16 hover:bg-accent/35 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:border-white/[0.06] dark:bg-[linear-gradient(180deg,rgba(14,14,18,0.96),rgba(9,9,12,0.92))] dark:hover:border-[rgba(94,106,210,0.2)] dark:hover:bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-card)_90%)]";
 const READER_COMMAND_EVENT_NAME = "feedfuse:reader-command";
 type ReaderArticleCommand = "ai-summary" | "ai-translate";
 
-function getPlayableMediaAttachment(
-  article: { mediaAttachments?: Array<{ url: string; mimeType: string }> } | null,
-) {
-  return (
-    article?.mediaAttachments?.find((attachment) => {
-      const mimeType = attachment.mimeType.toLowerCase();
-      return attachment.url && (mimeType.startsWith("audio/") || mimeType.startsWith("video/"));
-    }) ?? null
-  );
+function getPlayableMediaAttachment(article: { mediaAttachments?: Array<{ url: string; mimeType: string }> } | null) {
+  return article?.mediaAttachments?.find((a) => { const m = a.mimeType.toLowerCase(); return a.url && (m.startsWith("audio/") || m.startsWith("video/")); }) ?? null;
 }
 
 function dispatchReaderArticleCommand(command: ReaderArticleCommand) {
-  window.dispatchEvent(
-    new CustomEvent(READER_COMMAND_EVENT_NAME, {
-      detail: { command },
-    }),
-  );
+  window.dispatchEvent(new CustomEvent(READER_COMMAND_EVENT_NAME, { detail: { command } }));
 }
 
-interface ArticleViewProps {
-  highlightQuery?: string;
-  onOpenSearch?: () => void;
-  onOpenSettings?: () => void;
-  onTitleVisibilityChange?: (isVisible: boolean) => void;
-  reserveTopSpace?: boolean;
-  renderedAt?: string;
-}
-
-type ImagePreviewState = {
-  articleId: string | null;
-  previewId: number;
-  src: string;
-  alt: string;
-};
+interface ArticleViewProps { highlightQuery?: string; onOpenSearch?: () => void; onTitleVisibilityChange?: (isVisible: boolean) => void; reserveTopSpace?: boolean; renderedAt?: string; }
+type ImagePreviewState = { articleId: string | null; previewId: number; src: string; alt: string; };
 
 export default function ArticleView({
-  highlightQuery = "",
-  onOpenSearch,
-  onOpenSettings,
-  onTitleVisibilityChange,
-  reserveTopSpace = true,
-  renderedAt,
+  highlightQuery = "", onOpenSearch, onTitleVisibilityChange, reserveTopSpace = true, renderedAt,
 }: ArticleViewProps = {}) {
-  const article = useAppStore((state) => getSelectedArticleFromState(state));
-  const feed = useAppStore((state) => {
-    const currentArticle = getSelectedArticleFromState(state);
-    return currentArticle
-      ? (state.feeds.find((item) => item.id === currentArticle.feedId) ?? null)
-      : null;
-  });
-  const markAsRead = useAppStore((state) => state.markAsRead);
-  const toggleStar = useAppStore((state) => state.toggleStar);
-  const refreshArticle = useAppStore((state) => state.refreshArticle);
-  const openArticleInReader = useAppStore((state) => state.openArticleInReader);
-  const general = useSettingsStore((state) => state.persistedSettings.general);
-  const autoMarkReadEnabled = useSettingsStore(
-    (state) => state.persistedSettings.general.autoMarkReadEnabled,
-  );
-  const autoMarkReadDelayMs = useSettingsStore(
-    (state) => state.persistedSettings.general.autoMarkReadDelayMs,
-  );
+  const article = useAppStore((s) => getSelectedArticleFromState(s));
+  const feed = useAppStore((s) => { const ca = getSelectedArticleFromState(s); return ca ? (s.feeds.find((i) => i.id === ca.feedId) ?? null) : null; });
+  const markAsRead = useAppStore((s) => s.markAsRead);
+  const toggleStar = useAppStore((s) => s.toggleStar);
+  const refreshArticle = useAppStore((s) => s.refreshArticle);
+  const openArticleInReader = useAppStore((s) => s.openArticleInReader);
+  const general = useSettingsStore((s) => s.persistedSettings.general);
+  const autoMarkReadEnabled = useSettingsStore((s) => s.persistedSettings.general.autoMarkReadEnabled);
+  const autoMarkReadDelayMs = useSettingsStore((s) => s.persistedSettings.general.autoMarkReadDelayMs);
   const [tasks, setTasks] = useState<ArticleTasksDto | null>(null);
-  const [aiSummaryExpandedArticleId, setAiSummaryExpandedArticleId] = useState<
-    string | null
-  >(null);
+  const [aiSummaryExpandedArticleId, setAiSummaryExpandedArticleId] = useState<string | null>(null);
   const lastReportedTitleVisibilityRef = useRef<boolean | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const articleContentRef = useRef<HTMLDivElement | null>(null);
   const imagePreviewSequenceRef = useRef(0);
   const scrollStateFrameRef = useRef<number | null>(null);
   const pendingScrollElementRef = useRef<HTMLDivElement | null>(null);
-  const [scrollAssistArticleId, setScrollAssistArticleId] = useState<
-    string | null
-  >(null);
+  const [scrollAssistArticleId, setScrollAssistArticleId] = useState<string | null>(null);
   const [scrollAssistPercent, setScrollAssistPercent] = useState(0);
   const [articleTitleVisible, setArticleTitleVisible] = useState(true);
   const [hasScrollableContent, setHasScrollableContent] = useState(false);
-  const [imagePreview, setImagePreview] = useState<ImagePreviewState | null>(
-    null,
-  );
+  const [imagePreview, setImagePreview] = useState<ImagePreviewState | null>(null);
   const [isDesktop, setIsDesktop] = useState<boolean>(true);
   const referenceTime = useRenderTimeSnapshot(renderedAt);
-
   const feedFullTextOnOpenEnabled = feed?.fullTextOnOpenEnabled ?? false;
   const feedAiSummaryOnOpenEnabled = feed?.aiSummaryOnOpenEnabled ?? false;
-  const feedBodyTranslateOnOpenEnabled =
-    feed?.bodyTranslateOnOpenEnabled ?? false;
+  const feedBodyTranslateOnOpenEnabled = feed?.bodyTranslateOnOpenEnabled ?? false;
   const currentArticleId = article?.id ?? null;
-  const immersiveTranslation = useImmersiveTranslation({
-    articleId: currentArticleId,
-  });
-  const streamingAiSummary = useStreamingAiSummary({
-    articleId: currentArticleId,
-    initialSession: article?.aiSummarySession ?? null,
-    onCompleted: async (articleId) => {
-      await refreshArticle(articleId);
-    },
-  });
+  const immersiveTranslation = useImmersiveTranslation({ articleId: currentArticleId });
+  const streamingAiSummary = useStreamingAiSummary({ articleId: currentArticleId, initialSession: article?.aiSummarySession ?? null, onCompleted: async (id) => { await refreshArticle(id); } });
   const requestStreamingAiSummary = streamingAiSummary.requestSummary;
   const fulltextStatus = tasks?.fulltext.status ?? "idle";
-  const fulltextPending = Boolean(
-    currentArticleId &&
-    (fulltextStatus === "queued" || fulltextStatus === "running"),
-  );
+  const fulltextPending = Boolean(currentArticleId && (fulltextStatus === "queued" || fulltextStatus === "running"));
   const fulltextLoading = fulltextPending;
   const aiSummaryLoading = streamingAiSummary.loading;
   const aiSummaryMissingApiKey = streamingAiSummary.missingApiKey;
   const aiSummaryWaitingFulltext = streamingAiSummary.waitingFulltext;
-  const aiSummaryExpanded = Boolean(
-    currentArticleId && aiSummaryExpandedArticleId === currentArticleId,
-  );
+  const aiSummaryExpanded = Boolean(currentArticleId && aiSummaryExpandedArticleId === currentArticleId);
   const aiTranslationLoading = immersiveTranslation.loading;
   const aiTranslationMissingApiKey = immersiveTranslation.missingApiKey;
   const aiTranslationTimedOut = immersiveTranslation.timedOut;
@@ -183,1207 +88,283 @@ export default function ArticleView({
   const aiTranslationViewing = immersiveTranslation.viewing;
   const immersiveTranslationSession = immersiveTranslation.session;
   const requestImmersiveTranslation = immersiveTranslation.requestTranslation;
-  const hasLegacyAiTranslationContent = Boolean(
-    article?.aiTranslationBilingualHtml?.trim() ||
-    article?.aiTranslationZhHtml?.trim(),
-  );
+  const hasLegacyAiTranslationContent = Boolean(article?.aiTranslationBilingualHtml?.trim() || article?.aiTranslationZhHtml?.trim());
   const hasImmersiveSegments = immersiveTranslation.segments.length > 0;
-  const hasAiTranslationContent =
-    hasLegacyAiTranslationContent || hasImmersiveSegments;
+  const hasAiTranslationContent = hasLegacyAiTranslationContent || hasImmersiveSegments;
   const bodyTranslationEligible = article?.bodyTranslationEligible !== false;
-  // AI digest articles are already synthesized content, so fulltext/translation actions stay disabled.
   const isAiDigestArticle = (feed?.kind ?? "rss") === "ai_digest";
-  // 播客文章只提供播放与导出，不开放全文、摘要和翻译入口。
   const isPodcastArticle = Boolean(article?.mediaAttachments?.length);
   const aiDigestSources = article?.aiDigestSources ?? [];
-  const aiDigestSourcesOverflow =
-    aiDigestSources.length > AI_DIGEST_SOURCES_VISIBLE_LIMIT;
   const titleOriginal = article?.titleOriginal?.trim() || article?.title || "";
   const titleZh = article?.titleZh?.trim();
   const showBilingualTitle = aiTranslationViewing && Boolean(titleZh);
   const showDesktopToolbar = reserveTopSpace && isDesktop;
-  const activeImagePreview =
-    imagePreview?.articleId === currentArticleId ? imagePreview : null;
-  const scrollStateMatchesCurrentArticle =
-    scrollAssistArticleId === currentArticleId;
-  const effectiveScrollAssistPercent = scrollStateMatchesCurrentArticle
-    ? scrollAssistPercent
-    : 0;
-  const effectiveArticleTitleVisible = scrollStateMatchesCurrentArticle
-    ? articleTitleVisible
-    : true;
-  const effectiveHasScrollableContent = scrollStateMatchesCurrentArticle
-    ? hasScrollableContent
-    : false;
+  const activeImagePreview = imagePreview?.articleId === currentArticleId ? imagePreview : null;
+  const ssm = scrollAssistArticleId === currentArticleId;
+  const effectiveScrollAssistPercent = ssm ? scrollAssistPercent : 0;
+  const effectiveArticleTitleVisible = ssm ? articleTitleVisible : true;
+  const effectiveHasScrollableContent = ssm ? hasScrollableContent : false;
 
-  const reportTitleVisibility = useCallback(
-    (isVisible: boolean) => {
-      if (!onTitleVisibilityChange) return;
-      if (lastReportedTitleVisibilityRef.current === isVisible) return;
-      lastReportedTitleVisibilityRef.current = isVisible;
-      onTitleVisibilityChange(isVisible);
-    },
-    [onTitleVisibilityChange],
-  );
+  const reportTitleVisibility = useCallback((v: boolean) => {
+    if (!onTitleVisibilityChange || lastReportedTitleVisibilityRef.current === v) return;
+    lastReportedTitleVisibilityRef.current = v;
+    onTitleVisibilityChange(v);
+  }, [onTitleVisibilityChange]);
 
-  const updateScrollAssistState = useCallback(
-    (element: HTMLDivElement) => {
-      const maxScroll = Math.max(
-        element.scrollHeight - element.clientHeight,
-        0,
-      );
-      const nextProgress =
-        maxScroll <= 0
-          ? 0
-          : Math.min(1, Math.max(0, element.scrollTop / maxScroll));
-      const nextPercent = Math.round(nextProgress * 100);
-      const nextTitleVisible =
-        element.scrollTop <= FLOATING_TITLE_SCROLL_THRESHOLD_PX;
-      const nextHasScrollableContent = maxScroll > 0;
-
-      setScrollAssistArticleId((current) =>
-        current === currentArticleId ? current : currentArticleId,
-      );
-      setHasScrollableContent((current) =>
-        current === nextHasScrollableContent
-          ? current
-          : nextHasScrollableContent,
-      );
-      setScrollAssistPercent((current) =>
-        current === nextPercent ? current : nextPercent,
-      );
-      setArticleTitleVisible((current) =>
-        current === nextTitleVisible ? current : nextTitleVisible,
-      );
-    },
-    [currentArticleId],
-  );
+  const updateScrollAssistState = useCallback((el: HTMLDivElement) => {
+    const ms = Math.max(el.scrollHeight - el.clientHeight, 0);
+    const np = ms <= 0 ? 0 : Math.min(1, Math.max(0, el.scrollTop / ms));
+    setScrollAssistArticleId((c) => c === currentArticleId ? c : currentArticleId);
+    setHasScrollableContent((c) => c === (ms > 0) ? c : ms > 0);
+    setScrollAssistPercent((c) => c === Math.round(np * 100) ? c : Math.round(np * 100));
+    setArticleTitleVisible((c) => c === (el.scrollTop <= FLOATING_TITLE_SCROLL_THRESHOLD_PX) ? c : el.scrollTop <= FLOATING_TITLE_SCROLL_THRESHOLD_PX);
+  }, [currentArticleId]);
 
   const cancelScheduledScrollStateUpdate = useCallback(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const frameId = scrollStateFrameRef.current;
-    if (frameId === null) {
-      return;
-    }
-
-    window.cancelAnimationFrame(frameId);
+    if (typeof window === "undefined") return;
+    const id = scrollStateFrameRef.current;
+    if (id === null) return;
+    window.cancelAnimationFrame(id);
     scrollStateFrameRef.current = null;
   }, []);
 
-  const scheduleScrollStateUpdate = useCallback(
-    (element: HTMLDivElement) => {
-      pendingScrollElementRef.current = element;
-      if (
-        typeof window === "undefined" ||
-        scrollStateFrameRef.current !== null
-      ) {
-        return;
-      }
+  const scheduleScrollStateUpdate = useCallback((el: HTMLDivElement) => {
+    pendingScrollElementRef.current = el;
+    if (typeof window === "undefined" || scrollStateFrameRef.current !== null) return;
+    scrollStateFrameRef.current = window.requestAnimationFrame(() => {
+      scrollStateFrameRef.current = null;
+      const p = pendingScrollElementRef.current;
+      if (p) updateScrollAssistState(p);
+    });
+  }, [updateScrollAssistState]);
 
-      scrollStateFrameRef.current = window.requestAnimationFrame(() => {
-        scrollStateFrameRef.current = null;
-        const pendingElement = pendingScrollElementRef.current;
-        if (!pendingElement) {
-          return;
-        }
+  const onArticleScroll = useCallback((e: UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    reportTitleVisibility(el.scrollTop <= FLOATING_TITLE_SCROLL_THRESHOLD_PX);
+    scheduleScrollStateUpdate(el);
+  }, [reportTitleVisibility, scheduleScrollStateUpdate]);
 
-        updateScrollAssistState(pendingElement);
-      });
-    },
-    [updateScrollAssistState],
-  );
+  useEffect(() => () => cancelScheduledScrollStateUpdate(), [cancelScheduledScrollStateUpdate]);
 
-  const onArticleScroll = useCallback(
-    (event: UIEvent<HTMLDivElement>) => {
-      const element = event.currentTarget;
-      reportTitleVisibility(
-        element.scrollTop <= FLOATING_TITLE_SCROLL_THRESHOLD_PX,
-      );
-      scheduleScrollStateUpdate(element);
-    },
-    [reportTitleVisibility, scheduleScrollStateUpdate],
-  );
-
-  useEffect(() => {
-    return () => {
-      cancelScheduledScrollStateUpdate();
-    };
-  }, [cancelScheduledScrollStateUpdate]);
-
-  const handleBackToTop = useCallback(() => {
-    scrollContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-  }, []);
+  const handleBackToTop = useCallback(() => { scrollContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" }); }, []);
 
   useLayoutEffect(() => {
-    if (typeof window === "undefined") {
-      return undefined;
-    }
-
-    const updateDesktopState = () => {
-      const nextIsDesktop =
-        window.innerWidth >= READER_RESIZE_DESKTOP_MIN_WIDTH;
-      setIsDesktop((currentIsDesktop) =>
-        currentIsDesktop === nextIsDesktop ? currentIsDesktop : nextIsDesktop,
-      );
-    };
-
-    updateDesktopState();
-    window.addEventListener("resize", updateDesktopState);
-
-    return () => {
-      window.removeEventListener("resize", updateDesktopState);
-    };
+    if (typeof window === "undefined") return;
+    const ud = () => { const nd = window.innerWidth >= READER_RESIZE_DESKTOP_MIN_WIDTH; setIsDesktop((c) => c === nd ? c : nd); };
+    ud();
+    window.addEventListener("resize", ud);
+    return () => window.removeEventListener("resize", ud);
   }, []);
 
-  useEffect(() => {
-    lastReportedTitleVisibilityRef.current = null;
-    reportTitleVisibility(true);
-  }, [article?.id, reportTitleVisibility]);
+  useEffect(() => { lastReportedTitleVisibilityRef.current = null; reportTitleVisibility(true); }, [article?.id, reportTitleVisibility]);
 
   useEffect(() => {
-    if (!article || article.isRead) {
-      return undefined;
-    }
-
-    if (!autoMarkReadEnabled) {
-      return undefined;
-    }
-
-    if (autoMarkReadDelayMs === 0) {
-      markAsRead(article.id);
-      return undefined;
-    }
-
-    const timer = setTimeout(() => {
-      markAsRead(article.id);
-    }, autoMarkReadDelayMs);
-
-    return () => clearTimeout(timer);
+    if (!article || article.isRead) return;
+    if (!autoMarkReadEnabled) return;
+    if (autoMarkReadDelayMs === 0) { markAsRead(article.id); return; }
+    const t = setTimeout(() => markAsRead(article.id), autoMarkReadDelayMs);
+    return () => clearTimeout(t);
   }, [article, autoMarkReadDelayMs, autoMarkReadEnabled, markAsRead]);
 
-  const requestFulltext = useCallback(
-    async (
-      articleId: string,
-      input?: { signal?: AbortSignal; force?: boolean },
-    ) => {
-      const signal = input?.signal;
-      const force = Boolean(input?.force);
-
-      await enqueueArticleFulltext(articleId, { force });
-      const result = await pollWithBackoff({
-        fn: () => getArticleTasks(articleId),
-        stop: (value) => {
-          const status = value.fulltext.status;
-          return (
-            status === "idle" || status === "succeeded" || status === "failed"
-          );
-        },
-        onValue: (value) => {
-          if (!signal?.aborted) setTasks(value);
-        },
-        signal,
-      });
-
-      if (result.value?.fulltext.status === "succeeded") {
-        await refreshArticle(articleId);
-        return;
-      }
-
-      if (result.value?.fulltext.status === "failed") {
-        const failureReason =
-          result.value.fulltext.errorMessage?.trim() ||
-          result.value.fulltext.rawErrorMessage?.trim() ||
-          "请稍后重试";
-        toast.error(`抓取全文失败：${failureReason}`, {
-          dedupeKey: `article-fulltext-failed:${articleId}:${result.value.fulltext.jobId ?? "none"}:${result.value.fulltext.errorCode ?? failureReason}`,
-        });
-      }
-    },
-    [refreshArticle],
-  );
+  const requestFulltext = useCallback(async (articleId: string, input?: { signal?: AbortSignal; force?: boolean }) => {
+    const signal = input?.signal;
+    await enqueueArticleFulltext(articleId, { force: Boolean(input?.force) });
+    const r = await pollWithBackoff({
+      fn: () => getArticleTasks(articleId),
+      stop: (v) => { const s = v.fulltext.status; return s === "idle" || s === "succeeded" || s === "failed"; },
+      onValue: (v) => { if (!signal?.aborted) setTasks(v); }, signal,
+    });
+    if (r.value?.fulltext.status === "succeeded") { await refreshArticle(articleId); return; }
+    if (r.value?.fulltext.status === "failed") {
+      const fr = r.value.fulltext.errorMessage?.trim() || r.value.fulltext.rawErrorMessage?.trim() || "请稍后重试";
+      toast.error(`抓取全文失败：${fr}`, { dedupeKey: `article-fulltext-failed:${articleId}:${r.value.fulltext.jobId ?? "none"}:${r.value.fulltext.errorCode ?? fr}` });
+    }
+  }, [refreshArticle]);
 
   useEffect(() => {
     const articleId = article?.id ?? null;
     const articleLink = article?.link ?? "";
     if (!articleId) return;
-
-    const controller = new AbortController();
-    const { signal } = controller;
-
+    const ctrl = new AbortController();
+    const { signal } = ctrl;
     void (async () => {
       setTasks(null);
-
-      try {
-        const initialTasks = await getArticleTasks(articleId);
-        if (signal.aborted) return;
-        setTasks(initialTasks);
-      } catch (err) {
-        console.error(err);
-        if (signal.aborted) return;
-      }
-
-      if (!feedFullTextOnOpenEnabled) return;
-      if (isAiDigestArticle) return;
-      if (isPodcastArticle) return;
-      if (!articleLink) return;
-
-      try {
-        await requestFulltext(articleId, { signal, force: false });
-        if (signal.aborted) return;
-      } catch (err) {
-        console.error(err);
-        return;
-      }
+      try { const t = await getArticleTasks(articleId); if (!signal.aborted) setTasks(t); } catch (err) { console.error(err); if (signal.aborted) return; }
+      if (!feedFullTextOnOpenEnabled || isAiDigestArticle || isPodcastArticle || !articleLink) return;
+      try { await requestFulltext(articleId, { signal, force: false }); } catch (err) { console.error(err); }
     })();
-
-    return () => {
-      controller.abort();
-      setTasks(null);
-    };
-  }, [
-    article?.id,
-    article?.link,
-    feedFullTextOnOpenEnabled,
-    isAiDigestArticle,
-    isPodcastArticle,
-    requestFulltext,
-  ]);
+    return () => { ctrl.abort(); setTasks(null); };
+  }, [article?.id, article?.link, feedFullTextOnOpenEnabled, isAiDigestArticle, isPodcastArticle, requestFulltext]);
 
   useEffect(() => {
-    const articleId = article?.id ?? null;
-    if (!articleId) return;
-    if (!feedAiSummaryOnOpenEnabled) return;
-    if (isPodcastArticle) return;
-    // Keep the last summary/session outcome visible after refresh instead of auto-enqueueing again.
-    const hasFormalAiSummary = Boolean(article?.aiSummary?.trim());
-    const hasExistingSession = Boolean(article?.aiSummarySession);
-    if (hasFormalAiSummary || hasExistingSession) return;
-
-    queueMicrotask(() => {
-      void requestStreamingAiSummary();
-    });
-  }, [
-    article?.aiSummary,
-    article?.aiSummarySession,
-    article?.aiSummarySession?.id,
-    article?.aiSummarySession?.status,
-    article?.id,
-    feedAiSummaryOnOpenEnabled,
-    isPodcastArticle,
-    requestStreamingAiSummary,
-  ]);
+    if (!article?.id || !feedAiSummaryOnOpenEnabled || isPodcastArticle) return;
+    const hs = Boolean(article?.aiSummary?.trim());
+    const he = Boolean(article?.aiSummarySession);
+    if (hs || he) return;
+    queueMicrotask(() => { void requestStreamingAiSummary(); });
+  }, [article?.aiSummary, article?.aiSummarySession, article?.aiSummarySession?.id, article?.aiSummarySession?.status, article?.id, feedAiSummaryOnOpenEnabled, isPodcastArticle, requestStreamingAiSummary]);
 
   useEffect(() => {
-    const articleId = article?.id ?? null;
-    if (!articleId) return;
-    if (!feedBodyTranslateOnOpenEnabled) return;
-    if (isAiDigestArticle) return;
-    if (isPodcastArticle) return;
-    if (!bodyTranslationEligible) return;
-    if (hasAiTranslationContent || immersiveTranslationSession) return;
-
+    if (!article?.id || !feedBodyTranslateOnOpenEnabled || isAiDigestArticle || isPodcastArticle || !bodyTranslationEligible || hasAiTranslationContent || immersiveTranslationSession) return;
     void requestImmersiveTranslation({ force: false, autoView: true });
-  }, [
-    article?.id,
-    bodyTranslationEligible,
-    feedBodyTranslateOnOpenEnabled,
-    isAiDigestArticle,
-    isPodcastArticle,
-    hasAiTranslationContent,
-    immersiveTranslationSession,
-    requestImmersiveTranslation,
-  ]);
+  }, [article?.id, bodyTranslationEligible, feedBodyTranslateOnOpenEnabled, isAiDigestArticle, isPodcastArticle, hasAiTranslationContent, immersiveTranslationSession, requestImmersiveTranslation]);
 
   const textAutomationDisabled = isAiDigestArticle || isPodcastArticle;
   const fulltextButtonDisabled = fulltextPending || textAutomationDisabled;
   const aiTranslationButtonDisabled = textAutomationDisabled;
-  const aiSummaryButtonDisabled =
-    textAutomationDisabled || (feedFullTextOnOpenEnabled && fulltextPending);
+  const aiSummaryButtonDisabled = textAutomationDisabled || (feedFullTextOnOpenEnabled && fulltextPending);
   const showDesktopStarButton = Boolean(article);
   const showDesktopMarkdownExportButton = Boolean(article);
   const showDesktopFulltextButton = Boolean(article) && !fulltextButtonDisabled;
-  const showDesktopTranslationButton =
-    Boolean(article) && bodyTranslationEligible && !aiTranslationButtonDisabled;
-  const showDesktopAiSummaryButton =
-    Boolean(article) && !aiSummaryButtonDisabled;
+  const showDesktopTranslationButton = Boolean(article) && bodyTranslationEligible && !aiTranslationButtonDisabled;
+  const showDesktopAiSummaryButton = Boolean(article) && !aiSummaryButtonDisabled;
   const activeAiSummarySession = streamingAiSummary.session;
   const showingStreamingSummary = Boolean(activeAiSummarySession);
-  const sourceAiSummaryText = showingStreamingSummary
-    ? activeAiSummarySession?.finalText?.trim() ||
-      activeAiSummarySession?.draftText?.trim() ||
-      ""
-    : (article?.aiSummary?.trim() ?? "");
-  const { displayText: animatedAiSummaryText } = useAnimatedAiSummaryText({
-    articleId: currentArticleId,
-    sourceText: sourceAiSummaryText,
-    status: activeAiSummarySession?.status ?? null,
-  });
+  const sourceAiSummaryText = showingStreamingSummary ? activeAiSummarySession?.finalText?.trim() || activeAiSummarySession?.draftText?.trim() || "" : (article?.aiSummary?.trim() ?? "");
+  const { displayText: animatedAiSummaryText } = useAnimatedAiSummaryText({ articleId: currentArticleId, sourceText: sourceAiSummaryText, status: activeAiSummarySession?.status ?? null });
 
-  function onFulltextButtonClick() {
-    if (!article?.id) return;
-    if (textAutomationDisabled) return;
-    void requestFulltext(article.id, { force: true });
-  }
-
-  function onAiSummaryButtonClick() {
-    if (!article?.id) return;
-    if (textAutomationDisabled) return;
-    void requestStreamingAiSummary({ force: true });
-  }
-
-  function onAiTranslationButtonClick() {
-    if (!article?.id) return;
-    if (textAutomationDisabled) return;
-    void requestImmersiveTranslation({ force: true, autoView: true });
-  }
+  function onFulltextButtonClick() { if (!article?.id || textAutomationDisabled) return; void requestFulltext(article.id, { force: true }); }
+  function onAiSummaryButtonClick() { if (!article?.id || textAutomationDisabled) return; void requestStreamingAiSummary({ force: true }); }
+  function onAiTranslationButtonClick() { if (!article?.id || textAutomationDisabled) return; void requestImmersiveTranslation({ force: true, autoView: true }); }
 
   useEffect(() => {
-    const handleReaderCommand = (event: Event) => {
-      const command = (event as CustomEvent<{ command?: ReaderArticleCommand }>).detail?.command;
-
-      if (command === "ai-summary") {
-        if (!article?.id || aiSummaryButtonDisabled) return;
-        void requestStreamingAiSummary({ force: true });
-        return;
-      }
-
-      if (command === "ai-translate") {
-        if (!article?.id || !bodyTranslationEligible || aiTranslationButtonDisabled) return;
-        void requestImmersiveTranslation({ force: true, autoView: true });
-      }
+    const h = (e: Event) => {
+      const cmd = (e as CustomEvent<{ command?: ReaderArticleCommand }>).detail?.command;
+      if (cmd === "ai-summary" && article?.id && !aiSummaryButtonDisabled) { void requestStreamingAiSummary({ force: true }); return; }
+      if (cmd === "ai-translate" && article?.id && bodyTranslationEligible && !aiTranslationButtonDisabled) { void requestImmersiveTranslation({ force: true, autoView: true }); }
     };
-
-    window.addEventListener(READER_COMMAND_EVENT_NAME, handleReaderCommand);
-    return () => {
-      window.removeEventListener(READER_COMMAND_EVENT_NAME, handleReaderCommand);
-    };
-  }, [
-    aiSummaryButtonDisabled,
-    aiTranslationButtonDisabled,
-    article?.id,
-    bodyTranslationEligible,
-    requestImmersiveTranslation,
-    requestStreamingAiSummary,
-  ]);
+    window.addEventListener(READER_COMMAND_EVENT_NAME, h);
+    return () => window.removeEventListener(READER_COMMAND_EVENT_NAME, h);
+  }, [aiSummaryButtonDisabled, aiTranslationButtonDisabled, article?.id, bodyTranslationEligible, requestImmersiveTranslation, requestStreamingAiSummary]);
 
   function onMarkdownExportButtonClick() {
     if (!article) return;
-
-    const markdown = buildArticleMarkdownDocument({
-      title: titleOriginal,
-      publishedAt: article.publishedAt,
-      link: article.link,
-      contentHtml: article.content,
-    });
-
-    triggerArticleMarkdownDownload({
-      filename: sanitizeArticleMarkdownFilename(titleOriginal),
-      content: markdown,
-    });
+    triggerArticleMarkdownDownload({ filename: sanitizeArticleMarkdownFilename(titleOriginal), content: buildArticleMarkdownDocument({ title: titleOriginal, publishedAt: article.publishedAt, link: article.link, contentHtml: article.content }) });
   }
 
   async function onAiDigestSourceClick(source: ArticleAiDigestSource) {
-    // Preserve the current digest article URL entry so browser back can return to it.
-    await openArticleInReader({
-      view: source.feedId,
-      articleId: source.articleId,
-      articleHistory: "push",
-    });
-  }
-
-  function renderDesktopToolbar() {
-    const desktopToolbarTitle = article
-      ? titleOriginal
-      : "选择文章后可查看内容";
-    const showToolbarTitle = Boolean(article && !effectiveArticleTitleVisible);
-
-    return (
-      <div
-        data-testid="article-desktop-toolbar"
-        className="flex h-12 min-w-0 items-center justify-between gap-3 px-4"
-      >
-        <div className="min-w-0 flex-1">
-          {showToolbarTitle && article?.link ? (
-            <a
-              href={article.link}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label={`打开原文：${desktopToolbarTitle}`}
-              className="block truncate rounded-sm text-[0.96rem] font-semibold tracking-[0.01em] underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            >
-              {desktopToolbarTitle}
-            </a>
-          ) : showToolbarTitle ? (
-            <span className="block truncate text-[0.96rem] font-semibold tracking-[0.01em] text-foreground">
-              {desktopToolbarTitle}
-            </span>
-          ) : null}
-        </div>
-        <div className="shrink-0 flex items-center gap-2">
-          {showDesktopStarButton ? (
-            <ReaderToolbarIconButton
-              // Keep desktop star icon fill behavior aligned with inline mobile actions.
-              icon={({ className }) => (
-                <Star
-                  className={className}
-                  fill={article?.isStarred ? "currentColor" : "none"}
-                />
-              )}
-              label={article?.isStarred ? "已收藏" : "收藏"}
-              pressed={Boolean(article?.isStarred)}
-              onClick={article ? () => toggleStar(article.id) : undefined}
-            />
-          ) : null}
-          {showDesktopFulltextButton ? (
-            <ReaderToolbarIconButton
-              icon={FileText}
-              label="抓取全文"
-              onClick={article ? onFulltextButtonClick : undefined}
-            />
-          ) : null}
-          {showDesktopTranslationButton ? (
-            <ReaderToolbarIconButton
-              icon={Languages}
-              label="翻译"
-              onClick={article ? onAiTranslationButtonClick : undefined}
-            />
-          ) : null}
-          {showDesktopAiSummaryButton ? (
-            <ReaderToolbarIconButton
-              icon={Sparkles}
-              label="生成摘要"
-              onClick={article ? onAiSummaryButtonClick : undefined}
-            />
-          ) : null}
-          {showDesktopMarkdownExportButton ? (
-            <ReaderToolbarIconButton
-              icon={Download}
-              label="导出文章"
-              onClick={onMarkdownExportButtonClick}
-            />
-          ) : null}
-          <ReaderToolbarIconButton
-            icon={Search}
-            label="全局搜索"
-            onClick={onOpenSearch}
-          />
-          <ReaderToolbarIconButton
-            icon={SettingsIcon}
-            label="打开设置"
-            onClick={onOpenSettings}
-          />
-        </div>
-      </div>
-    );
+    await openArticleInReader({ view: source.feedId, articleId: source.articleId, articleHistory: "push" });
   }
 
   const toggleAiSummaryExpanded = useCallback(() => {
     if (!currentArticleId) return;
-    setAiSummaryExpandedArticleId((current) =>
-      current === currentArticleId ? null : currentArticleId,
-    );
+    setAiSummaryExpandedArticleId((c) => c === currentArticleId ? null : currentArticleId);
   }, [currentArticleId]);
 
-  const openImagePreview = useCallback(
-    (image: HTMLImageElement) => {
-      const src = image.currentSrc || image.getAttribute("src") || image.src;
-      if (!src) return;
-
-      imagePreviewSequenceRef.current += 1;
-      setImagePreview({
-        articleId: currentArticleId,
-        previewId: imagePreviewSequenceRef.current,
-        src,
-        alt: image.getAttribute("alt")?.trim() || "文章图片",
-      });
-    },
-    [currentArticleId],
-  );
+  const openImagePreview = useCallback((image: HTMLImageElement) => {
+    const src = image.currentSrc || image.getAttribute("src") || image.src;
+    if (!src) return;
+    imagePreviewSequenceRef.current += 1;
+    setImagePreview({ articleId: currentArticleId, previewId: imagePreviewSequenceRef.current, src, alt: image.getAttribute("alt")?.trim() || "文章图片" });
+  }, [currentArticleId]);
 
   const getPreviewableArticleImage = useCallback((target: Element) => {
-    const image = target.closest("img");
-    if (!(image instanceof HTMLImageElement)) return null;
-    if (image.closest("a[href]")) return null;
-
-    return image;
+    const img = target.closest("img");
+    return (img instanceof HTMLImageElement && !img.closest("a[href]")) ? img : null;
   }, []);
 
-  const onArticleContentClick = useCallback(
-    (event: MouseEvent<HTMLDivElement>) => {
-      const eventTarget = event.target;
-      if (!(eventTarget instanceof Element)) return;
+  const onArticleContentClick = useCallback((e: MouseEvent<HTMLDivElement>) => {
+    const t = e.target;
+    if (!(t instanceof Element)) return;
+    const rt = t.closest('[data-action="retry-segment"]');
+    if (rt) {
+      const si = rt.getAttribute("data-segment-index");
+      const n = si ? Number(si) : Number.NaN;
+      if (Number.isInteger(n) && n >= 0) { void immersiveTranslation.retrySegment(n); }
+      return;
+    }
+    const img = getPreviewableArticleImage(t);
+    if (!img) return;
+    e.preventDefault();
+    openImagePreview(img);
+  }, [getPreviewableArticleImage, immersiveTranslation, openImagePreview]);
 
-      const retryTarget = eventTarget.closest('[data-action="retry-segment"]');
-      if (retryTarget) {
-        const rawSegmentIndex = retryTarget.getAttribute("data-segment-index");
-        const segmentIndex = rawSegmentIndex
-          ? Number(rawSegmentIndex)
-          : Number.NaN;
-        if (!Number.isInteger(segmentIndex) || segmentIndex < 0) return;
+  const onArticleContentKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const t = e.target;
+    if (!(t instanceof Element)) return;
+    const img = getPreviewableArticleImage(t);
+    if (!img) return;
+    e.preventDefault();
+    openImagePreview(img);
+  }, [getPreviewableArticleImage, openImagePreview]);
 
-        void immersiveTranslation.retrySegment(segmentIndex);
-        return;
-      }
-
-      const image = getPreviewableArticleImage(eventTarget);
-      if (!image) return;
-
-      event.preventDefault();
-      openImagePreview(image);
-    },
-    [getPreviewableArticleImage, immersiveTranslation, openImagePreview],
-  );
-
-  const onArticleContentKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLDivElement>) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-
-      const image = getPreviewableArticleImage(target);
-      if (!image) return;
-
-      event.preventDefault();
-      openImagePreview(image);
-    },
-    [getPreviewableArticleImage, openImagePreview],
-  );
-
-  const immersiveHtml = useMemo(
-    () =>
-      buildImmersiveHtml(article?.content ?? "", immersiveTranslation.segments),
-    [article?.content, immersiveTranslation.segments],
-  );
-  const bodyHtml =
-    aiTranslationViewing && hasImmersiveSegments
-      ? immersiveHtml
-      : aiTranslationViewing && hasLegacyAiTranslationContent
-        ? article?.aiTranslationBilingualHtml?.trim() ||
-          article?.aiTranslationZhHtml?.trim() ||
-          article?.content ||
-          ""
-        : article?.content || "";
-  const highlightedBodyHtml = useMemo(
-    () => highlightHtmlByQuery(bodyHtml, highlightQuery),
-    [bodyHtml, highlightQuery],
-  );
-  const articleBodyMarkup = useMemo(
-    () => ({ __html: highlightedBodyHtml }),
-    [highlightedBodyHtml],
-  );
+  const immersiveHtml = useMemo(() => buildImmersiveHtml(article?.content ?? "", immersiveTranslation.segments), [article?.content, immersiveTranslation.segments]);
+  const bodyHtml = aiTranslationViewing && hasImmersiveSegments ? immersiveHtml : aiTranslationViewing && hasLegacyAiTranslationContent ? article?.aiTranslationBilingualHtml?.trim() || article?.aiTranslationZhHtml?.trim() || article?.content || "" : article?.content || "";
+  const highlightedBodyHtml = useMemo(() => highlightHtmlByQuery(bodyHtml, highlightQuery), [bodyHtml, highlightQuery]);
 
   useEffect(() => {
-    const container = articleContentRef.current;
-    if (!container) return;
-
-    for (const node of container.querySelectorAll("img")) {
-      if (!(node instanceof HTMLImageElement)) continue;
-      if (node.closest("a[href]")) continue;
-
-      const alt = node.alt?.trim();
-      const label = alt ? `查看大图：${alt}` : "查看大图";
-      node.tabIndex = 0;
-      node.setAttribute("role", "button");
-      node.setAttribute("aria-label", label);
-      node.classList.add("cursor-zoom-in");
+    const c = articleContentRef.current;
+    if (!c) return;
+    for (const n of c.querySelectorAll("img")) {
+      if (!(n instanceof HTMLImageElement) || n.closest("a[href]")) continue;
+      const alt = n.alt?.trim();
+      n.tabIndex = 0;
+      n.setAttribute("role", "button");
+      n.setAttribute("aria-label", alt ? `查看大图：${alt}` : "查看大图");
+      n.classList.add("cursor-zoom-in");
     }
-
-    for (const node of container.querySelectorAll("video")) {
-      if (!(node instanceof HTMLVideoElement)) continue;
-
-      // 文章正文视频来自已清洗 HTML，这里只补齐阅读器内的响应式呈现样式。
-      node.classList.add("my-5", "w-full", "max-w-full", "rounded-lg", "bg-black");
+    for (const n of c.querySelectorAll("video")) {
+      if (n instanceof HTMLVideoElement) n.classList.add("my-5", "w-full", "max-w-full", "rounded-lg", "bg-black");
     }
   }, [highlightedBodyHtml]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return undefined;
-    }
-
-    const element = scrollContainerRef.current;
-    if (!element) {
-      return undefined;
-    }
-
-    const rafId = window.requestAnimationFrame(() => {
-      reportTitleVisibility(
-        element.scrollTop <= FLOATING_TITLE_SCROLL_THRESHOLD_PX,
-      );
-      updateScrollAssistState(element);
-    });
-
-    return () => {
-      window.cancelAnimationFrame(rafId);
-    };
-  }, [
-    article?.id,
-    bodyHtml,
-    isDesktop,
-    reportTitleVisibility,
-    updateScrollAssistState,
-  ]);
+    if (typeof window === "undefined") return;
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const id = window.requestAnimationFrame(() => { reportTitleVisibility(el.scrollTop <= FLOATING_TITLE_SCROLL_THRESHOLD_PX); updateScrollAssistState(el); });
+    return () => window.cancelAnimationFrame(id);
+  }, [article?.id, bodyHtml, isDesktop, reportTitleVisibility, updateScrollAssistState]);
 
   if (!article) {
     return (
-      <div className="flex h-full flex-col bg-background text-foreground dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.015),rgba(255,255,255,0))]">
-        {showDesktopToolbar ? (
-          renderDesktopToolbar()
-        ) : reserveTopSpace ? (
-          <div className="h-12 shrink-0" />
-        ) : null}
-        <div className="flex flex-1 items-center justify-center">
-          <p className="text-muted-foreground">从列表中选择一篇文章开始阅读</p>
-        </div>
+      <div className="flex h-full flex-col bg-background text-foreground dark:bg-[linear-gradient(180deg,var(--glass-bg-light),transparent)]">
+        <ArticleHeader article={null} feed={feed} isDesktop={isDesktop} reserveTopSpace={reserveTopSpace} effectiveArticleTitleVisible={effectiveArticleTitleVisible} showBilingualTitle={showBilingualTitle} titleOriginal={titleOriginal} titleZh={titleZh} articleFiltered={false} referenceTime={referenceTime} showDesktopStarButton={false} showDesktopFulltextButton={false} showDesktopTranslationButton={false} showDesktopAiSummaryButton={false} showDesktopMarkdownExportButton={false} fulltextButtonDisabled={false} aiTranslationButtonDisabled={false} aiSummaryButtonDisabled={false} bodyTranslationEligible={false} onOpenSearch={onOpenSearch} onToggleStar={toggleStar} onFulltextButtonClick={onFulltextButtonClick} onAiTranslationButtonClick={onAiTranslationButtonClick} onAiSummaryButtonClick={onAiSummaryButtonClick} onMarkdownExportButtonClick={onMarkdownExportButtonClick} />
+        <div className="flex flex-1 items-center justify-center"><p className="text-muted-foreground">从列表中选择一篇文章开始阅读</p></div>
       </div>
     );
   }
 
-  const fontSizeClass = {
-    small: "text-sm",
-    medium: "text-base",
-    large: "text-lg",
-  }[general.fontSize];
-
-  const lineHeightClass = {
-    compact: "leading-normal",
-    normal: "leading-relaxed",
-    relaxed: "leading-loose",
-  }[general.lineHeight];
-
-  const fontFamilyClass =
-    general.fontFamily === "serif" ? "font-serif" : "font-sans";
-  const aiSummaryFontSizeClass = {
-    small: "text-sm",
-    medium: "text-sm",
-    large: "text-base",
-  }[general.fontSize];
-  const aiSummaryLineHeightClass = {
-    compact: "leading-relaxed",
-    normal: "leading-relaxed",
-    relaxed: "leading-relaxed",
-  }[general.lineHeight];
-  const aiSummaryText = showingStreamingSummary
-    ? animatedAiSummaryText
-    : sourceAiSummaryText;
-  const aiSummaryLines = aiSummaryText
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const fontSizeClass = { small: "text-sm", medium: "text-base", large: "text-lg" }[general.fontSize];
+  const lineHeightClass = { compact: "leading-normal", normal: "leading-relaxed", relaxed: "leading-loose" }[general.lineHeight];
+  const fontFamilyClass = general.fontFamily === "serif" ? "font-serif" : "font-sans";
+  const aiSummaryFontSizeClass = { small: "text-sm", medium: "text-sm", large: "text-base" }[general.fontSize];
+  const aiSummaryLineHeightClass = { compact: "leading-relaxed", normal: "leading-relaxed", relaxed: "leading-relaxed" }[general.lineHeight];
+  const aiSummaryText = showingStreamingSummary ? animatedAiSummaryText : sourceAiSummaryText;
+  const aiSummaryLines = aiSummaryText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const aiSummaryTldrText = aiSummaryLines.slice(0, 2).join(" ");
   const aiSummaryContentId = `ai-summary-${article.id}`;
   const aiSummarySessionFailed = activeAiSummarySession?.status === "failed";
-  const aiSummarySessionRunning =
-    activeAiSummarySession?.status === "queued" ||
-    activeAiSummarySession?.status === "running";
-  const aiSummaryFailed =
-    aiSummarySessionFailed || tasks?.ai_summary.status === "failed";
-  const aiSummaryErrorMessage =
-    activeAiSummarySession?.rawErrorMessage ||
-    tasks?.ai_summary.rawErrorMessage ||
-    activeAiSummarySession?.errorMessage ||
-    tasks?.ai_summary.errorMessage ||
-    "暂时无法生成摘要";
+  const aiSummarySessionRunning = activeAiSummarySession?.status === "queued" || activeAiSummarySession?.status === "running";
+  const aiSummaryFailed = aiSummarySessionFailed || tasks?.ai_summary.status === "failed";
+  const aiSummaryErrorMessage = activeAiSummarySession?.rawErrorMessage || tasks?.ai_summary.rawErrorMessage || activeAiSummarySession?.errorMessage || tasks?.ai_summary.errorMessage || "暂时无法生成摘要";
   const aiTranslateFailed = tasks?.ai_translate.status === "failed";
-  const aiTranslateErrorMessage =
-    tasks?.ai_translate.rawErrorMessage ||
-    tasks?.ai_translate.errorMessage ||
-    "暂时无法完成翻译";
-  const showAsyncErrorCard =
-    !aiSummaryLoading &&
-    !aiSummaryMissingApiKey &&
-    !aiSummaryWaitingFulltext &&
-    !aiTranslationLoading &&
-    !aiTranslationMissingApiKey &&
-    !aiTranslationTimedOut &&
-    !aiTranslationWaitingFulltext &&
-    (aiSummaryFailed || aiTranslateFailed);
-  const showScrollAssist =
-    isDesktop && !effectiveArticleTitleVisible && effectiveHasScrollableContent;
-  const articleFiltered =
-    article.isFiltered || article.filterStatus === "filtered";
+  const aiTranslateErrorMessage = tasks?.ai_translate.rawErrorMessage || tasks?.ai_translate.errorMessage || "暂时无法完成翻译";
+  const showAsyncErrorCard = !aiSummaryLoading && !aiSummaryMissingApiKey && !aiSummaryWaitingFulltext && !aiTranslationLoading && !aiTranslationMissingApiKey && !aiTranslationTimedOut && !aiTranslationWaitingFulltext && (aiSummaryFailed || aiTranslateFailed);
+  const showScrollAssist = isDesktop && !effectiveArticleTitleVisible && effectiveHasScrollableContent;
+  const articleFiltered = article.isFiltered || article.filterStatus === "filtered";
   const playableMediaAttachment = getPlayableMediaAttachment(article);
+  const articleVideoMeta = getArticleVideoMeta({ link: article.link, content: article.content, previewImage: article.previewImage, mediaAttachments: article.mediaAttachments });
 
   return (
-    <div className="flex h-full flex-col bg-background text-foreground dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.015),rgba(255,255,255,0))]">
-      {showDesktopToolbar ? (
-        renderDesktopToolbar()
-      ) : reserveTopSpace ? (
-        <div className="h-12 shrink-0" />
-      ) : null}
-      <div
-        className="relative flex-1 overflow-hidden"
-        data-testid="article-viewport"
-      >
-        <div
-          ref={scrollContainerRef}
-          className="h-full overflow-y-auto"
-          onScroll={onArticleScroll}
-          data-testid="article-scroll-container"
-        >
-          <div
-            className="w-full px-8 pb-12 pt-4 dark:bg-[radial-gradient(circle_at_top,rgba(94,106,210,0.07),transparent_22%)] lg:pl-12 lg:pr-8"
-            data-testid="article-content-shell"
-          >
-            <div className="mb-8">
-              <h1 className="mb-4 break-words text-3xl font-bold tracking-tight">
-                {article.link ? (
-                  <a
-                    href={article.link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={cn(
-                      "group max-w-full break-words rounded-sm underline-offset-4 transition-colors hover:text-foreground/90 hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-                      showBilingualTitle
-                        ? "inline-flex flex-col items-start gap-1"
-                        : "inline-flex items-center gap-2",
-                    )}
-                  >
-                    <span className="break-words">{titleOriginal}</span>
-                    {showBilingualTitle ? (
-                      <span className="break-words text-base font-medium text-muted-foreground">
-                        {titleZh}
-                      </span>
-                    ) : null}
-                  </a>
-                ) : (
-                  <span
-                    className={cn(
-                      "max-w-full break-words",
-                      showBilingualTitle
-                        ? "inline-flex flex-col items-start gap-1"
-                        : undefined,
-                    )}
-                  >
-                    <span className="break-words">{titleOriginal}</span>
-                    {showBilingualTitle ? (
-                      <span className="break-words text-base font-medium text-muted-foreground">
-                        {titleZh}
-                      </span>
-                    ) : null}
-                  </span>
-                )}
-              </h1>
-
-              <div className="mb-4 flex items-center text-sm text-muted-foreground">
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <span className="relative flex h-4 w-4 shrink-0 items-center justify-center">
-                    <span
-                      aria-hidden="true"
-                      className="text-[11px] leading-none"
-                    >
-                      📰
-                    </span>
-                    {feed?.icon ? (
-                      <img
-                        src={feed.icon}
-                        alt=""
-                        aria-hidden="true"
-                        loading="lazy"
-                        decoding="async"
-                        fetchPriority="low"
-                        width={16}
-                        height={16}
-                        data-testid="article-feed-icon"
-                        className="absolute inset-0 h-full w-full rounded-[3px] bg-background object-cover"
-                        onError={(event) => {
-                          event.currentTarget.style.display = "none";
-                        }}
-                      />
-                    ) : null}
-                  </span>
-                  <span className="min-w-0 break-words">{feed?.title}</span>
-                  <span aria-hidden="true" className="shrink-0">
-                    ·
-                  </span>
-                  <span className="shrink-0">
-                    {formatRelativeTime(article.publishedAt, referenceTime)}
-                  </span>
-                  {articleFiltered ? (
-                    <Badge
-                      variant="secondary"
-                      className="h-5 shrink-0 px-1.5 text-[10px] font-medium"
-                      data-testid="article-filter-badge"
-                    >
-                      {getFilteredReasonLabel(article.filteredBy)}
-                    </Badge>
-                  ) : null}
-                  {article.author && (
-                    <>
-                      <span aria-hidden="true" className="shrink-0">
-                        ·
-                      </span>
-                      <span className="min-w-0 break-words">
-                        {article.author}
-                      </span>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {!showDesktopToolbar ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    type="button"
-                    onClick={() => toggleStar(article.id)}
-                    variant={article.isStarred ? "default" : "secondary"}
-                    size="compact"
-                    className="cursor-pointer"
-                  >
-                    <Star fill={article.isStarred ? "currentColor" : "none"} />
-                    <span>{article.isStarred ? "已收藏" : "收藏"}</span>
-                  </Button>
-
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="compact"
-                    className="cursor-pointer"
-                    onClick={onFulltextButtonClick}
-                    disabled={fulltextButtonDisabled}
-                  >
-                    <FileText />
-                    <span>抓取全文</span>
-                  </Button>
-
-                  {bodyTranslationEligible ? (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="compact"
-                      className="cursor-pointer"
-                      onClick={onAiTranslationButtonClick}
-                      disabled={aiTranslationButtonDisabled}
-                    >
-                      <Languages />
-                      <span>翻译</span>
-                    </Button>
-                  ) : null}
-
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="compact"
-                    className="cursor-pointer"
-                    onClick={onAiSummaryButtonClick}
-                    disabled={aiSummaryButtonDisabled}
-                  >
-                    <Sparkles />
-                    <span>生成摘要</span>
-                  </Button>
-                </div>
-              ) : null}
-            </div>
-
-            {playableMediaAttachment ? (
-              <section
-                className="mb-5 rounded-lg border border-border/65 bg-card/70 p-3"
-                aria-label="播客播放器"
-              >
-                {playableMediaAttachment.mimeType.toLowerCase().startsWith("audio/") ? (
-                  <audio
-                    data-testid="article-media-player"
-                    className="w-full"
-                    src={playableMediaAttachment.url}
-                    controls
-                    preload="metadata"
-                  />
-                ) : (
-                  <video
-                    data-testid="article-media-player"
-                    className="max-h-[28rem] w-full rounded-md bg-black"
-                    src={playableMediaAttachment.url}
-                    controls
-                    preload="metadata"
-                  />
-                )}
-              </section>
-            ) : null}
-
-            {fulltextLoading ? (
-              <div
-                className={ARTICLE_STATUS_CARD_CLASS_NAME}
-                role="status"
-                aria-live="polite"
-              >
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <span
-                    className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-muted-foreground/70"
-                    aria-hidden="true"
-                  />
-                  <span>正在抓取全文，完成后会自动更新</span>
-                </div>
-              </div>
-            ) : null}
-
-            {aiSummaryText ? (
-              <section
-                className={ARTICLE_SUMMARY_CARD_CLASS_NAME}
-                aria-label="AI 摘要"
-                onClick={toggleAiSummaryExpanded}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className={ARTICLE_SUMMARY_BADGE_CLASS_NAME}>
-                      <Sparkles className="h-3.5 w-3.5" />
-                      <span>AI 摘要</span>
-                    </span>
-                    {aiSummarySessionRunning ? (
-                      <span className="text-[11px] text-muted-foreground">
-                        正在生成摘要
-                      </span>
-                    ) : null}
-                    <span className="text-[11px] text-muted-foreground">
-                      摘要可能有误，请以原文为准
-                    </span>
-                  </div>
-
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="-mr-2 h-7 shrink-0 px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground dark:border dark:border-transparent dark:hover:border-white/[0.06] dark:hover:bg-[rgba(255,255,255,0.04)]"
-                    aria-expanded={aiSummaryExpanded}
-                    aria-controls={aiSummaryContentId}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      toggleAiSummaryExpanded();
-                    }}
-                  >
-                    {aiSummaryExpanded ? "收起摘要" : "展开摘要"}
-                  </Button>
-                </div>
-
-                <div
-                  id={aiSummaryContentId}
-                  className="mt-2 border-t border-border/40 pt-2"
-                >
-                  {aiSummaryExpanded ? (
-                    <div
-                      className={cn(
-                        "space-y-2 text-foreground/85",
-                        aiSummaryFontSizeClass,
-                        aiSummaryLineHeightClass,
-                        fontFamilyClass,
-                      )}
-                    >
-                      {aiSummaryLines.map((line, index) => (
-                        <p key={`${article.id}-ai-summary-${index}`}>{line}</p>
-                      ))}
-                    </div>
-                  ) : (
-                    <p
-                      className={cn(
-                        "line-clamp-2 text-foreground/85",
-                        aiSummaryFontSizeClass,
-                        aiSummaryLineHeightClass,
-                        fontFamilyClass,
-                      )}
-                    >
-                      {aiSummaryTldrText || aiSummaryText}
-                    </p>
-                  )}
-                </div>
-              </section>
-            ) : null}
-
-            {!aiSummaryText && aiSummaryLoading ? (
-              <div
-                className={ARTICLE_STATUS_CARD_CLASS_NAME}
-                role="status"
-                aria-live="polite"
-              >
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <span
-                    className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-muted-foreground/70"
-                    aria-hidden="true"
-                  />
-                  <span>正在生成摘要，请稍候…</span>
-                </div>
-              </div>
-            ) : null}
-
-            {!aiSummaryText && aiSummaryMissingApiKey ? (
-              <div className={`${ARTICLE_STATUS_CARD_CLASS_NAME} text-sm text-muted-foreground`}>
-                请先在设置中完成 AI 配置，才能生成摘要
-              </div>
-            ) : null}
-
-            {!aiSummaryText && aiSummaryWaitingFulltext ? (
-              <div className={`${ARTICLE_STATUS_CARD_CLASS_NAME} text-sm text-muted-foreground`}>
-                请先等待全文抓取完成，再开始摘要
-              </div>
-            ) : null}
-
-            {showAsyncErrorCard ? (
-              <section
-                className={`${ARTICLE_STATUS_CARD_CLASS_NAME} text-sm text-muted-foreground`}
-                aria-label="处理失败"
-              >
-                <div className="mb-2 font-medium text-foreground">处理失败</div>
-                <div className="space-y-3">
-                  {aiSummaryFailed ? (
-                    <div className="flex flex-wrap items-start justify-between gap-2 sm:items-center">
-                      <span className="min-w-0 flex-1 break-words">
-                        摘要：{aiSummaryErrorMessage}
-                      </span>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        onClick={onAiSummaryButtonClick}
-                      >
-                        重试
-                      </Button>
-                    </div>
-                  ) : null}
-                  {aiTranslateFailed ? (
-                    <div className="flex flex-wrap items-start justify-between gap-2 sm:items-center">
-                      <span className="min-w-0 flex-1 break-words">
-                        翻译：{aiTranslateErrorMessage}
-                      </span>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        onClick={onAiTranslationButtonClick}
-                      >
-                        重试
-                      </Button>
-                    </div>
-                  ) : null}
-                </div>
-              </section>
-            ) : null}
-
-            {!hasAiTranslationContent && aiTranslationLoading ? (
-              <div
-                className={ARTICLE_STATUS_CARD_CLASS_NAME}
-                role="status"
-                aria-live="polite"
-              >
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <span
-                    className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-muted-foreground/70"
-                    aria-hidden="true"
-                  />
-                  <span>正在翻译文章，请稍候…</span>
-                </div>
-              </div>
-            ) : null}
-
-            {!hasAiTranslationContent && aiTranslationMissingApiKey ? (
-              <div className={`${ARTICLE_STATUS_CARD_CLASS_NAME} text-sm text-muted-foreground`}>
-                请先在设置中完成 AI 配置，才能翻译文章
-              </div>
-            ) : null}
-
-            {!hasAiTranslationContent && aiTranslationTimedOut ? (
-              <div className={`${ARTICLE_STATUS_CARD_CLASS_NAME} text-sm text-muted-foreground`}>
-                翻译还在处理中。请稍后重试，或刷新查看结果。
-              </div>
-            ) : null}
-
-            {!hasAiTranslationContent && aiTranslationWaitingFulltext ? (
-              <div className={`${ARTICLE_STATUS_CARD_CLASS_NAME} text-sm text-muted-foreground`}>
-                请先等待全文抓取完成，再开始翻译
-              </div>
-            ) : null}
-
-            <div
-              ref={articleContentRef}
-              className={cn(
-                // Tighten article typography contrast without making the surrounding UI feel heavier.
-                "prose max-w-none prose-headings:text-foreground/94 prose-headings:font-semibold prose-p:text-foreground/84 prose-p:font-[450] prose-li:text-foreground/84 prose-li:font-[450] prose-strong:text-foreground/96 prose-blockquote:border-border/90 prose-blockquote:text-foreground/84 prose-figcaption:text-muted-foreground prose-a:text-foreground/94 prose-a:decoration-primary/45 prose-video:my-5 prose-video:w-full prose-video:max-w-full prose-video:rounded-lg prose-video:bg-black dark:prose-invert",
-                fontSizeClass,
-                lineHeightClass,
-                fontFamilyClass,
-              )}
-              data-testid="article-html-content"
-              onClickCapture={onArticleContentClick}
-              onKeyDownCapture={onArticleContentKeyDown}
-              dangerouslySetInnerHTML={articleBodyMarkup}
-            />
-
-            {isAiDigestArticle ? (
-              <section
-                data-testid="ai-digest-sources-section"
-                className="mt-6 rounded-2xl border border-border/65 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--color-muted)_74%,white_26%),color-mix(in_oklab,var(--color-background)_88%,white_12%))] px-4 py-3 dark:border-white/[0.06] dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.025))]"
-                aria-label="来源"
-              >
-                <h2 className="text-sm font-semibold">来源</h2>
-                {aiDigestSources.length === 0 ? (
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    暂无来源记录
-                  </p>
-                ) : (
-                  <div
-                    data-testid={
-                      aiDigestSourcesOverflow
-                        ? "ai-digest-sources-scroll-container"
-                        : undefined
-                    }
-                    className={cn(
-                      "mt-2",
-                      aiDigestSourcesOverflow &&
-                        // Cap the panel at roughly three source cards; longer lists scroll inside.
-                        `${AI_DIGEST_SOURCES_SCROLL_MAX_HEIGHT_CLASS} overflow-y-auto pr-1`,
-                    )}
-                  >
-                    <ul className="space-y-2">
-                      {aiDigestSources.map((source) => (
-                        <li
-                          key={`${article.id}-${source.articleId}-${source.position}`}
-                        >
-                          <button
-                            type="button"
-                            className={ARTICLE_SOURCE_BUTTON_CLASS_NAME}
-                            onClick={() => {
-                              void onAiDigestSourceClick(source);
-                            }}
-                          >
-                            <span className="min-w-0 space-y-0.5">
-                              <span className="block break-words text-sm font-medium text-foreground">
-                                {source.title}
-                              </span>
-                              <span className="block break-words text-xs text-muted-foreground">
-                                {source.feedTitle}
-                              </span>
-                            </span>
-                            <span className="shrink-0 text-xs text-muted-foreground">
-                              {formatRelativeTime(
-                                source.publishedAt ?? article.publishedAt,
-                                referenceTime,
-                              )}
-                            </span>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </section>
-            ) : null}
+    <div className="flex h-full flex-col bg-background text-foreground dark:bg-[linear-gradient(180deg,var(--glass-bg-light),transparent)]">
+      <ArticleHeader article={article} feed={feed} isDesktop={isDesktop} reserveTopSpace={reserveTopSpace} effectiveArticleTitleVisible={effectiveArticleTitleVisible} showBilingualTitle={showBilingualTitle} titleOriginal={titleOriginal} titleZh={titleZh} articleFiltered={articleFiltered} referenceTime={referenceTime} showDesktopStarButton={showDesktopStarButton} showDesktopFulltextButton={showDesktopFulltextButton} showDesktopTranslationButton={showDesktopTranslationButton} showDesktopAiSummaryButton={showDesktopAiSummaryButton} showDesktopMarkdownExportButton={showDesktopMarkdownExportButton} fulltextButtonDisabled={fulltextButtonDisabled} aiTranslationButtonDisabled={aiTranslationButtonDisabled} aiSummaryButtonDisabled={aiSummaryButtonDisabled} bodyTranslationEligible={bodyTranslationEligible} onOpenSearch={onOpenSearch} onToggleStar={toggleStar} onFulltextButtonClick={onFulltextButtonClick} onAiTranslationButtonClick={onAiTranslationButtonClick} onAiSummaryButtonClick={onAiSummaryButtonClick} onMarkdownExportButtonClick={onMarkdownExportButtonClick} />
+      <div className="relative flex-1 overflow-hidden" data-testid="article-viewport">
+        <div ref={scrollContainerRef} className="h-full overflow-y-auto" onScroll={onArticleScroll} data-testid="article-scroll-container">
+          <div className="w-full px-8 pb-12 pt-4 dark:bg-[radial-gradient(circle_at_top,color-mix(in_oklab,var(--color-primary)_7%,transparent),transparent_22%)] lg:pl-12 lg:pr-8" data-testid="article-content-shell">
+            <ArticleMediaSection articleVideoMeta={articleVideoMeta} playableMediaAttachment={playableMediaAttachment} titleOriginal={titleOriginal} articleId={currentArticleId} />
+            <DouyinVideoStats contentHtml={article?.content ?? ''} articleId={currentArticleId} />
+            <ArticleFulltextStatus fulltextLoading={fulltextLoading} />
+            <ArticleAiSummary articleId={article.id} aiSummaryText={aiSummaryText} aiSummaryExpanded={aiSummaryExpanded} aiSummaryLoading={aiSummaryLoading} aiSummaryMissingApiKey={aiSummaryMissingApiKey} aiSummaryWaitingFulltext={aiSummaryWaitingFulltext} aiSummarySessionRunning={aiSummarySessionRunning} aiSummaryFontSizeClass={aiSummaryFontSizeClass} aiSummaryLineHeightClass={aiSummaryLineHeightClass} fontFamilyClass={fontFamilyClass} aiSummaryLines={aiSummaryLines} aiSummaryTldrText={aiSummaryTldrText} aiSummaryContentId={aiSummaryContentId} toggleAiSummaryExpanded={toggleAiSummaryExpanded} />
+            <ArticleErrorCard showAsyncErrorCard={showAsyncErrorCard} aiSummaryFailed={aiSummaryFailed} aiTranslateFailed={aiTranslateFailed} aiSummaryErrorMessage={aiSummaryErrorMessage} aiTranslateErrorMessage={aiTranslateErrorMessage} onAiSummaryButtonClick={onAiSummaryButtonClick} onAiTranslationButtonClick={onAiTranslationButtonClick} />
+            <ArticleTranslationStatus hasAiTranslationContent={hasAiTranslationContent} aiTranslationLoading={aiTranslationLoading} aiTranslationMissingApiKey={aiTranslationMissingApiKey} aiTranslationTimedOut={aiTranslationTimedOut} aiTranslationWaitingFulltext={aiTranslationWaitingFulltext} />
+            <ArticleBody ref={articleContentRef} bodyHtml={highlightedBodyHtml} fontSizeClass={fontSizeClass} lineHeightClass={lineHeightClass} fontFamilyClass={fontFamilyClass} onClick={onArticleContentClick} onKeyDown={onArticleContentKeyDown} />
+            <ArticleDigestSources isAiDigestArticle={isAiDigestArticle} aiDigestSources={aiDigestSources} article={article} referenceTime={referenceTime} onAiDigestSourceClick={onAiDigestSourceClick} />
           </div>
         </div>
-
-        <ArticleScrollAssist
-          visible={showScrollAssist}
-          percent={effectiveScrollAssistPercent}
-          onBackToTop={handleBackToTop}
-        />
-        <ArticleImagePreview
-          key={activeImagePreview?.previewId ?? "empty"}
-          image={activeImagePreview}
-          open={Boolean(activeImagePreview)}
-          onOpenChange={(open) => {
-            if (!open) setImagePreview(null);
-          }}
-        />
+        <ArticleScrollAssist visible={showScrollAssist} percent={effectiveScrollAssistPercent} onBackToTop={handleBackToTop} />
+        <ArticleImagePreview key={activeImagePreview?.previewId ?? "empty"} image={activeImagePreview} open={Boolean(activeImagePreview)} onOpenChange={(o) => { if (!o) setImagePreview(null); }} />
       </div>
     </div>
   );

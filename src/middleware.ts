@@ -6,6 +6,14 @@ const PUBLIC_PATHS = [
   '/api/auth/login',
   '/api/auth/register',
   '/api/auth/setup',
+  '/api/video/serve',
+  '/api/video/material',
+  '/api/video/material-data',
+  '/api/video/download',
+  '/api/video/transcript',
+  // OpenChatCut 去剪辑需要免鉴权拉取工作区素材（仅本地开发用）
+  '/api/workspace/serve',
+  '/api/workspace/material-data',
 ];
 
 function isPublicApiPath(pathname: string): boolean {

@@ -1,5 +1,11 @@
 import type { Article, Feed, ViewType } from '../../../types';
-import { AI_DIGEST_VIEW_ID } from '@/lib/reader/view';
+import {
+  AI_DIGEST_VIEW_ID,
+  ARTICLE_VIEW_ID,
+  VIDEO_VIEW_ID,
+} from '@/lib/reader/view';
+import { getArticleVideoMeta } from '@/lib/media/video';
+import { getArticleDisplayKind } from '@/lib/reader/articleKind';
 import { getArticleSectionHeading, getLocalDayKey } from '../../../utils/date';
 
 export interface ArticlePreviewImage {
@@ -90,6 +96,15 @@ export function buildArticleListDerivedState(
       continue;
     }
 
+    const displayKind = getArticleDisplayKind(article);
+    if (
+      (input.selectedView === ARTICLE_VIEW_ID && displayKind === 'article') ||
+      (input.selectedView === VIDEO_VIEW_ID && displayKind === 'video')
+    ) {
+      viewScopedArticles.push(article);
+      continue;
+    }
+
     if (article.feedId === input.selectedView) {
       viewScopedArticles.push(article);
     }
@@ -169,7 +184,13 @@ export function buildArticleListDerivedState(
     });
     totalVirtualHeight += articleRowHeight;
 
-    const previewImage = article.previewImage ?? getPreviewImage(article.content);
+    const videoMeta = getArticleVideoMeta({
+      link: article.link,
+      content: article.content,
+      previewImage: article.previewImage,
+      mediaAttachments: article.mediaAttachments,
+    });
+    const previewImage = article.previewImage ?? videoMeta?.thumbnailUrl ?? getPreviewImage(article.content);
     if (!previewImage) {
       continue;
     }

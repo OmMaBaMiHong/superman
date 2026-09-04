@@ -13,6 +13,8 @@ const allowedAttributes: sanitizeHtml.IOptions['allowedAttributes'] = {
   ...sanitizeHtml.defaults.allowedAttributes,
   a: ['href', 'name', 'target', 'rel'],
   img: ['src', 'srcset', 'alt', 'title', 'width', 'height', 'loading', 'decoding'],
+  // 抖音工作台：允许 RSSHub 注入的视频统计标记（播放/点赞/评论/分享/收藏），供仪表盘解析。
+  div: ['data-douyin-stats', 'style'],
   source: ['src', 'type'],
   td: ['colspan', 'rowspan'],
   th: ['colspan', 'rowspan'],

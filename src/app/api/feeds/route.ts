@@ -8,6 +8,7 @@ import { listFeeds } from '@/server/domains/feeds/repositories/feedsRepo';
 import { isSafeExternalUrl } from '@/server/integrations/rss/ssrfGuard';
 import { createFeedWithCategoryResolution } from '@/server/domains/feeds/services/feedCategoryLifecycleService';
 import { normalizeFeedAutoTriggerFlags } from '@/lib/feeds/feedAutoTriggerPolicy';
+import { isRssHubUrl } from '@/lib/rsshub/url';
 import {
   writeUserOperationFailedLog,
   writeUserOperationSucceededLog,
@@ -21,12 +22,14 @@ const categoryInputShape = {
   categoryId: numericIdSchema.nullable().optional(),
   categoryName: z.string().trim().min(1).nullable().optional(),
 };
+const feedContentViewSchema = z.enum(['article', 'picture', 'video', 'social', 'digest']);
 
 const createFeedBodySchema = z
   .object({
     title: z.string().trim().min(1),
     url: z.string().trim().min(1).url(),
     siteUrl: z.string().trim().url().nullable().optional(),
+    view: feedContentViewSchema.optional(),
     ...categoryInputShape,
     fullTextOnOpenEnabled: z.boolean().optional(),
     fullTextOnFetchEnabled: z.boolean().optional(),
@@ -156,7 +159,10 @@ export async function POST(request: Request) {
       await writeFeedCreateFailure(error, session.userId);
       return fail(error);
     }
-    if (!(await isSafeExternalUrl(parsed.data.url, feedUrlSafetyOptions))) {
+    if (
+      !isRssHubUrl(parsed.data.url) &&
+      !(await isSafeExternalUrl(parsed.data.url, feedUrlSafetyOptions))
+    ) {
       const error = new ValidationError('Invalid request body', {
         url: '当前网络环境不允许访问该链接',
       });

@@ -1,5 +1,13 @@
 import type { Pool } from 'pg';
-import { AI_DIGEST_VIEW_ID, isRssSmartView } from '@/lib/reader/view';
+import {
+  AI_DIGEST_VIEW_ID,
+  GITHUB_VIEW_ID,
+  getContentViewForSmartMediaView,
+  isReaderContentPageView,
+  isRssSmartView,
+  isSmartMediaView,
+} from '@/lib/reader/view';
+import type { GithubArticleMeta, GithubContentType } from '@/types';
 import { getServerEnv } from '@/server/infra/env';
 import { buildImageProxyUrl, getOptionalImageProxySecret } from '@/server/integrations/media/imageProxyUrl';
 import { evaluateArticleBodyTranslationEligibility } from '@/server/integrations/ai/articleTranslationEligibility';
@@ -76,27 +84,48 @@ export function buildArticleFilter(input: {
   unreadOnly?: boolean;
   includeFiltered?: boolean;
 }): { whereSql: string; params: unknown[]; limit: number } {
+  // 内容页视图（发现 / 知识库）不走 snapshot 数据语义：直接返回空结果，避免
+  // 落到「具体 feed」分支把 'discover'/'knowledge' 当 feed_id 比较触发类型错误 500。
+  // 前端 appStore.loadSnapshot 已有内容页早退守卫，这里是后端兜底。
+  if (isReaderContentPageView(input.view)) {
+    return {
+      whereSql: 'where false',
+      params: [],
+      limit: Math.min(
+        MAX_LIMIT,
+        Math.max(1, Math.floor(input.limit ?? DEFAULT_LIMIT)),
+      ),
+    };
+  }
+
   const whereParts: string[] = ['articles.user_id = $1'];
   const params: unknown[] = [input.userId ?? '1'];
   let paramIndex = 2;
 
   if (input.view === AI_DIGEST_VIEW_ID) {
-    whereParts.push("feed_id in (select id from feeds where user_id = $1 and kind = 'ai_digest')");
+    whereParts.push("articles.feed_id in (select id from feeds where user_id = $1 and kind = 'ai_digest')");
+  } else if (input.view === GITHUB_VIEW_ID) {
+    whereParts.push("articles.feed_id in (select id from feeds where user_id = $1 and kind = 'github')");
   } else if (input.view === 'unread') {
-    whereParts.push('is_read = false');
+    whereParts.push('articles.is_read = false');
   } else if (input.view === 'starred') {
-    whereParts.push('is_starred = true');
+    whereParts.push('articles.is_starred = true');
+  } else if (isSmartMediaView(input.view)) {
+    whereParts.push(
+      `articles.feed_id in (select id from feeds where user_id = $1 and kind = 'rss' and feeds.view = $${paramIndex++})`,
+    );
+    params.push(getContentViewForSmartMediaView(input.view));
   } else if (input.view !== 'all') {
-    whereParts.push(`feed_id = $${paramIndex++}`);
+    whereParts.push(`articles.feed_id = $${paramIndex++}`);
     params.push(input.view);
   }
 
   if (isRssSmartView(input.view)) {
-    whereParts.push("feed_id in (select id from feeds where user_id = $1 and kind = 'rss')");
+    whereParts.push("articles.feed_id in (select id from feeds where user_id = $1 and kind = 'rss')");
   }
 
   if (input.unreadOnly) {
-    whereParts.push('is_read = false');
+    whereParts.push('articles.is_read = false');
   }
 
   const isSpecificFeedView =
@@ -104,18 +133,19 @@ export function buildArticleFilter(input: {
     input.view !== 'unread' &&
     input.view !== 'starred' &&
     input.view !== AI_DIGEST_VIEW_ID &&
+    input.view !== GITHUB_VIEW_ID &&
     !isRssSmartView(input.view);
   const visibleStatuses =
     isSpecificFeedView && input.includeFiltered
       ? ['passed', 'error', 'filtered']
       : ['passed', 'error'];
-  whereParts.push(`filter_status = any($${paramIndex++}::text[])`);
+  whereParts.push(`articles.filter_status = any($${paramIndex++}::text[])`);
   params.push(visibleStatuses);
 
   const decodedCursor = decodeCursor(input.cursor);
   if (decodedCursor) {
     whereParts.push(
-      `(coalesce(published_at, 'epoch'::timestamptz), articles.id) < ($${paramIndex++}, $${paramIndex++})`,
+      `(coalesce(articles.published_at, 'epoch'::timestamptz), articles.id) < ($${paramIndex++}, $${paramIndex++})`,
     );
     params.push(decodedCursor.publishedAt, decodedCursor.id);
   }
@@ -163,11 +193,13 @@ export interface ReaderSnapshotArticleItem {
     finishedAt: string | null;
     updatedAt: string;
   } | null;
+  /** kind='github' 的条目附加信息，非 GitHub 条目为 null（ADR-03 复用快照，零改造三栏渲染）。 */
+  githubMeta: GithubArticleMeta | null;
 }
 
 export interface ReaderSnapshotFeed {
   id: string;
-  kind: 'rss' | 'ai_digest';
+  kind: 'rss' | 'ai_digest' | 'github';
   provider: 'local_rss' | 'fever';
   remoteManaged: boolean;
   remoteSource: 'fever' | null;
@@ -281,6 +313,10 @@ type ArticleQueryRow = ReaderSnapshotArticleItem & {
   aiSummarySessionStartedAt: string | null;
   aiSummarySessionFinishedAt: string | null;
   aiSummarySessionUpdatedAt: string | null;
+  ghType: GithubContentType | null;
+  ghTagName: string | null;
+  ghIsPrerelease: boolean | null;
+  ghHtmlUrl: string | null;
 };
 
 async function queryArticleRows(
@@ -334,6 +370,10 @@ async function queryArticleRows(
         ai_summary_session.started_at as "aiSummarySessionStartedAt",
         ai_summary_session.finished_at as "aiSummarySessionFinishedAt",
         ai_summary_session.updated_at as "aiSummarySessionUpdatedAt",
+        gai.gh_type as "ghType",
+        gai.tag_name as "ghTagName",
+        gai.is_prerelease as "ghIsPrerelease",
+        gai.html_url as "ghHtmlUrl",
         coalesce(articles.published_at, 'epoch'::timestamptz) as "sortPublishedAt"
       from articles
       inner join feeds on feeds.id = articles.feed_id
@@ -359,6 +399,9 @@ async function queryArticleRows(
           updated_at desc
         limit 1
       ) ai_summary_session on true
+      left join github_article_items gai
+        on gai.article_id = articles.id
+        and gai.user_id = articles.user_id
       ${whereSql}
       ${whereSql ? 'and' : 'where'} ${ACTIVE_FEVER_ARTICLE_SQL}
       order by "sortPublishedAt" desc, articles.id desc
@@ -483,6 +526,10 @@ export async function getReaderSnapshot(
           aiSummarySessionStartedAt,
           aiSummarySessionFinishedAt,
           aiSummarySessionUpdatedAt,
+          ghType,
+          ghTagName,
+          ghIsPrerelease,
+          ghHtmlUrl,
           ...rest
         } = item;
         const eligibility = evaluateArticleBodyTranslationEligibility({
@@ -497,6 +544,15 @@ export async function getReaderSnapshot(
           previewImage: rewritePreviewImage(rest.previewImage),
           bodyTranslationEligible: eligibility.bodyTranslationEligible,
           bodyTranslationBlockedReason: eligibility.bodyTranslationBlockedReason,
+          githubMeta:
+            ghType !== null
+              ? {
+                  ghType,
+                  tagName: ghTagName,
+                  isPrerelease: Boolean(ghIsPrerelease),
+                  htmlUrl: ghHtmlUrl ?? '',
+                }
+              : null,
           aiSummarySession:
             aiSummarySessionId &&
             aiSummarySessionStatus &&

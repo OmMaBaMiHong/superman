@@ -2,6 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearApiErrorNotifier, setApiErrorNotifier } from '@/lib/api/apiErrorNotifier';
 import { validateRssUrl } from '@/features/feeds/utils/rssValidation';
 
+function getFetchUrl(input: unknown): string {
+  if (typeof input === 'string') return input;
+  if (input instanceof Request) return input.url;
+  return String(input);
+}
+
 describe('validateRssUrl', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -28,6 +34,29 @@ describe('validateRssUrl', () => {
     const result = await validateRssUrl('https://example.com/success.xml');
     expect(result.ok).toBe(true);
     expect(result.kind).toBe('rss');
+  });
+
+  it('allows rsshub urls to be validated by the server', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({ ok: true, data: { valid: true, kind: 'rss', title: 'Andrej Karpathy - YouTube' } }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    );
+
+    const result = await validateRssUrl('rsshub://youtube/user/@AndrejKarpathy');
+
+    expect(result).toMatchObject({
+      ok: true,
+      kind: 'rss',
+      title: 'Andrej Karpathy - YouTube',
+    });
+    expect(getFetchUrl(fetchMock.mock.calls[0]?.[0])).toContain(
+      'url=rsshub%3A%2F%2Fyoutube%2Fuser%2F%40AndrejKarpathy',
+    );
   });
 
   it('maps 401/403/timeout/not-feed/dns-error to deterministic error codes', async () => {

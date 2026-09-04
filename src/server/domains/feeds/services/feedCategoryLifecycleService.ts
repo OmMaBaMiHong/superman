@@ -1,4 +1,5 @@
 import type { Pool, PoolClient } from 'pg';
+import type { FeedContentView } from '@/types';
 import {
   createCategory,
   deleteCategory,
@@ -40,6 +41,7 @@ export interface CreateFeedWithCategoryInput extends CategoryResolutionInput {
   titleTranslateEnabled?: boolean;
   bodyTranslateEnabled?: boolean;
   articleListDisplayMode?: 'card' | 'list';
+  view?: FeedContentView;
   fetchIntervalMinutes?: number;
 }
 
@@ -58,6 +60,7 @@ export interface UpdateFeedWithCategoryInput extends CategoryResolutionInput {
   titleTranslateEnabled?: boolean;
   bodyTranslateEnabled?: boolean;
   articleListDisplayMode?: 'card' | 'list';
+  view?: FeedContentView;
   fetchIntervalMinutes?: number;
 }
 

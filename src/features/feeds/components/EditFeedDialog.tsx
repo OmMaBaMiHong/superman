@@ -22,6 +22,7 @@ export default function EditFeedDialog({ open, feed, categories, onOpenChange, o
         title: feed.title,
         url: feed.url,
         siteUrl: feed.siteUrl ?? null,
+        view: feed.view ?? 'article',
         categoryId: feed.categoryId ?? null,
       }}
       readOnlyFields={{ title: isRemoteManaged, url: isRemoteManaged, category: isRemoteManaged }}

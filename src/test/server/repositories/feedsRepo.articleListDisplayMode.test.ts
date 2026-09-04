@@ -39,4 +39,29 @@ describe('feedsRepo (articleListDisplayMode)', () => {
     expect(sql).toContain('articleListDisplayMode');
     expect(sql).toContain('url = $');
   });
+
+  it('persists feed content view separately from category', async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [{ id: 'f1' }] });
+    const pool = { query } as unknown as Pool;
+    const mod = (await import('@/server/domains/feeds/repositories/feedsRepo')) as typeof import('@/server/domains/feeds/repositories/feedsRepo');
+
+    await mod.createFeed(pool, {
+      title: 'A',
+      url: 'https://example.com/rss.xml',
+      categoryId: 'cat-1',
+      view: 'video',
+    });
+    await mod.updateFeed(pool, 'f1', { view: 'social' });
+
+    const createSql = String(query.mock.calls[0]?.[0] ?? '');
+    const createValues = query.mock.calls[0]?.[1] as unknown[];
+    const updateSql = String(query.mock.calls[1]?.[0] ?? '');
+    const updateValues = query.mock.calls[1]?.[1] as unknown[];
+
+    expect(createSql).toContain('view');
+    expect(createSql).toContain('category_id');
+    expect(createValues).toContain('video');
+    expect(updateSql).toContain('view = $');
+    expect(updateValues).toContain('social');
+  });
 });

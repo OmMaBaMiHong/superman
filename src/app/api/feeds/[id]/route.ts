@@ -15,6 +15,7 @@ import {
 } from '@/server/domains/feeds/services/feedCategoryLifecycleService';
 import { getFeedById } from '@/server/domains/feeds/repositories/feedsRepo';
 import { normalizeFeedAutoTriggerFlags } from '@/lib/feeds/feedAutoTriggerPolicy';
+import { isRssHubUrl } from '@/lib/rsshub/url';
 import {
   writeUserOperationFailedLog,
   writeUserOperationSucceededLog,
@@ -32,12 +33,14 @@ const categoryInputShape = {
   categoryId: numericIdSchema.nullable().optional(),
   categoryName: z.string().trim().min(1).nullable().optional(),
 };
+const feedContentViewSchema = z.enum(['article', 'picture', 'video', 'social', 'digest']);
 
 const patchBodySchema = z
   .object({
     title: z.string().trim().min(1).optional(),
     url: z.string().trim().min(1).url().optional(),
     siteUrl: z.string().trim().url().nullable().optional(),
+    view: feedContentViewSchema.optional(),
     enabled: z.boolean().optional(),
     ...categoryInputShape,
     fullTextOnOpenEnabled: z.boolean().optional(),
@@ -216,6 +219,7 @@ export async function PATCH(
     actionKey = resolveFeedPatchActionKey(bodyParsed.data);
     if (
       typeof bodyParsed.data.url !== 'undefined' &&
+      !isRssHubUrl(bodyParsed.data.url) &&
       !(await isSafeExternalUrl(bodyParsed.data.url, feedUrlSafetyOptions))
     ) {
       const error = new ValidationError('Invalid request body', {

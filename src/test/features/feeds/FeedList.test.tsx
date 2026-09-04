@@ -55,7 +55,11 @@ import FeedList from '../../../features/feeds/components/FeedList';
 import { ToastHost } from '../../../features/toast/components/ToastHost';
 import { useAppStore } from '../../../store/appStore';
 import { READER_PANE_ACTIVE_ITEM_CLASS_NAME } from '@/lib/ui/designSystem';
-import { AI_DIGEST_VIEW_ID } from '@/lib/reader/view';
+import {
+  AI_DIGEST_VIEW_ID,
+  ARTICLE_VIEW_ID,
+  VIDEO_VIEW_ID,
+} from '@/lib/reader/view';
 
 const LEFT_RAIL_UNREAD_BADGE_CLASS_NAME =
   'bg-[color-mix(in_oklab,var(--color-background)_86%,white_14%)]';
@@ -138,6 +142,7 @@ describe('FeedList manage', () => {
           titleTranslateEnabled: Boolean(feed.titleTranslateEnabled),
           bodyTranslateEnabled: Boolean(feed.bodyTranslateEnabled),
           articleListDisplayMode: feed.articleListDisplayMode ?? 'card',
+          view: feed.view ?? 'article',
           categoryId: feed.categoryId ?? null,
           fetchIntervalMinutes: 30,
           lastFetchStatus: feed.fetchStatus ?? null,
@@ -208,6 +213,7 @@ describe('FeedList manage', () => {
           bodyTranslateOnOpenEnabled: false,
           titleTranslateEnabled: false,
           bodyTranslateEnabled: false,
+          view: 'article',
           categoryId: null,
           category: null,
         },
@@ -305,6 +311,10 @@ describe('FeedList manage', () => {
                 (body.articleListDisplayMode as 'card' | 'list' | undefined) ??
                 useAppStore.getState().feeds[0]?.articleListDisplayMode ??
                 'card',
+              view:
+                (body.view as string | undefined) ??
+                useAppStore.getState().feeds[0]?.view ??
+                'article',
               categoryId: Object.prototype.hasOwnProperty.call(body, 'categoryId')
                 ? ((body.categoryId as string | null | undefined) ?? null)
                 : (useAppStore.getState().feeds[0]?.categoryId ?? null),
@@ -590,6 +600,7 @@ describe('FeedList manage', () => {
               titleTranslateEnabled: Boolean(useAppStore.getState().feeds[0]?.titleTranslateEnabled),
               bodyTranslateEnabled: Boolean(useAppStore.getState().feeds[0]?.bodyTranslateEnabled),
               articleListDisplayMode: useAppStore.getState().feeds[0]?.articleListDisplayMode ?? 'card',
+              view: useAppStore.getState().feeds[0]?.view ?? 'article',
               categoryId: useAppStore.getState().feeds[0]?.categoryId ?? null,
               fetchIntervalMinutes: 30,
             },
@@ -750,7 +761,7 @@ describe('FeedList manage', () => {
     expect(iconImg?.getAttribute('src')).toBe('/api/feeds/feed-1/favicon');
   });
 
-  it('clears 全部文章 active classes after selecting a feed', async () => {
+  it('clears 全部 tab active classes after selecting a feed', async () => {
     useAppStore.setState({
       selectedView: 'all',
       selectedArticleId: null,
@@ -758,11 +769,10 @@ describe('FeedList manage', () => {
 
     renderWithNotifications();
 
-    const allArticlesButton = screen.getByRole('button', { name: '全部文章' });
+    const allArticlesButton = screen.getByRole('tab', { name: '全部' });
     const feedButton = screen.getByRole('button', { name: /My Feed.*2/ });
 
     expect(allArticlesButton).toHaveClass('bg-primary/10', 'text-primary');
-    expect(allArticlesButton.className).toContain(READER_PANE_ACTIVE_ITEM_CLASS_NAME);
     expect(feedButton).not.toHaveClass('bg-primary/10', 'text-primary');
 
     fireEvent.click(feedButton);
@@ -784,7 +794,7 @@ describe('FeedList manage', () => {
     renderWithNotifications();
 
     const starredArticlesButton = screen.getByRole('button', { name: '收藏文章' });
-    const aiDigestArticlesButton = screen.getByRole('button', { name: '智能报告' });
+    const aiDigestArticlesButton = screen.getByRole('tab', { name: '智能报告' });
     const categoryButton = screen.getByRole('button', { name: /未分类/ });
     const feedButton = screen.getByRole('button', { name: /My Feed.*2/ });
 
@@ -795,23 +805,93 @@ describe('FeedList manage', () => {
     expect(screen.queryByRole('button', { name: '未读文章' })).not.toBeInTheDocument();
   });
 
-  it('renders smart views in 全部文章、收藏文章、智能报告 order', () => {
+  it('renders view tabs as a vertical list and keeps 收藏文章 outside the list', () => {
     renderWithNotifications();
 
-    const allArticlesButton = screen.getByRole('button', { name: '全部文章' });
+    const tabs = screen.getByTestId('feed-rail-level2');
+    const allArticlesButton = within(tabs).getByRole('tab', { name: '全部' });
+    const articleButton = within(tabs).getByRole('tab', { name: '图文' });
+    const videoButton = within(tabs).getByRole('tab', { name: '视频' });
+    const aiDigestArticlesButton = within(tabs).getByRole('tab', { name: '智能报告' });
     const starredArticlesButton = screen.getByRole('button', { name: '收藏文章' });
-    const aiDigestArticlesButton = screen.getByRole('button', { name: '智能报告' });
 
     expect(screen.queryByRole('button', { name: '未读文章' })).not.toBeInTheDocument();
-    expect(allArticlesButton.compareDocumentPosition(starredArticlesButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+    expect(within(tabs).queryByRole('button', { name: '收藏文章' })).not.toBeInTheDocument();
+    expect(allArticlesButton.compareDocumentPosition(articleButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
-    expect(
-      starredArticlesButton.compareDocumentPosition(aiDigestArticlesButton) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(articleButton.compareDocumentPosition(videoButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(videoButton.compareDocumentPosition(aiDigestArticlesButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(aiDigestArticlesButton.compareDocumentPosition(starredArticlesButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
   });
 
-  it('shows badges for 全部文章、收藏文章 and 智能报告 smart views', () => {
+  it('selects view tabs from the left rail list', () => {
+    renderWithNotifications();
+
+    fireEvent.click(screen.getByRole('tab', { name: '图文' }));
+    expect(useAppStore.getState().selectedView).toBe(ARTICLE_VIEW_ID);
+
+    fireEvent.click(screen.getByRole('tab', { name: '视频' }));
+    expect(useAppStore.getState().selectedView).toBe(VIDEO_VIEW_ID);
+  });
+
+  it('renders view tabs as a vertical list in the left rail', () => {
+    renderWithNotifications();
+
+    const tabs = screen.getByTestId('feed-rail-level2');
+
+    expect(tabs).toHaveAttribute('role', 'tablist');
+    expect(tabs).toHaveAttribute('aria-orientation', 'vertical');
+    expect(within(tabs).getByRole('tab', { name: /图文/ })).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.click(within(tabs).getByRole('tab', { name: /视频/ }));
+
+    expect(within(tabs).getByRole('tab', { name: /视频/ })).toHaveAttribute('aria-selected', 'true');
+    expect(useAppStore.getState().selectedView).toBe(VIDEO_VIEW_ID);
+  });
+
+  it('filters the feed tree by the active view tab', () => {
+    useAppStore.setState((state) => ({
+      ...state,
+      feeds: [
+        {
+          ...state.feeds[0],
+          id: 'feed-article',
+          title: 'Article Feed',
+          view: 'article',
+          unreadCount: 1,
+        },
+        {
+          ...state.feeds[0],
+          id: 'feed-video',
+          title: 'Video Feed',
+          view: 'video',
+          unreadCount: 2,
+        },
+      ],
+      selectedView: 'all',
+      selectedArticleId: null,
+    }));
+
+    renderWithNotifications();
+
+    expect(screen.getByRole('button', { name: /Article Feed.*1/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Video Feed.*2/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: '视频' }));
+
+    expect(screen.queryByRole('button', { name: /Article Feed/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Video Feed.*2/ })).toBeInTheDocument();
+    expect(useAppStore.getState().selectedView).toBe(VIDEO_VIEW_ID);
+  });
+
+  it('shows badges for 全部, 收藏文章 and 智能报告 views', () => {
     useAppStore.setState((state) => ({
       ...state,
       feeds: [
@@ -835,6 +915,7 @@ describe('FeedList manage', () => {
           bodyTranslateOnOpenEnabled: false,
           titleTranslateEnabled: false,
           bodyTranslateEnabled: false,
+          view: 'digest',
           categoryId: null,
           category: null,
         },
@@ -880,10 +961,10 @@ describe('FeedList manage', () => {
 
     renderWithNotifications();
 
-    const allArticlesButton = screen.getByRole('button', { name: '全部文章' });
+    const allArticlesButton = screen.getByRole('tab', { name: '全部' });
     const starredArticlesButton = screen.getByRole('button', { name: '收藏文章' });
-    const aiDigestArticlesButton = screen.getByRole('button', { name: '智能报告' });
-    const allArticlesBadge = within(allArticlesButton).getByText('5');
+    const aiDigestArticlesButton = screen.getByRole('tab', { name: '智能报告' });
+    const allArticlesBadge = within(allArticlesButton).getByText('2');
     const starredArticlesBadge = within(starredArticlesButton).getByText('2');
     const aiDigestBadge = within(aiDigestArticlesButton).getByText('3');
 
@@ -922,6 +1003,7 @@ describe('FeedList manage', () => {
           bodyTranslateOnOpenEnabled: false,
           titleTranslateEnabled: false,
           bodyTranslateEnabled: false,
+          view: 'digest',
           categoryId: null,
           category: null,
         },
@@ -989,10 +1071,10 @@ describe('FeedList manage', () => {
 
     renderWithNotifications();
 
-    const allArticlesButton = screen.getByRole('button', { name: '全部文章' });
-    const aiDigestArticlesButton = screen.getByRole('button', { name: '智能报告' });
+    const allArticlesButton = screen.getByRole('tab', { name: '全部' });
+    const aiDigestArticlesButton = screen.getByRole('tab', { name: '智能报告' });
 
-    expect(within(allArticlesButton).getByText('5')).toBeInTheDocument();
+    expect(within(allArticlesButton).getByText('2')).toBeInTheDocument();
     expect(within(aiDigestArticlesButton).getByText('3')).toBeInTheDocument();
 
     act(() => {
@@ -1000,7 +1082,7 @@ describe('FeedList manage', () => {
     });
 
     await waitFor(() => {
-      expect(within(allArticlesButton).getByText('4')).toBeInTheDocument();
+      expect(within(allArticlesButton).getByText('2')).toBeInTheDocument();
       expect(within(aiDigestArticlesButton).getByText('2')).toBeInTheDocument();
     });
   });
@@ -1013,7 +1095,7 @@ describe('FeedList manage', () => {
 
     renderWithNotifications();
 
-    fireEvent.click(screen.getByRole('button', { name: '智能报告' }));
+    fireEvent.click(screen.getByRole('tab', { name: '智能报告' }));
 
     await waitFor(() => {
       expect(useAppStore.getState().selectedView).toBe(AI_DIGEST_VIEW_ID);

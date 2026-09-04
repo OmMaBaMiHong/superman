@@ -1,0 +1,104 @@
+%% ============================================================
+%% FeedFuse GitHub 模块 — 核心时序图（Release 抓取主链路）
+%% 其余三张（添加订阅 / 阅读器加载 / Token 配置）见 arch-github-module.md
+%% ============================================================
+sequenceDiagram
+    autonumber
+    participant CRON as pg-boss schedule<br/>(* * * * *)
+    participant TICK as githubSyncDue handler
+    participant SR as githubSubscriptionsRepo
+    participant BOSS as pg-boss
+    participant WF as githubFetchWorker
+    participant ING as githubIngestService
+    participant TOK as githubTokenService
+    participant SB as secretBox
+    participant GC as githubClient
+    participant GH as api.github.com
+    participant RL as githubRateLimit
+    participant MD as githubMarkdown
+    participant SAN as sanitizeContent
+    participant AR as articlesRepo
+    participant IR as githubArticleItemsRepo
+    participant FR as feedsRepo
+    participant BO as githubBackoff
+
+    CRON->>TICK: github.sync_due
+    TICK->>SR: listDueSubscriptions(now, limit=200)
+    Note over SR: where feeds.enabled = true<br/>and (next_sync_at is null or next_sync_at <= now)<br/>and (rate_limited_until is null or rate_limited_until <= now)
+    SR-->>TICK: DueRow[]
+    loop 每个到期订阅
+        TICK->>BOSS: send('github.fetch_repo', { userId, feedId })
+        Note over BOSS: singletonKey=userId:feedId, singletonSeconds=300<br/>→ 天然去重，不会重复投递
+    end
+
+    BOSS->>WF: github.fetch_repo job
+    WF->>ING: syncRepository({ pool, boss, feedId, userId, force })
+
+    ING->>SR: getSubscriptionByFeedId(feedId, userId)
+    SR-->>ING: sub{ owner, repo, releasesEtag, includePrerelease, ... }
+    alt feed 已停用 / 不存在
+        ING-->>WF: { inserted:0, errorMessage:'订阅源已停用' }
+    end
+    alt 处于限流熔断期且非 force
+        ING-->>WF: { inserted:0, errorCode:'rate_limited' }
+    end
+
+    ING->>SR: markSyncAttempt(feedId, now)
+
+    ING->>TOK: getGithubToken(pool, userId)
+    TOK->>SB: open(github_token_encrypted, key)
+    SB-->>TOK: plaintext token
+    TOK-->>ING: token | ''
+
+    ING->>GC: listReleases({ owner, repo, etag: releasesEtag, token, perPage:30 })
+    GC->>GH: GET /repos/{owner}/{repo}/releases<br/>Accept: application/vnd.github.full+json<br/>If-None-Match: {etag}<br/>Authorization: Bearer {token}
+    GH-->>GC: 200 / 304 / 403 / 404
+    GC->>RL: parseRateLimitHeaders(headers)
+    RL-->>GC: { limit, remaining, resetAt, retryAfterSeconds }
+
+    alt 304 Not Modified（不消耗配额）
+        GC-->>ING: { status:304, releases:[], etag, rateLimit }
+        ING->>BO: computeNextSyncAt({ ok:true, intervalMinutes })
+        ING->>SR: recordSyncResult({ notModified:true, nextSyncAt, failures:0 })
+        ING->>FR: recordFeedFetchResult({ status:304, error:null })
+        ING-->>WF: { inserted:0, notModified:true }
+    else 403 限流 / 429
+        GC-->>ING: throw GithubApiError('rate_limited', rateLimit)
+        ING->>BO: computeNextSyncAt({ rateLimitedUntil: resetAt })
+        ING->>SR: recordRateLimit({ rateLimitedUntil, remaining, nextSyncAt })
+        ING->>FR: recordFeedFetchResult({ status:403, error:'GitHub 请求已达上限，将在 xx:xx 后自动恢复' })
+        ING-->>WF: { errorCode:'rate_limited' }
+        Note over WF: 不 throw —— 避免 pg-boss 重试打爆配额
+    else 404 / 401
+        GC-->>ING: throw GithubApiError('not_found'|'unauthorized')
+        ING->>BO: computeNextSyncAt({ failures: n+1 })  指数退避
+        ING->>SR: recordSyncResult({ errorCode, failures:n+1, nextSyncAt })
+        ING->>FR: recordFeedFetchResult({ error: 中文提示 })
+        ING-->>WF: { errorCode }
+    else 200 OK
+        GC-->>ING: { status:200, releases:[...], etag:newEtag, rateLimit }
+
+        loop 每个 release（按 published_at 升序处理）
+            ING->>ING: 跳过 draft；prerelease 且 !includePrerelease → 跳过
+            ING->>MD: renderReleaseBody({ bodyHtml, body, baseUrl:htmlUrl })
+            MD->>MD: bodyHtml 存在 ? 直接用 : marked.parse(body)
+            MD->>SAN: sanitizeContent(html, { baseUrl })
+            SAN-->>MD: safeHtml
+            MD-->>ING: contentHtml
+            ING->>ING: toReleaseDraft() → dedupeKey = 'github:release:{release.id}'
+            ING->>AR: insertArticleIgnoreDuplicate({<br/>feedId, userId, dedupeKey, title, link:htmlUrl,<br/>author, publishedAt, contentHtml,<br/>summary, filterStatus:'passed' })
+            Note over AR: on conflict (feed_id, dedupe_key) do nothing<br/>filterStatus='passed' → 跳过 AI 过滤管线
+            alt 新条目
+                AR-->>ING: ArticleRow{ id }
+                ING->>IR: insertArticleItem({ articleId, feedId, userId,<br/>ghType:'release', ghId, tagName, isPrerelease, bodyMarkdown, htmlUrl })
+                ING->>ING: inserted++
+            else 已存在
+                AR-->>ING: null → skipped++
+            end
+        end
+
+        ING->>SR: recordSyncResult({ etag:newEtag, lastSyncedAt:now,<br/>lastReleasePublishedAt, failures:0, rateLimitRemaining, nextSyncAt })
+        ING->>FR: recordFeedFetchResult({ status:200, error:null })
+        ING-->>WF: { inserted, skipped }
+    end
+    WF-->>BOSS: job 完成

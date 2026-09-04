@@ -12,11 +12,11 @@ import { useTagStore } from './hooks/useTagStore';
 const TAG_COLORS = ['gray', 'red', 'blue', 'green', 'yellow'] as const;
 
 const TAG_COLOR_HEX: Record<string, string> = {
-  gray: '#9ca3af',
-  red: '#f87171',
-  blue: '#60a5fa',
-  green: '#4ade80',
-  yellow: '#facc15',
+  gray: 'var(--color-muted-foreground)',
+  red: 'var(--color-error)',
+  blue: 'var(--color-info)',
+  green: 'var(--color-success)',
+  yellow: 'var(--color-warning)',
 };
 
 function resolveTagColor(color: string | null | undefined): string {

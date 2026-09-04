@@ -1,6 +1,12 @@
-export type FeedKind = 'rss' | 'ai_digest';
+export type FeedKind = 'rss' | 'ai_digest' | 'github';
 export type FeedProvider = 'local_rss' | 'fever';
-export type FeedContentView = 'article' | 'picture' | 'video' | 'social' | 'digest';
+export type FeedContentView =
+  | 'article'
+  | 'picture'
+  | 'video'
+  | 'social'
+  | 'digest'
+  | 'github';
 export type UserType = 'initial_admin' | 'admin' | 'member';
 
 export interface Feed {
@@ -75,6 +81,8 @@ export interface Article {
   bodyTranslationBlockedReason?: string | null;
   aiDigestSources?: ArticleAiDigestSource[];
   mediaAttachments?: ArticleMediaAttachment[];
+  /** kind='github' 的条目附加信息，非 GitHub 条目为 undefined/null */
+  githubMeta?: GithubArticleMeta | null;
 }
 
 export interface ArticleAiDigestSource {
@@ -179,7 +187,9 @@ export type SystemLogCategory =
   | 'external_api'
   | 'ai_summary'
   | 'ai_translate'
-  | 'ai_digest';
+  | 'ai_digest'
+  | 'github'
+  | 'oauth';
 
 export interface LoggingSettings {
   enabled: boolean;
@@ -243,6 +253,144 @@ export interface Tag {
   name: string;
   color: string;
   createdAt: string;
+}
+
+// === GitHub ===
+/**
+ * GitHub 条目类型。
+ *
+ * MVP 行为只开 `release`（API 层用 zod 限制），
+ * 但类型与数据库 CHECK 约束提前按四值落地，P1 扩展 Issue/PR 时零迁移。
+ */
+export type GithubContentType = 'release' | 'issue' | 'pr' | 'commit';
+
+/** 仓库订阅的同步健康状态（R05 状态 badge 四态）。 */
+export type GithubSyncStatus = 'idle' | 'syncing' | 'rate_limited' | 'error';
+
+/** 设置页仓库卡片使用的前端模型。`id` 即 `feedId`。 */
+export interface GithubRepoSubscription {
+  id: string;
+  feedId: string;
+  owner: string;
+  repo: string;
+  /** `${owner}/${repo}` */
+  fullName: string;
+  /** feeds.title，用户可改 */
+  title: string;
+  htmlUrl: string;
+  avatarUrl: string | null;
+  description: string | null;
+  language: string | null;
+  stargazers: number | null;
+  contentTypes: GithubContentType[];
+  includePrerelease: boolean;
+  enabled: boolean;
+  fetchIntervalMinutes: number;
+  categoryId: string | null;
+  unreadCount: number;
+  status: GithubSyncStatus;
+  lastSyncedAt: string | null;
+  nextSyncAt: string | null;
+  rateLimitedUntil: string | null;
+  lastError: string | null;
+  lastErrorCode: string | null;
+}
+
+export interface GithubRateLimitStatus {
+  limit: number | null;
+  remaining: number | null;
+  resetAt: string | null;
+}
+
+export interface GithubTokenStatus {
+  hasToken: boolean;
+  /** 形如 `ghp_****cdef`，永不返回明文 */
+  maskedToken: string | null;
+  rateLimit: GithubRateLimitStatus | null;
+}
+
+/** 中栏 / 右栏渲染 GitHub 条目所需的附加信息。 */
+export interface GithubArticleMeta {
+  ghType: GithubContentType;
+  tagName: string | null;
+  isPrerelease: boolean;
+  htmlUrl: string;
+}
+
+// === OAuth 三方授权中心 ===
+/**
+ * 四家平台标识，与服务端 `OAUTH_PROVIDER_IDS` 一一对应。
+ * 新增平台时需同步扩此处、服务端 registry 与 DB CHECK 约束。
+ */
+export type OAuthProviderId = 'github' | 'wechat' | 'douyin' | 'xiaohongshu';
+
+/** 连接状态机，与服务端 `OAUTH_CONNECTION_STATUSES` 一一对应。 */
+export type OAuthConnectionStatus = 'active' | 'expired' | 'revoked';
+
+/**
+ * 平台配置状态（设置页卡片模型）。
+ *
+ * 安全约定：本结构**绝不含** client secret 的明文或密文，
+ * 只有 `maskedClientSecret`（形如 `abcd****wxyz`）。
+ */
+export interface OAuthProviderConfigStatus {
+  provider: OAuthProviderId;
+  displayName: string;
+  configured: boolean;
+  /** 公开值，明文返回。 */
+  clientId: string;
+  /** 形如 `abcd****wxyz`，永不返回明文。 */
+  maskedClientSecret: string | null;
+  enabled: boolean;
+  /** 服务端单向推导，只读展示供用户复制到平台后台。 */
+  redirectUri: string;
+  supportsPkce: boolean;
+  requiresExactRedirectUri: boolean;
+}
+
+/**
+ * 已授权连接的对外视图。
+ *
+ * 安全约定：本结构**结构性地**不存在任何 token 字段，
+ * 前端从设计上就拿不到凭据（而非依赖运行时过滤）。
+ */
+export interface OAuthConnectionView {
+  id: string;
+  provider: OAuthProviderId;
+  status: OAuthConnectionStatus;
+  displayName: string | null;
+  avatarUrl: string | null;
+  /** ISO 8601 UTC。 */
+  authorizedAt: string;
+  accessTokenExpiresAt: string | null;
+  canRefresh: boolean;
+}
+
+/** 发起授权的返回值，前端拿到后自行 `location.assign`。 */
+export interface OAuthAuthorizeResult {
+  authorizeUrl: string;
+}
+
+/** 回调 302 回站后 query 中携带的结果标记。 */
+export type OAuthCallbackOutcome = 'success' | 'denied' | 'failed';
+
+/** RSSHub 平台 Cookie 授权。 */
+export type RssHubCookieProvider = 'douyin' | 'xiaohongshu' | 'weibo';
+
+/**
+ * RSSHub 平台 Cookie 状态（设置页卡片模型）。
+ *
+ * 安全约定：本结构**结构性地**不存在 Cookie 明文或密文，
+ * 只有 `maskedCookie`（形如 `abcd****wxyz`）。
+ */
+export interface RssHubCookieView {
+  provider: RssHubCookieProvider;
+  displayName: string;
+  configured: boolean;
+  maskedCookie: string | null;
+  remark: string;
+  /** ISO 8601 UTC。 */
+  updatedAt: string | null;
 }
 
 // === Boards ===

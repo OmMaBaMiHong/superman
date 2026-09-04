@@ -119,6 +119,46 @@ export async function clearTranslationApiKey(pool: DbClient, userId?: string): P
   return setTranslationApiKey(pool, normalizeUserId(userId), '');
 }
 
+/**
+ * 读取用户已加密的 GitHub Token 密文。
+ *
+ * 明文永不返回值，调用方需经 `secretBox.open()` 解密后才能使用。空串表示未配置。
+ */
+export async function getGithubTokenEncrypted(pool: DbClient, userId?: string): Promise<string> {
+  const { rows } = await pool.query<{ githubTokenEncrypted: string }>(
+    `select github_token_encrypted as "githubTokenEncrypted" from user_settings where user_id = $1`,
+    [normalizeUserId(userId)],
+  );
+  return rows[0]?.githubTokenEncrypted ?? '';
+}
+
+export async function setGithubTokenEncrypted(
+  pool: DbClient,
+  userIdOrToken: string,
+  maybeToken?: string,
+): Promise<string> {
+  const userId = typeof maybeToken === 'string' ? userIdOrToken : normalizeUserId();
+  const token = maybeToken ?? userIdOrToken;
+  const { rows } = await pool.query<{ githubTokenEncrypted: string }>(
+    `
+      insert into user_settings(user_id, github_token_encrypted)
+      values ($1, $2)
+      on conflict (user_id)
+      do update set
+        github_token_encrypted = excluded.github_token_encrypted,
+        updated_at = now()
+      returning github_token_encrypted as "githubTokenEncrypted"
+    `,
+    [userId, token],
+  );
+  return rows[0]?.githubTokenEncrypted ?? token;
+}
+
+/** 清除 GitHub Token（写回空密文）。 */
+export async function clearGithubToken(pool: DbClient, userId?: string): Promise<string> {
+  return setGithubTokenEncrypted(pool, normalizeUserId(userId), '');
+}
+
 export async function getAuthSettings(pool: DbClient): Promise<AuthSettingsRow> {
   const { rows } = await pool.query<AuthSettingsRow>(`
     select

@@ -1,15 +1,18 @@
 import { useRef, useState, type FormEvent } from 'react';
-import { ApiError } from '@/lib/api/apiClient';
+import { ApiError, resolveRssHubSourceUrl } from '@/lib/api/apiClient';
 import { mapApiErrorToUserMessage } from '@/lib/api/mapApiErrorToUserMessage';
 import type { UserOperationActionKey } from '@/lib/userOperationCatalog';
-import type { Category } from '../../../types';
+import type { Category, FeedContentView } from '../../../types';
 import { runImmediateOperation } from '../../notifications/userOperationNotifier';
 import type {
   FeedDialogInitialValues,
   FeedDialogSubmitPayload,
   ValidationState,
 } from '../feedDialog.types';
+import type { RecommendedFeed } from '../recommendedFeeds';
 import { validateRssUrl } from '../utils/rssValidation';
+
+export type FeedDiscoveryInputType = 'empty' | 'rsshub' | 'rss';
 
 interface UseFeedDialogFormOptions {
   actionKey: UserOperationActionKey;
@@ -121,6 +124,10 @@ function resolveUrlFieldError({
     return '请输入 RSS 地址。';
   }
 
+  if (isInternalFeedUrl(trimmedUrl)) {
+    return null;
+  }
+
   // Blur 触发异步校验后，先展示验证中状态，不要提前渲染失败提示。
   if (validationState === 'validating') {
     return null;
@@ -135,6 +142,124 @@ function resolveUrlFieldError({
   }
 
   return null;
+}
+
+function isInternalFeedUrl(url: string): boolean {
+  return url.toLowerCase().startsWith('rsshub://');
+}
+
+function detectFeedDiscoveryInputType(url: string): FeedDiscoveryInputType {
+  const trimmed = url.trim().toLowerCase();
+  if (!trimmed) return 'empty';
+  if (trimmed.startsWith('rsshub://')) return 'rsshub';
+  return 'rss';
+}
+
+function isHttpFeedCandidate(url: string): boolean {
+  const trimmed = url.trim().toLowerCase();
+  return trimmed.startsWith('http://') || trimmed.startsWith('https://');
+}
+
+// 根据 RSSHub 路由路径和来源域名推断视图类型
+function inferViewFromRssHubRoute(routePath: string, sourceDomain?: string): FeedContentView | null {
+  const path = routePath.toLowerCase();
+  const domain = (sourceDomain ?? '').toLowerCase();
+
+  // 视频平台
+  if (
+    path.includes('/bilibili/') || path.includes('/douyin/') || path.includes('/youtube/') ||
+    path.includes('/tiktok/') || path.includes('/vimeo/') || path.includes('/twitch/') ||
+    domain.includes('bilibili') || domain.includes('douyin') || domain.includes('youtube') ||
+    domain.includes('tiktok') || domain.includes('vimeo') || domain.includes('twitch')
+  ) {
+    return 'video';
+  }
+
+  // 社交平台
+  if (
+    path.includes('/twitter/') || path.includes('/x/') || path.includes('/weibo/') ||
+    path.includes('/mastodon/') || path.includes('/bsky/') || path.includes('/threads/') ||
+    path.includes('/zhihu/') || path.includes('/tieba/') || path.includes('/douban/') ||
+    domain.includes('twitter') || domain.includes('x.com') || domain.includes('weibo') ||
+    domain.includes('zhihu') || domain.includes('tieba') || domain.includes('douban')
+  ) {
+    return 'social';
+  }
+
+  // 图片平台
+  if (
+    path.includes('/pinterest/') || path.includes('/instagram/') || path.includes('/unsplash/') ||
+    path.includes('/deviantart/') || path.includes('/pixiv/') ||
+    domain.includes('pinterest') || domain.includes('instagram') || domain.includes('pixiv')
+  ) {
+    return 'picture';
+  }
+
+  return null;
+}
+
+// 根据来源域名建议分类名称
+function inferCategoryFromSourceDomain(sourceDomain?: string): string | null {
+  if (!sourceDomain) return null;
+  const domain = sourceDomain.toLowerCase();
+
+  const domainMap: Record<string, string> = {
+    'bilibili.com': 'B站',
+    'douyin.com': '抖音',
+    'youtube.com': 'YouTube',
+    'twitter.com': 'Twitter',
+    'x.com': 'Twitter',
+    'weibo.com': '微博',
+    'xiaohongshu.com': '小红书',
+    'zhihu.com': '知乎',
+    'douban.com': '豆瓣',
+    'instagram.com': 'Instagram',
+    'pinterest.com': 'Pinterest',
+    'tiktok.com': 'TikTok',
+    'vimeo.com': 'Vimeo',
+    'twitch.tv': 'Twitch',
+    'github.com': 'GitHub',
+    'reddit.com': 'Reddit',
+    'medium.com': 'Medium',
+    'pixiv.net': 'Pixiv',
+    'deviantart.com': 'DeviantArt',
+    'dribbble.com': '设计',
+    'behance.net': '设计',
+  };
+
+  return domainMap[domain] ?? null;
+}
+
+// 从 rsshub:// 路由路径中提取来源域名，用于分类推断
+const ROUTE_SEGMENT_TO_DOMAIN: Record<string, string> = {
+  'bilibili': 'bilibili.com',
+  'douyin': 'douyin.com',
+  'youtube': 'youtube.com',
+  'twitter': 'twitter.com',
+  'x': 'x.com',
+  'weibo': 'weibo.com',
+  'xiaohongshu': 'xiaohongshu.com',
+  'zhihu': 'zhihu.com',
+  'douban': 'douban.com',
+  'instagram': 'instagram.com',
+  'pinterest': 'pinterest.com',
+  'tiktok': 'tiktok.com',
+  'vimeo': 'vimeo.com',
+  'twitch': 'twitch.tv',
+  'github': 'github.com',
+  'reddit': 'reddit.com',
+  'medium': 'medium.com',
+  'pixiv': 'pixiv.net',
+  'deviantart': 'deviantart.com',
+  'dribbble': 'dribbble.com',
+  'behance': 'behance.net',
+};
+
+function extractSourceDomainFromRoutePath(routePath: string): string | undefined {
+  const segments = routePath.replace(/^\//, '').split('/').filter(Boolean);
+  const firstSegment = segments[0]?.toLowerCase();
+  if (!firstSegment) return undefined;
+  return ROUTE_SEGMENT_TO_DOMAIN[firstSegment];
 }
 
 export function useFeedDialogForm({
@@ -164,6 +289,7 @@ export function useFeedDialogForm({
   const initialTrimmedUrl = initialUrl.trim();
   const [title, setTitle] = useState(initialValues?.title ?? '');
   const [url, setUrl] = useState(initialUrl);
+  const [view, setView] = useState<FeedContentView>(initialValues?.view ?? 'article');
   const [categoryInput, setCategoryInput] = useState(defaultCategoryInput);
   const [validationState, setValidationState] = useState<ValidationState>(
     initialTrimmedUrl ? 'verified' : 'idle',
@@ -181,6 +307,7 @@ export function useFeedDialogForm({
 
   const trimmedTitle = title.trim();
   const trimmedUrl = url.trim();
+  const detectedInputType = detectFeedDiscoveryInputType(trimmedUrl);
   const titleFieldError =
     serverFieldErrors.title ?? resolveTitleFieldError(trimmedTitle, titleTouched, submitAttempted);
   const urlFieldError =
@@ -195,7 +322,14 @@ export function useFeedDialogForm({
   const canSave =
     Boolean(trimmedTitle) &&
     Boolean(trimmedUrl) &&
-    (skipUrlValidation || (validationState === 'verified' && lastVerifiedUrl === trimmedUrl)) &&
+    (skipUrlValidation ||
+      isInternalFeedUrl(trimmedUrl) ||
+      (validationState === 'verified' && lastVerifiedUrl === trimmedUrl)) &&
+    !submitting;
+  const canResolveSourceUrl =
+    !skipUrlValidation &&
+    isHttpFeedCandidate(trimmedUrl) &&
+    validationState !== 'validating' &&
     !submitting;
 
   const resetValidationState = () => {
@@ -250,6 +384,7 @@ export function useFeedDialogForm({
               title: trimmedTitle,
               url: trimmedUrl,
               siteUrl: validatedSiteUrl,
+              view,
               ...resolveCategoryPayload(categoryOptions, categoryInput),
             }),
         });
@@ -282,12 +417,103 @@ export function useFeedDialogForm({
       return;
     }
 
+    if (isInternalFeedUrl(urlToValidate)) {
+      const requestId = validationRequestIdRef.current + 1;
+      validationRequestIdRef.current = requestId;
+      setValidationState('validating');
+      setValidationMessage('正在识别 RSSHub 路由…');
+
+      try {
+        const rssHubResult = await resolveRssHubSourceUrl(urlToValidate);
+        if (requestId !== validationRequestIdRef.current) return;
+
+        if (rssHubResult.resolved && rssHubResult.routePath) {
+          setValidationState('verified');
+          setLastVerifiedUrl(urlToValidate);
+          setValidatedSiteUrl(null);
+          setValidationMessage(
+            rssHubResult.title
+              ? `已识别为 RSSHub 订阅：${rssHubResult.title}`
+              : '已识别为内置 RSSHub 订阅地址。',
+          );
+
+          const suggestedTitle = typeof rssHubResult.title === 'string' ? rssHubResult.title.trim() : '';
+          if (suggestedTitle && !title.trim()) {
+            setTitle(suggestedTitle);
+          }
+
+          // 自动识别视图类型
+          const sourceDomain = rssHubResult.sourceDomain ?? extractSourceDomainFromRoutePath(rssHubResult.routePath);
+          const inferredView = inferViewFromRssHubRoute(rssHubResult.routePath, sourceDomain);
+          if (inferredView && view === 'article') {
+            setView(inferredView);
+          }
+
+          // 自动建议分类
+          const suggestedCategory = inferCategoryFromSourceDomain(sourceDomain);
+          if (suggestedCategory && isUncategorizedInput(categoryInput)) {
+            setCategoryInput(suggestedCategory);
+          }
+          return;
+        }
+      } catch {
+        if (requestId !== validationRequestIdRef.current) return;
+      }
+
+      setValidationState('verified');
+      setLastVerifiedUrl(urlToValidate);
+      setValidatedSiteUrl(null);
+      setValidationMessage('已识别为内置 RSSHub 订阅地址。');
+      return;
+    }
+
     const requestId = validationRequestIdRef.current + 1;
     validationRequestIdRef.current = requestId;
     setValidationState('validating');
-    setValidationMessage('正在验证链接…');
+    setValidationMessage(isHttpFeedCandidate(urlToValidate) ? '正在识别 RSSHub 订阅…' : '正在验证链接…');
 
     try {
+      if (isHttpFeedCandidate(urlToValidate)) {
+        const rssHubResult = await resolveRssHubSourceUrl(urlToValidate);
+        if (requestId !== validationRequestIdRef.current) {
+          return;
+        }
+
+        if (rssHubResult.resolved && rssHubResult.rssHubUrl) {
+          setUrl(rssHubResult.rssHubUrl);
+          setValidationState('verified');
+          setLastVerifiedUrl(rssHubResult.rssHubUrl);
+          setValidatedSiteUrl(rssHubResult.finalUrl ?? null);
+          setValidationMessage(
+            rssHubResult.title
+              ? `已识别为 RSSHub 订阅：${rssHubResult.title}`
+              : '已识别为 RSSHub 订阅。',
+          );
+
+          const suggestedTitle = typeof rssHubResult.title === 'string' ? rssHubResult.title.trim() : '';
+          if (suggestedTitle && !title.trim()) {
+            setTitle(suggestedTitle);
+          }
+
+          // 自动识别视图类型
+          const suggestedRoutePath = rssHubResult.routePath ?? '';
+          const suggestedSourceDomain = rssHubResult.sourceDomain;
+          const inferredView = inferViewFromRssHubRoute(suggestedRoutePath, suggestedSourceDomain);
+          if (inferredView && view === 'article') {
+            setView(inferredView);
+          }
+
+          // 自动建议分类（仅当用户未手动选择分类时）
+          const suggestedCategory = inferCategoryFromSourceDomain(suggestedSourceDomain);
+          if (suggestedCategory && isUncategorizedInput(categoryInput)) {
+            setCategoryInput(suggestedCategory);
+          }
+          return;
+        }
+
+        setValidationMessage('正在验证链接…');
+      }
+
       const result = await validateRssUrl(urlToValidate);
       if (requestId !== validationRequestIdRef.current) {
         return;
@@ -346,6 +572,11 @@ export function useFeedDialogForm({
     void handleValidate(blurValue);
   };
 
+  const handleResolveSourceUrl = () => {
+    setUrlTouched(true);
+    void handleValidate(trimmedUrl);
+  };
+
   const handleTitleChange = (nextTitle: string) => {
     setTitle(nextTitle);
     setSubmitError(null);
@@ -356,15 +587,38 @@ export function useFeedDialogForm({
     setTitleTouched(true);
   };
 
+  const applyRecommendedFeed = (feed: RecommendedFeed) => {
+    validationRequestIdRef.current += 1;
+    const nextUrl = feed.url.trim();
+    setUrl(nextUrl);
+    setTitle(feed.title);
+    setView(feed.view);
+    setCategoryInput(feed.category);
+    setValidationState('verified');
+    setLastVerifiedUrl(nextUrl);
+    setValidatedSiteUrl(null);
+    setValidationMessage('已选择内置推荐源，可以直接添加。');
+    setTitleTouched(false);
+    setUrlTouched(false);
+    setSubmitError(null);
+    setServerFieldErrors({});
+    titleInputRef.current?.focus();
+  };
+
   return {
+    applyRecommendedFeed,
     canSave,
+    canResolveSourceUrl,
     categoryInput,
     categoryOptions,
+    detectedInputType,
     handleSubmit,
+    handleResolveSourceUrl,
     handleTitleBlur,
     handleTitleChange,
     handleUrlBlur,
     handleUrlChange,
+    setView,
     setCategoryInput,
     submitError,
     submitting,
@@ -376,5 +630,6 @@ export function useFeedDialogForm({
     urlInputRef,
     validationMessage,
     validationState,
+    view,
   };
 }

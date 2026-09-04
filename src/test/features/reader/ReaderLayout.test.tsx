@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { hydrateRoot } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import { vi } from 'vitest';
@@ -35,6 +35,7 @@ import {
   READER_RESIZE_DESKTOP_MIN_WIDTH,
   READER_TABLET_MIN_WIDTH,
 } from '../../../features/reader/utils/readerLayoutSizing';
+import { VIDEO_VIEW_ID } from '@/lib/reader/view';
 import { defaultPersistedSettings } from '../../../features/settings/settingsSchema';
 import { useSettingsStore } from '../../../store/settingsStore';
 import { useAppStore } from '../../../store/appStore';
@@ -257,6 +258,40 @@ describe('ReaderLayout', () => {
       useAppStore.setState({ sidebarCollapsed: false });
     });
     expect(screen.getByTestId('reader-feed-pane')).toHaveStyle({ width: '280px' });
+  });
+
+  it('expands desktop media feeds across the reading pane like Folo media views', () => {
+    resetSettingsStore();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+
+    useAppStore.setState({
+      feeds: [
+        {
+          id: 'feed-video',
+          title: 'Video Feed',
+          url: 'https://example.com/video.xml',
+          unreadCount: 1,
+          enabled: true,
+          fullTextOnOpenEnabled: false,
+          aiSummaryOnOpenEnabled: false,
+          articleListDisplayMode: 'card',
+          categoryId: 'cat-uncategorized',
+          category: '未分类',
+          view: 'video',
+        },
+      ],
+      articles: [],
+      selectedView: 'feed-video',
+      selectedArticleId: null,
+    });
+
+    renderWithNotifications();
+
+    expect(screen.getByTestId('reader-feed-pane')).toBeInTheDocument();
+    expect(screen.getByTestId('reader-article-pane')).toHaveClass('flex-1');
+    expect(screen.getByTestId('reader-article-pane')).not.toHaveStyle({ width: '400px' });
+    expect(screen.queryByTestId('reader-resize-handle-middle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('article-scroll-container')).not.toBeInTheDocument();
   });
 
   it('persists left pane width after dragging the left separator', () => {
@@ -707,13 +742,13 @@ describe('ReaderLayout', () => {
       await flushReaderLayoutUpdates();
 
       await waitFor(() => {
-        const activeButtons = container.querySelectorAll('button[aria-current="true"]');
-        expect(activeButtons).toHaveLength(1);
         expect(screen.getByRole('button', { name: /Example Feed.*1/ })).toHaveAttribute(
           'aria-current',
           'true',
         );
-        expect(screen.getByRole('button', { name: '全部文章' })).not.toHaveAttribute('aria-current');
+        expect(
+          within(screen.getByTestId('feed-rail-level2')).getByRole('tab', { name: /全部/ }),
+        ).not.toHaveAttribute('aria-selected', 'true');
       });
 
       const hydrationOutput = consoleErrorSpy.mock.calls
@@ -843,9 +878,9 @@ describe('ReaderLayout', () => {
     const leftHandle = screen.getByTestId('reader-resize-handle-left');
     const middleHandle = screen.getByTestId('reader-resize-handle-middle');
 
-    expect(feedPane.className).toContain('border-border');
+    expect(feedPane.className).toContain('glass-surface-strong');
     expect(articlePane.className).toContain('border-border');
-    expect(feedPane.className).toContain('bg-muted/55');
+    expect(feedPane.className).not.toContain('bg-muted/55');
     expect(articlePane.className).toContain('bg-muted/15');
     expect(feedPane.className).not.toContain('border-primary/60');
     expect(articlePane.className).not.toContain('border-primary/60');
@@ -884,6 +919,69 @@ describe('ReaderLayout', () => {
       expect(leftHandle).toHaveAttribute('data-active', 'false');
       expect(middleHandle).toHaveAttribute('data-active', 'false');
     });
+  });
+
+  it('renders view tabs as a vertical list inside the left rail on desktop', () => {
+    resetSettingsStore();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+
+    useAppStore.setState({
+      feeds: [
+        {
+          id: 'feed-1',
+          title: 'Example Feed',
+          url: 'https://example.com/rss.xml',
+          unreadCount: 2,
+          enabled: true,
+          fullTextOnOpenEnabled: false,
+          aiSummaryOnOpenEnabled: false,
+          categoryId: 'cat-uncategorized',
+          category: '未分类',
+        },
+      ],
+      categories: [{ id: 'cat-uncategorized', name: '未分类', expanded: true }],
+      articles: [],
+      selectedView: 'all',
+      selectedArticleId: null,
+    });
+
+    renderWithNotifications();
+
+    const tabs = screen.getByTestId('feed-rail-level2');
+
+    expect(tabs).toHaveAttribute('role', 'tablist');
+    expect(tabs).toHaveAttribute('aria-orientation', 'vertical');
+    expect(within(tabs).getByRole('tab', { name: '全部' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+
+    fireEvent.click(within(tabs).getByRole('tab', { name: '视频' }));
+    expect(useAppStore.getState().selectedView).toBe(VIDEO_VIEW_ID);
+
+    // 视图列表收在左侧边栏顶部，「收藏文章」仍留在侧边栏内容区
+    const feedPane = screen.getByTestId('reader-feed-pane');
+    expect(within(feedPane).queryByRole('tablist')).toBeInTheDocument();
+    expect(within(feedPane).getByRole('button', { name: '收藏文章' })).toBeInTheDocument();
+  });
+
+  it('keeps view tabs inside the left drawer on mobile', () => {
+    resetSettingsStore();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+
+    renderWithNotifications();
+
+    // 移动端抽屉默认收起：视图列表不在 DOM 中
+    expect(screen.queryByTestId('feed-rail-level2')).not.toBeInTheDocument();
+    expect(screen.getByTestId('reader-non-desktop-topbar')).toBeInTheDocument();
+
+    // 打开左侧抽屉后可切换视图
+    fireEvent.click(screen.getByRole('button', { name: '打开订阅源列表' }));
+
+    const tabs = screen.getByTestId('feed-rail-level2');
+    expect(tabs).toHaveAttribute('aria-orientation', 'vertical');
+    fireEvent.click(within(tabs).getByRole('tab', { name: '视频' }));
+    expect(useAppStore.getState().selectedView).toBe(VIDEO_VIEW_ID);
   });
 
 });

@@ -1,0 +1,345 @@
+%% FeedFuse 三方授权中心（OAuth Hub）— 数据结构与接口类图
+%% 说明：本项目服务端为「函数导出模块」风格（非 OOP class）。
+%% 图中的 class 节点对应「一个模块文件 + 其导出函数/类型集合」，
+%% 与既有 docs/arch-github-module.class-diagram.mermaid 保持同一表达约定。
+
+classDiagram
+    direction TB
+
+    %% ============================================================
+    %% 一、持久化数据模型（0046_oauth_hub.sql）
+    %% ============================================================
+
+    class OAuthProviderConfigRow {
+        <<table oauth_provider_configs>>
+        +string provider
+        +string clientId
+        +string clientSecretEncrypted
+        +boolean enabled
+        +object extraConfig
+        +Date createdAt
+        +Date updatedAt
+    }
+    note for OAuthProviderConfigRow "全局单例配置，一平台一行，与 userId 无关。\nclientSecretEncrypted 为 secretBox 密文 v1:iv:tag:ct，\n明文永不落库、永不出网。\nprovider 为主键，新增平台零 DDL。"
+
+    class OAuthConnectionRow {
+        <<table oauth_connections>>
+        +string id
+        +string userId
+        +string provider
+        +string providerAccountId
+        +string accessTokenEncrypted
+        +string refreshTokenEncrypted
+        +string tokenType
+        +string scope
+        +Date accessTokenExpiresAt
+        +Date refreshTokenExpiresAt
+        +string status
+        +object profileSnapshot
+        +Date authorizedAt
+        +Date lastRefreshedAt
+    }
+    note for OAuthConnectionRow "per-user 授权连接。status 取值 active|expired|revoked。\n唯一键 (user_id, provider, provider_account_id) 提前落地，\nMVP 由服务层约束每平台单连接，R13 多账号放开即可零迁移。\nprofileSnapshot 只存昵称/头像 URL，严禁写入任何凭据。"
+
+    class OAuthAuthStateRow {
+        <<table oauth_auth_states>>
+        +string state
+        +string provider
+        +string userId
+        +string codeVerifierEncrypted
+        +string redirectUri
+        +string returnTo
+        +Date expiresAt
+        +Date createdAt
+    }
+    note for OAuthAuthStateRow "一次性授权态，TTL 10 分钟。\nstate 明文作查询键（CSRF nonce，非凭据）；\ncodeVerifier 属敏感值，secretBox 加密后存储。\nredirectUri 在发起时锁定并回传，杜绝回调侧重新推导导致的不匹配。"
+
+    %% ============================================================
+    %% 二、Provider 抽象层 src/server/integrations/oauth/
+    %% ============================================================
+
+    class OAuthProviderCapabilities {
+        <<interface>>
+        +boolean supportsPkce
+        +boolean supportsRefresh
+        +boolean supportsRemoteRevoke
+        +boolean requiresExactRedirectUri
+    }
+    note for OAuthProviderCapabilities "AQ-4 能力开关建模。\nGitHub supportsPkce=true（官方 2025-07 起支持，仅 S256）；\n微信 false（明确不支持）；抖音/小红书保守默认 false，\n确认支持后仅改此常量，流程代码零改动。"
+
+    class OAuthProviderDefinition {
+        <<interface>>
+        +string id
+        +string displayName
+        +OAuthProviderCapabilities capabilities
+        +string authorizeEndpoint
+        +string tokenEndpoint
+        +string refreshEndpoint
+        +string userInfoEndpoint
+        +List~string~ allowedHosts
+        +List~string~ defaultScopes
+        +buildAuthorizeUrl(input) string
+        +buildTokenRequest(input) OAuthTokenRequest
+        +buildRefreshRequest(input) OAuthTokenRequest
+        +parseTokenResponse(raw) OAuthTokenBundle
+        +fetchProfile(accessToken) OAuthProfile
+    }
+    note for OAuthProviderDefinition "所有 endpoint 均为代码内常量，禁止从 DB / 用户输入读取，\n从源头消除 SSRF 配置注入面。用户只能配置 clientId / clientSecret。"
+
+    class OAuthTokenRequest {
+        +string url
+        +string method
+        +object headers
+        +object form
+        +string bodyKind
+    }
+    note for OAuthTokenRequest "method 支持 GET / POST：\n微信 token 交换为 GET（appid/secret 走 query），\nGitHub 为 POST form-urlencoded，抖音为 POST JSON。"
+
+    class OAuthTokenBundle {
+        +string accessToken
+        +string refreshToken
+        +string tokenType
+        +string scope
+        +number expiresIn
+        +number refreshExpiresIn
+        +string providerAccountId
+    }
+
+    class OAuthProfile {
+        +string providerAccountId
+        +string displayName
+        +string avatarUrl
+    }
+
+    class GithubOAuthProvider {
+        <<module providers/github.ts>>
+        +supportsPkce true
+        +scope read_user
+        +tokenRequest POST_form_urlencoded
+        +successRule http_2xx
+    }
+    class WechatOAuthProvider {
+        <<module providers/wechat.ts>>
+        +supportsPkce false
+        +scope snsapi_login
+        +tokenRequest GET_query
+        +clientIdParam appid
+        +successRule errcode_absent
+    }
+    class DouyinOAuthProvider {
+        <<module providers/douyin.ts>>
+        +supportsPkce false
+        +scope user_info
+        +tokenRequest POST_json
+        +clientIdParam client_key
+        +successRule data_error_code_zero
+    }
+    class XiaohongshuOAuthProvider {
+        <<module providers/xiaohongshu.ts>>
+        +supportsPkce false
+        +scope user_info
+        +tokenRequest POST_json
+        +successRule 待正式文档校准
+    }
+
+    class OAuthProviderRegistry {
+        <<module oauthProviderRegistry.ts>>
+        +getProvider(id) OAuthProviderDefinition
+        +listProviders() List~OAuthProviderDefinition~
+        +isSupportedProvider(id) boolean
+        +collectAllowedHosts() List~string~
+    }
+
+    class PkceModule {
+        <<module pkce.ts>>
+        +createCodeVerifier() string
+        +deriveCodeChallenge(verifier) string
+        +createState() string
+    }
+    note for PkceModule "基于 node:crypto randomBytes + createHash('sha256')，\n零第三方依赖。challenge 一律 S256 + base64url 无填充。"
+
+    class OAuthHttp {
+        <<module oauthHttp.ts>>
+        +requestToken(provider, request) OAuthTokenBundle
+    }
+    note for OAuthHttp "统一走 fetchExternalJson（SSRF 逐跳校验 + 主机白名单 +\n日志脱敏），禁止裸 fetch。POST 强制 maxRedirects=0，\n并置 redactResponseBody=true 防止 token 进日志。"
+
+    class OAuthError {
+        <<module oauthErrors.ts>>
+        +OAuthErrorKind kind
+        +string providerId
+        +string detail
+        +toAppError() AppError
+    }
+    note for OAuthError "kind 取值：not_configured | user_denied | invalid_state |\nstate_expired | redirect_uri_mismatch | token_exchange_failed |\nrefresh_failed | provider_error | network。\n每类映射一句中文文案（R07 / R12）。detail 只进日志不出网。"
+
+    %% ============================================================
+    %% 三、领域层 src/server/domains/oauth/
+    %% ============================================================
+
+    class OAuthProviderConfigsRepo {
+        <<module repositories>>
+        +listProviderConfigs(db) List~OAuthProviderConfigRow~
+        +getProviderConfig(db, provider) OAuthProviderConfigRow
+        +upsertProviderConfig(db, input) OAuthProviderConfigRow
+        +clearProviderConfig(db, provider) void
+    }
+
+    class OAuthConnectionsRepo {
+        <<module repositories>>
+        +listConnectionsByUser(db, userId) List~OAuthConnectionRow~
+        +getConnectionById(db, userId, id) OAuthConnectionRow
+        +upsertConnection(db, input) OAuthConnectionRow
+        +updateConnectionTokens(db, input) OAuthConnectionRow
+        +markConnectionExpired(db, userId, id) void
+        +deleteConnection(db, userId, id) void
+    }
+
+    class OAuthAuthStatesRepo {
+        <<module repositories>>
+        +insertAuthState(db, input) void
+        +consumeAuthState(db, state) OAuthAuthStateRow
+        +purgeExpiredAuthStates(db) number
+    }
+    note for OAuthAuthStatesRepo "consumeAuthState 用 DELETE ... RETURNING 原子消费，\n单条 SQL 同时完成「校验存在 + 一次性删除」，天然防重放。\npurge 由插入路径顺带触发（惰性清理），无需额外定时任务。"
+
+    class OAuthConfigService {
+        <<module services>>
+        +getProviderConfigStatuses(pool) List~OAuthProviderConfigStatus~
+        +saveProviderConfig(pool, input) OAuthProviderConfigStatus
+        +clearProviderConfig(pool, provider) OAuthProviderConfigStatus
+        +resolveClientCredentials(pool, provider) OAuthClientCredentials
+    }
+    note for OAuthConfigService "对外只返回 maskSecret() 打码值（对标 githubTokenService.maskToken）；\nresolveClientCredentials 仅供服务端内部调用，绝不经由任何路由出网。"
+
+    class OAuthAuthorizeService {
+        <<module services>>
+        +startAuthorization(pool, input) OAuthAuthorizeTicket
+    }
+
+    class OAuthCallbackService {
+        <<module services>>
+        +handleCallback(pool, input) OAuthCallbackOutcome
+    }
+
+    class OAuthConnectionService {
+        <<module services>>
+        +listConnectionViews(pool, userId) List~OAuthConnectionView~
+        +revokeConnection(pool, userId, id) void
+        +refreshConnection(pool, userId, id) OAuthConnectionView
+        +ensureFreshAccessToken(pool, userId, id) string
+    }
+
+    class OAuthRedirectUri {
+        <<module redirectUri.ts>>
+        +resolvePublicBaseUrl(headers) string
+        +buildRedirectUri(headers, provider) string
+        +sanitizeReturnTo(value) string
+    }
+    note for OAuthRedirectUri "AQ-6：优先读 env FEEDFUSE_PUBLIC_BASE_URL，\n回落 x-forwarded-proto + x-forwarded-host / host。\nsanitizeReturnTo 只放行站内相对路径，防开放重定向。"
+
+    %% ============================================================
+    %% 四、对外视图 DTO（永不含明文凭据）
+    %% ============================================================
+
+    class OAuthProviderConfigStatus {
+        +string provider
+        +string displayName
+        +boolean configured
+        +string clientId
+        +string maskedClientSecret
+        +boolean enabled
+        +string redirectUri
+        +boolean supportsPkce
+    }
+
+    class OAuthConnectionView {
+        +string id
+        +string provider
+        +string status
+        +string displayName
+        +string avatarUrl
+        +Date authorizedAt
+        +Date accessTokenExpiresAt
+        +boolean canRefresh
+    }
+
+    %% ============================================================
+    %% 五、复用的既有底座（不修改语义，仅调用 / 最小增量扩展）
+    %% ============================================================
+
+    class SecretBox {
+        <<existing infra/crypto>>
+        +seal(plaintext, key) string
+        +open(sealed, key) string
+        +isSealed(value) boolean
+    }
+
+    class SecretKeyProvider {
+        <<existing infra/crypto>>
+        +resolveSecretKey(pool) Buffer
+    }
+
+    class ExternalHttpClient {
+        <<existing infra/http — T01 增量扩展>>
+        +fetchExternalJson(url, options) FetchExternalJsonResult
+    }
+    note for ExternalHttpClient "现状仅支持 GET（method 在 fetchTextHop 内硬编码）。\nT01 向后兼容扩展：新增 options.method / options.form /\noptions.redactResponseBody，默认值保持 GET 与现有行为完全一致。"
+
+    class SessionService {
+        <<existing domains/auth>>
+        +requireApiSession() ApiSessionResult
+    }
+
+    %% ============================================================
+    %% 关系
+    %% ============================================================
+
+    OAuthProviderDefinition *-- OAuthProviderCapabilities : 组合
+    OAuthProviderDefinition ..> OAuthTokenRequest : 产出
+    OAuthProviderDefinition ..> OAuthTokenBundle : 解析产出
+    OAuthProviderDefinition ..> OAuthProfile : 拉取产出
+
+    OAuthProviderDefinition <|.. GithubOAuthProvider : 实现
+    OAuthProviderDefinition <|.. WechatOAuthProvider : 实现
+    OAuthProviderDefinition <|.. DouyinOAuthProvider : 实现
+    OAuthProviderDefinition <|.. XiaohongshuOAuthProvider : 实现
+
+    OAuthProviderRegistry o-- OAuthProviderDefinition : 注册四家
+
+    OAuthHttp ..> OAuthTokenRequest : 执行
+    OAuthHttp ..> ExternalHttpClient : 复用管线
+    OAuthHttp ..> OAuthError : 抛出
+
+    OAuthProviderConfigsRepo ..> OAuthProviderConfigRow : 读写
+    OAuthConnectionsRepo ..> OAuthConnectionRow : 读写
+    OAuthAuthStatesRepo ..> OAuthAuthStateRow : 读写
+
+    OAuthConfigService --> OAuthProviderConfigsRepo : 依赖
+    OAuthConfigService ..> SecretBox : 加解密 secret
+    OAuthConfigService ..> SecretKeyProvider : 取密钥
+    OAuthConfigService ..> OAuthProviderConfigStatus : 产出
+
+    OAuthAuthorizeService --> OAuthProviderRegistry : 取适配器
+    OAuthAuthorizeService --> OAuthConfigService : 取 clientId
+    OAuthAuthorizeService --> OAuthAuthStatesRepo : 写入 state
+    OAuthAuthorizeService ..> PkceModule : 生成 state / verifier
+    OAuthAuthorizeService ..> OAuthRedirectUri : 推导 redirectUri
+    OAuthAuthorizeService ..> SecretBox : 加密 codeVerifier
+
+    OAuthCallbackService --> OAuthAuthStatesRepo : 原子消费 state
+    OAuthCallbackService --> OAuthProviderRegistry : 取适配器
+    OAuthCallbackService --> OAuthConfigService : 取 clientSecret
+    OAuthCallbackService --> OAuthHttp : 换取 token
+    OAuthCallbackService --> OAuthConnectionsRepo : 落库连接
+    OAuthCallbackService ..> SecretBox : 加密 token
+    OAuthCallbackService ..> OAuthError : 归一错误
+
+    OAuthConnectionService --> OAuthConnectionsRepo : 依赖
+    OAuthConnectionService --> OAuthHttp : 刷新 token
+    OAuthConnectionService ..> SecretBox : 解密 refreshToken
+    OAuthConnectionService ..> OAuthConnectionView : 产出
+
+    OAuthAuthorizeService ..> SessionService : 取 userId
+    OAuthCallbackService ..> SessionService : 校验 userId 一致性
+    OAuthConnectionService ..> SessionService : 取 userId

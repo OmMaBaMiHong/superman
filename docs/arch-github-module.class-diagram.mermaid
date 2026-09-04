@@ -1,0 +1,273 @@
+classDiagram
+    direction LR
+
+    %% ============ 领域类型 ============
+    class GithubContentType {
+        <<type>>
+        release, issue, pr, commit
+    }
+
+    class GithubRepoSubscriptionRow {
+        +string feedId
+        +string userId
+        +string owner
+        +string repo
+        +string repoHtmlUrl
+        +GithubContentType[] contentTypes
+        +boolean includePrerelease
+        +string|null repoDescription
+        +string|null repoLanguage
+        +number|null repoStargazers
+        +string|null repoAvatarUrl
+        +string|null releasesEtag
+        +string|null lastReleasePublishedAt
+        +string|null lastSyncedAt
+        +string|null lastSyncAttemptAt
+        +string|null nextSyncAt
+        +number consecutiveFailures
+        +string|null rateLimitedUntil
+        +number|null rateLimitRemaining
+        +string|null lastErrorCode
+        +string|null lastError
+    }
+
+    class GithubSubscriptionView {
+        <<DTO>>
+        +string id
+        +string feedId
+        +string owner
+        +string repo
+        +string fullName
+        +string title
+        +boolean enabled
+        +number fetchIntervalMinutes
+        +string|null categoryId
+        +GithubSyncStatus status
+        +number unreadCount
+    }
+
+    class GithubSyncStatus {
+        <<type>>
+        idle, syncing, rate_limited, error
+    }
+
+    class GithubArticleItemRow {
+        +string articleId
+        +string userId
+        +string feedId
+        +GithubContentType ghType
+        +string ghId
+        +string|null ghNodeId
+        +number|null ghNumber
+        +string|null tagName
+        +boolean isPrerelease
+        +boolean isDraft
+        +string|null bodyMarkdown
+        +string htmlUrl
+    }
+
+    class GithubReleaseDraft {
+        <<value object>>
+        +string ghId
+        +string dedupeKey
+        +string title
+        +string|null tagName
+        +string|null author
+        +string publishedAt
+        +string contentHtml
+        +string bodyMarkdown
+        +string htmlUrl
+        +boolean isPrerelease
+        +boolean isDraft
+    }
+
+    %% ============ 集成层 ============
+    class GithubClient {
+        <<module>>
+        +getRepository(input) Promise~GithubRepository~
+        +listReleases(input) Promise~GithubReleasesResult~
+        -buildHeaders(token, etag) Record
+        -assertAllowedHost(url) void
+    }
+
+    class GithubReleasesResult {
+        +number status
+        +GithubRelease[] releases
+        +string|null etag
+        +GithubRateLimitSnapshot rateLimit
+    }
+
+    class GithubRateLimitSnapshot {
+        +number|null limit
+        +number|null remaining
+        +Date|null resetAt
+        +number|null retryAfterSeconds
+    }
+
+    class GithubRateLimit {
+        <<module>>
+        +parseRateLimitHeaders(headers) GithubRateLimitSnapshot
+        +isRateLimited(status, snapshot) boolean
+        +resolveRateLimitedUntil(snapshot, now) Date
+    }
+
+    class GithubMarkdown {
+        <<module>>
+        +renderReleaseBody(input) string
+    }
+
+    class GithubResourceMapper {
+        <<module>>
+        +parseRepoInput(raw) ParsedRepoRef
+        +buildReleaseDedupeKey(releaseId) string
+        +toReleaseDraft(release, ctx) GithubReleaseDraft
+        +buildReleaseTitle(release) string
+    }
+
+    class ParsedRepoRef {
+        +string owner
+        +string repo
+        +string fullName
+        +string htmlUrl
+    }
+
+    class GithubApiError {
+        <<Error>>
+        +number|null status
+        +GithubApiErrorKind kind
+        +GithubRateLimitSnapshot|null rateLimit
+    }
+
+    %% ============ 领域服务 ============
+    class GithubSubscriptionsRepo {
+        <<module>>
+        +createSubscription(db, input) Promise~Row~
+        +getSubscriptionByFeedId(db, feedId, userId) Promise~NullableRow~
+        +findSubscriptionByRepo(db, owner, repo, userId) Promise~NullableRow~
+        +listSubscriptionsByUser(db, userId) Promise~Row[]~
+        +listDueSubscriptions(db, now, limit) Promise~DueRow[]~
+        +updateSubscriptionConfig(db, feedId, patch, userId) Promise~Row~
+        +recordSyncResult(db, feedId, result) Promise~void~
+        +recordRepoMetadata(db, feedId, metadata) Promise~void~
+        +deleteSubscription(db, feedId, userId) Promise~void~
+    }
+
+    class GithubArticleItemsRepo {
+        <<module>>
+        +insertArticleItem(db, input) Promise~void~
+        +getByArticleId(db, articleId, userId) Promise~NullableRow~
+        +listByArticleIds(db, ids, userId) Promise~Row[]~
+    }
+
+    class GithubTokenService {
+        <<module>>
+        +getGithubToken(pool, userId) Promise~string~
+        +setGithubToken(pool, userId, token) Promise~void~
+        +clearGithubToken(pool, userId) Promise~void~
+        +getTokenStatus(pool, userId) Promise~GithubTokenStatus~
+        +maskToken(token) string
+    }
+
+    class GithubSubscriptionLifecycleService {
+        <<module>>
+        +createGithubSubscription(pool, input) Promise~GithubSubscriptionView~
+        +updateGithubSubscription(pool, feedId, patch, userId) Promise~View~
+        +deleteGithubSubscription(pool, feedId, userId) Promise~void~
+    }
+
+    class GithubIngestService {
+        <<module>>
+        +syncRepository(input) Promise~GithubSyncResult~
+    }
+
+    class GithubSyncResult {
+        +number inserted
+        +number skipped
+        +boolean notModified
+        +string|null errorCode
+        +string|null errorMessage
+        +Date nextSyncAt
+    }
+
+    class GithubBackoff {
+        <<module>>
+        +computeNextSyncAt(input) Date
+    }
+
+    class GithubFetchErrorMapping {
+        <<module>>
+        +mapGithubFetchError(err) MappedError
+    }
+
+    %% ============ 复用的现有模块 ============
+    class FeedsRepo {
+        <<existing>>
+        +createGithubFeed(db, input) Promise~FeedRow~
+        +updateFeed(db, id, patch, userId)
+        +recordFeedFetchResult(db, id, result)
+    }
+
+    class ArticlesRepo {
+        <<existing>>
+        +insertArticleIgnoreDuplicate(db, input) Promise~NullableArticleRow~
+    }
+
+    class ExternalHttpClient {
+        <<existing + extended>>
+        +fetchExternalJson(url, options) Promise~FetchJsonResult~
+        +fetchRssXml(url, options)
+    }
+
+    class SecretBox {
+        <<new infra>>
+        +seal(plaintext, key) string
+        +open(sealed, key) string
+        +isSealed(value) boolean
+    }
+
+    %% ============ Worker ============
+    class GithubSyncDueWorker {
+        <<worker>>
+        +runGithubSyncDue(input) Promise~EnqueueSummary~
+    }
+
+    class GithubFetchWorker {
+        <<worker>>
+        +runGithubFetchWorker(input) Promise~void~
+    }
+
+    %% ============ 关系 ============
+    GithubRepoSubscriptionRow "1" --> "1..*" GithubContentType : contentTypes
+    GithubSubscriptionView --> GithubSyncStatus : status
+    GithubSubscriptionsRepo ..> GithubRepoSubscriptionRow : returns
+    GithubArticleItemsRepo ..> GithubArticleItemRow : returns
+
+    GithubClient ..> GithubReleasesResult : returns
+    GithubClient ..> GithubApiError : throws
+    GithubClient --> ExternalHttpClient : uses
+    GithubClient --> GithubRateLimit : uses
+    GithubReleasesResult --> GithubRateLimitSnapshot
+    GithubResourceMapper ..> ParsedRepoRef : returns
+    GithubResourceMapper ..> GithubReleaseDraft : returns
+    GithubResourceMapper --> GithubMarkdown : uses
+
+    GithubIngestService --> GithubClient : uses
+    GithubIngestService --> GithubResourceMapper : uses
+    GithubIngestService --> GithubTokenService : uses
+    GithubIngestService --> GithubSubscriptionsRepo : uses
+    GithubIngestService --> GithubArticleItemsRepo : uses
+    GithubIngestService --> ArticlesRepo : uses
+    GithubIngestService --> FeedsRepo : uses
+    GithubIngestService --> GithubBackoff : uses
+    GithubIngestService --> GithubFetchErrorMapping : uses
+    GithubIngestService ..> GithubSyncResult : returns
+
+    GithubSubscriptionLifecycleService --> FeedsRepo : uses
+    GithubSubscriptionLifecycleService --> GithubSubscriptionsRepo : uses
+    GithubSubscriptionLifecycleService --> GithubClient : validates repo
+    GithubSubscriptionLifecycleService ..> GithubSubscriptionView : returns
+
+    GithubTokenService --> SecretBox : uses
+
+    GithubSyncDueWorker --> GithubSubscriptionsRepo : listDueSubscriptions
+    GithubFetchWorker --> GithubIngestService : delegates

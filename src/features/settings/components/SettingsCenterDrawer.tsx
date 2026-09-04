@@ -1,4 +1,15 @@
-import { Bot, Flame, KeyRound, Palette, Rss, ScrollText, type LucideIcon } from 'lucide-react';
+import {
+  Bot,
+  Cookie,
+  Flame,
+  Github,
+  KeyRound,
+  Palette,
+  Rss,
+  ScrollText,
+  ShieldCheck,
+  type LucideIcon,
+} from 'lucide-react';
 import { startTransition, useEffect, useRef, useState } from 'react';
 import {
   AlertDialog,
@@ -26,6 +37,9 @@ import LogsSettingsPanel from '../panels/LogsSettingsPanel';
 import RssSettingsPanel from '../panels/RssSettingsPanel';
 import SecuritySettingsPanel from '../panels/SecuritySettingsPanel';
 import FeverAccountSettingsPanel from '../panels/FeverAccountSettingsPanel';
+import GithubSettingsPanel from '../panels/GithubSettingsPanel';
+import OAuthSettingsPanel from '../panels/OAuthSettingsPanel';
+import RssHubCookiesSettingsPanel from '../panels/RssHubCookiesSettingsPanel';
 import type { OpmlTransferResultSummary } from '../panels/OpmlTransferSection';
 import { useSettingsAutosave } from '../hooks';
 import {
@@ -36,9 +50,19 @@ import {
 
 interface SettingsCenterDrawerProps {
   onClose: () => void;
+  initialSection?: SettingsSectionKey;
 }
 
-type SettingsSectionKey = 'general' | 'rss' | 'ai' | 'security' | 'fever' | 'logging';
+export type SettingsSectionKey =
+  | 'general'
+  | 'rss'
+  | 'rsshub'
+  | 'ai'
+  | 'security'
+  | 'fever'
+  | 'logging'
+  | 'github'
+  | 'oauth';
 
 interface SettingsSectionItem {
   key: SettingsSectionKey;
@@ -49,9 +73,13 @@ interface SettingsSectionItem {
 const sectionItems: SettingsSectionItem[] = [
   { key: 'general', label: '通用', icon: Palette },
   { key: 'rss', label: 'RSS', icon: Rss },
+  { key: 'rsshub', label: '平台 Cookie', icon: Cookie },
   { key: 'ai', label: 'AI', icon: Bot },
   { key: 'security', label: '账号与安全', icon: KeyRound },
   { key: 'fever', label: 'Fever 账号', icon: Flame },
+  { key: 'github', label: 'GitHub', icon: Github },
+  // 「三方授权」与 GitHub 平级，置于 GitHub 与日志之间。
+  { key: 'oauth', label: '三方授权', icon: ShieldCheck },
   { key: 'logging', label: '日志', icon: ScrollText },
 ];
 
@@ -75,7 +103,7 @@ const autosaveStatusMeta = {
 } as const;
 
 const settingsSectionTabClassName =
-  'group relative min-w-[152px] justify-start rounded-xl border border-transparent bg-transparent px-3 py-2.5 text-left text-muted-foreground transition-[background-color,border-color,color,box-shadow,transform] duration-200 hover:-translate-y-px hover:border-border/70 hover:bg-background/55 hover:text-foreground dark:hover:border-white/[0.05] dark:hover:bg-[color-mix(in_oklab,var(--color-primary)_8%,var(--color-card)_92%)] data-[state=active]:border-border data-[state=active]:bg-[color-mix(in_oklab,var(--color-background)_84%,white_16%)] data-[state=active]:text-foreground dark:data-[state=active]:border-[rgba(94,106,210,0.14)] dark:data-[state=active]:bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-card)_90%)] md:min-w-0 md:w-full md:px-3 md:py-3 md:pl-7 md:before:absolute md:before:inset-y-3 md:before:left-2 md:before:w-[3px] md:before:rounded-full md:before:content-[\'\'] md:data-[state=active]:before:bg-[linear-gradient(180deg,var(--color-primary),color-mix(in_oklab,var(--color-primary)_74%,white_26%))]';
+  'group relative min-w-[152px] justify-start rounded-xl border border-transparent bg-transparent px-3 py-2.5 text-left text-muted-foreground transition-[background-color,border-color,color,box-shadow,transform] duration-200 hover:-translate-y-px hover:border-border/70 hover:bg-background/55 hover:text-foreground dark:hover:border-white/[0.05] dark:hover:bg-[color-mix(in_oklab,var(--color-primary)_8%,var(--color-card)_92%)] data-[state=active]:border-border data-[state=active]:bg-[color-mix(in_oklab,var(--color-background)_84%,white_16%)] data-[state=active]:text-foreground dark:data-[state=active]:border-primary/14 dark:data-[state=active]:bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-card)_90%)] md:min-w-0 md:w-full md:px-3 md:py-3 md:pl-7 md:before:absolute md:before:inset-y-3 md:before:left-2 md:before:w-[3px] md:before:rounded-full md:before:content-[\'\'] md:data-[state=active]:before:bg-[linear-gradient(180deg,var(--color-primary),color-mix(in_oklab,var(--color-primary)_74%,white_26%))]';
 
 const settingsSectionIconClassName =
   'mt-0.5 shrink-0 text-muted-foreground transition-colors duration-200 group-data-[state=active]:text-primary group-hover:text-foreground';
@@ -83,10 +111,10 @@ const settingsSectionIconClassName =
 const settingsSectionLabelClassName =
   'text-sm font-medium text-foreground/90 transition-colors group-data-[state=active]:text-foreground group-hover:text-foreground';
 
-export default function SettingsCenterDrawer({ onClose }: SettingsCenterDrawerProps) {
+export default function SettingsCenterDrawer({ onClose, initialSection }: SettingsCenterDrawerProps) {
   const [draftVersion, setDraftVersion] = useState(0);
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
-  const [activeSection, setActiveSection] = useState<SettingsSectionKey>('general');
+  const [activeSection, setActiveSection] = useState<SettingsSectionKey>(initialSection ?? 'general');
   const [opmlImporting, setOpmlImporting] = useState(false);
   const [opmlExporting, setOpmlExporting] = useState(false);
   const [lastOpmlImportResult, setLastOpmlImportResult] =
@@ -185,9 +213,12 @@ export default function SettingsCenterDrawer({ onClose }: SettingsCenterDrawerPr
   const sectionErrors: Record<SettingsSectionKey, number> = {
     general: validationErrorKeys.filter((field) => field.startsWith('general.')).length,
     rss: validationErrorKeys.filter((field) => field.startsWith('rss.')).length,
+    rsshub: 0,
     ai: validationErrorKeys.filter((field) => field.startsWith('ai.')).length,
     security: 0,
     fever: 0,
+    github: 0,
+    oauth: 0,
     logging: 0,
   };
 
@@ -350,6 +381,9 @@ export default function SettingsCenterDrawer({ onClose }: SettingsCenterDrawerPr
                           onOpmlExport={handleOpmlExport}
                         />
                       </TabsContent>
+                      <TabsContent value="rsshub" className="mt-0 h-full overflow-y-auto">
+                        <RssHubCookiesSettingsPanel />
+                      </TabsContent>
                       <TabsContent value="ai" className="mt-0 h-full overflow-y-auto">
                         <AISettingsPanel
                           draft={draft}
@@ -362,6 +396,12 @@ export default function SettingsCenterDrawer({ onClose }: SettingsCenterDrawerPr
                       </TabsContent>
                       <TabsContent value="fever" className="mt-0 h-full overflow-y-auto">
                         <FeverAccountSettingsPanel />
+                      </TabsContent>
+                      <TabsContent value="github" className="mt-0 h-full overflow-y-auto">
+                        <GithubSettingsPanel />
+                      </TabsContent>
+                      <TabsContent value="oauth" className="mt-0 h-full overflow-y-auto">
+                        <OAuthSettingsPanel />
                       </TabsContent>
                       <TabsContent value="logging" className="mt-0 h-full min-h-0">
                         <LogsSettingsPanel

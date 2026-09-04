@@ -1,9 +1,10 @@
 import type { Pool, PoolClient } from 'pg';
+import type { FeedContentView } from '@/types';
 import { normalizeUserId } from '@/server/domains/users/userScope';
 
 type DbClient = Pool | PoolClient;
 
-export type FeedKind = 'rss' | 'ai_digest';
+export type FeedKind = 'rss' | 'ai_digest' | 'github';
 export type FeedProvider = 'local_rss' | 'fever';
 
 export interface FeedRow {
@@ -25,6 +26,7 @@ export interface FeedRow {
   titleTranslateEnabled: boolean;
   bodyTranslateEnabled: boolean;
   articleListDisplayMode: 'card' | 'list';
+  view: FeedContentView;
   categoryId: string | null;
   fetchIntervalMinutes: number;
   lastFetchStatus: number | null;
@@ -52,6 +54,7 @@ const feedRowSelectSql = `
         title_translate_enabled as "titleTranslateEnabled",
         body_translate_enabled as "bodyTranslateEnabled",
         article_list_display_mode as "articleListDisplayMode",
+        view,
         category_id as "categoryId",
         fetch_interval_minutes as "fetchIntervalMinutes",
         last_fetch_status as "lastFetchStatus",
@@ -89,6 +92,7 @@ export async function listFeeds(db: DbClient, userId?: string): Promise<FeedRow[
       title_translate_enabled as "titleTranslateEnabled",
       body_translate_enabled as "bodyTranslateEnabled",
       article_list_display_mode as "articleListDisplayMode",
+      view,
       category_id as "categoryId",
       fetch_interval_minutes as "fetchIntervalMinutes",
       last_fetch_status as "lastFetchStatus",
@@ -142,6 +146,7 @@ export async function createFeed(
     titleTranslateEnabled?: boolean;
     bodyTranslateEnabled?: boolean;
     articleListDisplayMode?: 'card' | 'list';
+    view?: FeedContentView;
     categoryId?: string | null;
     fetchIntervalMinutes?: number;
     userId?: string;
@@ -167,10 +172,11 @@ export async function createFeed(
         title_translate_enabled,
         body_translate_enabled,
         article_list_display_mode,
+        view,
         category_id,
         fetch_interval_minutes
       )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
       returning
         ${feedRowSelectSql},
         false as "isPodcast"
@@ -192,8 +198,60 @@ export async function createFeed(
       input.titleTranslateEnabled ?? false,
       input.bodyTranslateEnabled ?? false,
       input.articleListDisplayMode ?? 'card',
+      input.view ?? 'article',
       input.categoryId ?? null,
       input.fetchIntervalMinutes ?? 30,
+    ],
+  );
+  return rows[0];
+}
+
+/**
+ * 创建 GitHub 仓库订阅对应的 feed。
+ *
+ * 与 `createAiDigestFeed` 同构：kind='github'、view='github'，其余字段复用本地 RSS feed
+ * 的存储结构。匿名用户刷新间隔会被同步引擎强制抬到 60 分钟（见 githubBackoff）。
+ */
+export async function createGithubFeed(
+  db: DbClient,
+  input: {
+    title: string;
+    url: string;
+    siteUrl?: string | null;
+    iconUrl?: string | null;
+    categoryId?: string | null;
+    fetchIntervalMinutes?: number;
+    userId?: string;
+  },
+): Promise<FeedRow> {
+  const scopedUserId = normalizeUserId(input.userId);
+  const { rows } = await db.query<FeedRow>(
+    `
+      insert into feeds(
+        user_id,
+        kind,
+        title,
+        url,
+        site_url,
+        icon_url,
+        enabled,
+        view,
+        category_id,
+        fetch_interval_minutes
+      )
+      values ($1, 'github', $2, $3, $4, $5, true, 'github', $6, $7)
+      returning
+        ${feedRowSelectSql},
+        false as "isPodcast"
+    `,
+    [
+      scopedUserId,
+      input.title,
+      input.url,
+      input.siteUrl ?? null,
+      input.iconUrl ?? null,
+      input.categoryId ?? null,
+      input.fetchIntervalMinutes ?? 60,
     ],
   );
   return rows[0];
@@ -301,6 +359,7 @@ export async function updateFeed(
     titleTranslateEnabled?: boolean;
     bodyTranslateEnabled?: boolean;
     articleListDisplayMode?: 'card' | 'list';
+    view?: FeedContentView;
     categoryId?: string | null;
     fetchIntervalMinutes?: number;
     userId?: string;
@@ -366,6 +425,10 @@ export async function updateFeed(
   if (typeof input.articleListDisplayMode !== 'undefined') {
     fields.push(`article_list_display_mode = $${paramIndex++}`);
     values.push(input.articleListDisplayMode);
+  }
+  if (typeof input.view !== 'undefined') {
+    fields.push(`view = $${paramIndex++}`);
+    values.push(input.view);
   }
   if (typeof input.categoryId !== 'undefined') {
     fields.push(`category_id = $${paramIndex++}`);
@@ -653,13 +716,14 @@ export async function createAiDigestFeed(
       with next_feed as (
         select nextval(pg_get_serial_sequence('feeds', 'id'))::bigint as id
       )
-      insert into feeds(id, user_id, kind, title, url, category_id)
+      insert into feeds(id, user_id, kind, title, url, view, category_id)
       select
         next_feed.id,
         $1,
         'ai_digest',
         $2,
         'http://localhost/__feedfuse_ai_digest__/' || next_feed.id::text,
+        'digest',
         $3
       from next_feed
       returning

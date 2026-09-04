@@ -267,6 +267,94 @@ describe('/api/feeds', () => {
     expect(json.data.fullTextOnFetchEnabled).toBe(true);
   });
 
+  it('POST creates a feed with independent view and category', async () => {
+    createFeedWithCategoryResolutionMock.mockResolvedValue({
+      id: feedId,
+      title: 'Andrej Karpathy - YouTube',
+      url: 'rsshub://youtube/user/@AndrejKarpathy',
+      siteUrl: null,
+      iconUrl: null,
+      enabled: true,
+      fullTextOnOpenEnabled: false,
+      fullTextOnFetchEnabled: false,
+      aiSummaryOnOpenEnabled: false,
+      categoryId,
+      view: 'video',
+      fetchIntervalMinutes: 30,
+    });
+
+    const mod = await import('../../../../app/api/feeds/route');
+    const res = await mod.POST(
+      new Request('http://localhost/api/feeds', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Andrej Karpathy - YouTube',
+          url: 'rsshub://youtube/user/@AndrejKarpathy',
+          categoryId,
+          view: 'video',
+        }),
+      }),
+    );
+    const json = await res.json();
+
+    expect(createFeedWithCategoryResolutionMock).toHaveBeenCalledWith(
+      pool,
+      expect.objectContaining({
+        categoryId,
+        view: 'video',
+      }),
+    );
+    expect(json.ok).toBe(true);
+    expect(json.data.categoryId).toBe(categoryId);
+    expect(json.data.view).toBe('video');
+  });
+
+  it('POST creates an rsshub feed without exposing the local RSSHub endpoint', async () => {
+    createFeedWithCategoryResolutionMock.mockResolvedValue({
+      id: feedId,
+      title: 'Andrej Karpathy - YouTube',
+      url: 'rsshub://youtube/user/@AndrejKarpathy',
+      siteUrl: 'https://www.youtube.com/channel/UCXUPKJO5MZQN11PqgIvyuvQ',
+      iconUrl: null,
+      enabled: true,
+      fullTextOnOpenEnabled: false,
+      fullTextOnFetchEnabled: false,
+      aiSummaryOnOpenEnabled: false,
+      categoryId: null,
+      fetchIntervalMinutes: 30,
+    });
+
+    const mod = await import('../../../../app/api/feeds/route');
+    const res = await mod.POST(
+      new Request('http://localhost/api/feeds', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Andrej Karpathy - YouTube',
+          url: 'rsshub://youtube/user/@AndrejKarpathy',
+          siteUrl: 'https://www.youtube.com/channel/UCXUPKJO5MZQN11PqgIvyuvQ',
+        }),
+      }),
+    );
+    const json = await res.json();
+
+    expect(createFeedWithCategoryResolutionMock).toHaveBeenCalledWith(
+      pool,
+      expect.objectContaining({
+        title: 'Andrej Karpathy - YouTube',
+        url: 'rsshub://youtube/user/@AndrejKarpathy',
+        siteUrl: 'https://www.youtube.com/channel/UCXUPKJO5MZQN11PqgIvyuvQ',
+      }),
+    );
+    expect(isSafeExternalUrlMock).not.toHaveBeenCalledWith(
+      'rsshub://youtube/user/@AndrejKarpathy',
+      expect.anything(),
+    );
+    expect(json.ok).toBe(true);
+    expect(json.data.url).toBe('rsshub://youtube/user/@AndrejKarpathy');
+  });
+
   it('POST /api/feeds accepts categoryName and delegates to lifecycle service', async () => {
     createFeedWithCategoryResolutionMock.mockResolvedValue({
       id: feedId,
@@ -561,6 +649,48 @@ describe('/api/feeds', () => {
       pool,
       expect.objectContaining({ actionKey: 'feed.update' }),
     );
+  });
+
+  it('PATCH updates a feed view without changing category', async () => {
+    updateFeedWithCategoryResolutionMock.mockResolvedValue({
+      id: feedId,
+      title: 'Updated',
+      url: 'https://example.com/rss.xml',
+      siteUrl: null,
+      iconUrl: null,
+      enabled: true,
+      fullTextOnOpenEnabled: false,
+      fullTextOnFetchEnabled: false,
+      aiSummaryOnOpenEnabled: false,
+      articleListDisplayMode: 'card',
+      categoryId,
+      view: 'social',
+      fetchIntervalMinutes: 30,
+    });
+
+    const mod = await import('../../../../app/api/feeds/[id]/route');
+    const res = await mod.PATCH(
+      new Request(`http://localhost/api/feeds/${feedId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          view: 'social',
+        }),
+      }),
+      { params: Promise.resolve({ id: feedId }) },
+    );
+    const json = await res.json();
+
+    expect(updateFeedWithCategoryResolutionMock).toHaveBeenCalledWith(
+      pool,
+      feedId,
+      expect.objectContaining({
+        view: 'social',
+      }),
+    );
+    expect(json.ok).toBe(true);
+    expect(json.data.categoryId).toBe(categoryId);
+    expect(json.data.view).toBe('social');
   });
 
   it('PATCH rejects remote-managed fever feed updates to remote-owned fields', async () => {

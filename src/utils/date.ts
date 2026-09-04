@@ -10,6 +10,20 @@ export function formatRelativeTime(dateString: string, now: Date = new Date()): 
   return date.toLocaleDateString('zh-CN');
 }
 
+export function formatFullDateTime(dateString: string): string {
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return '--';
+
+  const y = date.getFullYear();
+  const M = pad2(date.getMonth() + 1);
+  const d = pad2(date.getDate());
+  const h = pad2(date.getHours());
+  const m = pad2(date.getMinutes());
+  const s = pad2(date.getSeconds());
+
+  return `${y}-${M}-${d} ${h}:${m}:${s}`;
+}
+
 function pad2(value: number): string {
   return `${value}`.padStart(2, '0');
 }

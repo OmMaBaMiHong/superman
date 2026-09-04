@@ -131,6 +131,30 @@ export const QUEUE_CONTRACTS: Record<string, QueueContract> = {
     worker: { localConcurrency: 1, batchSize: 1 },
     send: () => ({ singletonKey: 'fever.sync_due', singletonSeconds: 55 }),
   },
+  'github.sync_due': {
+    queue: { warningQueueSize: 5 },
+    worker: { localConcurrency: 1, batchSize: 1 },
+    send: () => ({ singletonKey: 'github.sync_due', singletonSeconds: 55 }),
+  },
+  'github.fetch_repo': {
+    queue: {
+      // 重试次数压到 2：GitHub 速率配额有限，重试放大会直接击穿配额。
+      retryLimit: 2,
+      retryDelay: 60,
+      retryBackoff: true,
+      retryDelayMax: 1800,
+      deadLetter: 'dlq.github.fetch',
+      heartbeatSeconds: 60,
+      expireInSeconds: 900,
+      warningQueueSize: 200,
+    },
+    // 并发压到 2，保护速率配额（匿名 60 req/h、Token 5000 req/h）。
+    worker: { localConcurrency: 2, batchSize: 1 },
+    send: (ctx) => ({
+      singletonKey: [ctx.userId, ctx.feedId].filter(Boolean).join(':'),
+      singletonSeconds: 300,
+    }),
+  },
   'feed.refresh_all': {
     queue: { warningQueueSize: 50 },
     worker: { localConcurrency: 1, batchSize: 1 },

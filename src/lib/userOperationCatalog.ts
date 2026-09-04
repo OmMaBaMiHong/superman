@@ -28,6 +28,20 @@ export type UserOperationActionKey =
   | 'aiDigest.create'
   | 'aiDigest.update'
   | 'aiDigest.generate'
+  | 'github.repo.create'
+  | 'github.repo.update'
+  | 'github.repo.delete'
+  | 'github.repo.refresh'
+  | 'github.token.save'
+  | 'github.token.clear'
+  | 'oauth.config.save'
+  | 'oauth.config.clear'
+  | 'oauth.authorize.start'
+  | 'oauth.authorize.result'
+  | 'oauth.connection.revoke'
+  | 'oauth.connection.refresh'
+  | 'rsshub.cookie.save'
+  | 'rsshub.cookie.clear'
   | 'settings.save'
   | 'opml.import'
   | 'opml.export';
@@ -246,6 +260,121 @@ const catalog: Record<UserOperationActionKey, UserOperationCatalogEntry> = {
     successMessage: (context) =>
       context?.outcome === 'no_relevant_updates' ? '当前时间窗口没有相关内容' : '智能报告已生成',
     errorPrefix: () => '生成智能报告失败',
+  },
+  'github.repo.create': {
+    mode: 'immediate',
+    category: 'github',
+    successMessage: (context) =>
+      typeof context?.fullName === 'string'
+        ? `已订阅 ${context.fullName}`
+        : '已添加 GitHub 仓库订阅',
+    errorPrefix: () => '添加 GitHub 仓库订阅失败',
+  },
+  'github.repo.update': {
+    mode: 'immediate',
+    category: 'github',
+    successMessage: () => '已更新 GitHub 仓库订阅',
+    errorPrefix: () => '更新 GitHub 仓库订阅失败',
+  },
+  'github.repo.delete': {
+    mode: 'immediate',
+    category: 'github',
+    successMessage: () => '已删除 GitHub 仓库订阅',
+    errorPrefix: () => '删除 GitHub 仓库订阅失败',
+  },
+  'github.repo.refresh': {
+    mode: 'deferred',
+    category: 'github',
+    startMessage: () => '已开始同步仓库',
+    successMessage: (context) =>
+      context?.outcome === 'already_enqueued' ? '同步任务已在队列中' : '仓库同步已加入队列',
+    errorPrefix: () => '同步仓库失败',
+  },
+  'github.token.save': {
+    mode: 'immediate',
+    category: 'github',
+    successMessage: () => '已保存 GitHub Token',
+    errorPrefix: () => '保存 GitHub Token 失败',
+  },
+  'github.token.clear': {
+    mode: 'immediate',
+    category: 'github',
+    successMessage: () => '已清除 GitHub Token',
+    errorPrefix: () => '清除 GitHub Token 失败',
+  },
+  'oauth.config.save': {
+    mode: 'immediate',
+    category: 'oauth',
+    successMessage: (context) =>
+      typeof context?.displayName === 'string'
+        ? `已保存 ${context.displayName} 应用配置`
+        : '已保存平台应用配置',
+    errorPrefix: () => '保存平台应用配置失败',
+  },
+  'oauth.config.clear': {
+    mode: 'immediate',
+    category: 'oauth',
+    successMessage: (context) =>
+      typeof context?.displayName === 'string'
+        ? `已清除 ${context.displayName} 应用配置`
+        : '已清除平台应用配置',
+    errorPrefix: () => '清除平台应用配置失败',
+  },
+  'oauth.authorize.start': {
+    mode: 'immediate',
+    category: 'oauth',
+    // 成功即跳转到平台，页面马上卸载，成功 toast 没有展示窗口。
+    successMessage: () => '正在跳转到平台授权页',
+    errorPrefix: () => '发起授权失败',
+    toastVisibility: HIDE_SUCCESS_TOAST,
+  },
+  'oauth.authorize.result': {
+    mode: 'immediate',
+    category: 'oauth',
+    successMessage: (context) =>
+      typeof context?.displayName === 'string'
+        ? `已连接 ${context.displayName}`
+        : '授权成功',
+    errorPrefix: (context) =>
+      typeof context?.displayName === 'string'
+        ? `${context.displayName} 授权失败`
+        : '授权失败',
+  },
+  'oauth.connection.revoke': {
+    mode: 'immediate',
+    category: 'oauth',
+    successMessage: (context) =>
+      typeof context?.displayName === 'string'
+        ? `已断开 ${context.displayName}`
+        : '已断开授权连接',
+    errorPrefix: () => '断开授权连接失败',
+  },
+  'oauth.connection.refresh': {
+    mode: 'immediate',
+    category: 'oauth',
+    successMessage: (context) =>
+      typeof context?.displayName === 'string'
+        ? `已续期 ${context.displayName}`
+        : '已续期访问令牌',
+    errorPrefix: () => '续期访问令牌失败',
+  },
+  'rsshub.cookie.save': {
+    mode: 'immediate',
+    category: 'settings',
+    successMessage: (context) =>
+      typeof context?.displayName === 'string'
+        ? `已保存 ${context.displayName} Cookie`
+        : '已保存平台 Cookie',
+    errorPrefix: () => '保存平台 Cookie 失败',
+  },
+  'rsshub.cookie.clear': {
+    mode: 'immediate',
+    category: 'settings',
+    successMessage: (context) =>
+      typeof context?.displayName === 'string'
+        ? `已清除 ${context.displayName} Cookie`
+        : '已清除平台 Cookie',
+    errorPrefix: () => '清除平台 Cookie 失败',
   },
   'settings.save': {
     mode: 'immediate',

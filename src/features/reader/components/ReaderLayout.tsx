@@ -13,9 +13,18 @@ import ArticleView, { dispatchReaderArticleCommand } from '../../articles/compon
 import FeedList from '../../feeds/components/FeedList';
 import ResizeHandle from './ResizeHandle';
 import GlobalSearchDialog from './GlobalSearchDialog';
+import ReaderContentPage from './ReaderContentPage';
 import { getSelectedArticleFromState, useAppStore } from '../../../store/appStore';
 import { useSettingsStore } from '../../../store/settingsStore';
 import type { ViewType } from '../../../types';
+import type { SettingsSectionKey } from '../../settings/components/SettingsCenterDrawer';
+import { toast } from '@/features/toast/toast';
+import { runImmediateFailure, runImmediateSuccess } from '@/features/notifications/userOperationNotifier';
+import {
+  getOAuthProviderMeta,
+  isOAuthCallbackOutcome,
+  resolveOAuthCallbackReason,
+} from '@/features/oauth/utils/oauthProviderMeta';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -31,7 +40,12 @@ import {
   READER_TABLET_ARTICLE_PANE_CLASS_NAME,
 } from '@/lib/ui/designSystem';
 import { cn } from '@/lib/utils';
-import { AI_DIGEST_VIEW_ID } from '@/lib/reader/view';
+import {
+  AI_DIGEST_VIEW_ID,
+  isReaderContentPageView,
+  PUBLISH_CENTER_VIEW_ID,
+  VIDEO_VIEW_ID,
+} from '@/lib/reader/view';
 import {
   normalizeReaderPaneWidth,
   READER_LEFT_PANE_MAX_WIDTH,
@@ -51,6 +65,7 @@ const MOBILE_SMART_VIEW_LABELS: Record<string, string> = {
   unread: '未读文章',
   starred: '收藏文章',
   'ai-digest': '智能报告',
+  [PUBLISH_CENTER_VIEW_ID]: '工作台',
 };
 const GLOBAL_SEARCH_SHORTCUT_KEY = 'f';
 const READER_VIEW_SHORTCUTS: Record<string, ViewType> = {
@@ -185,7 +200,12 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
   const sidebarCollapsed = useAppStore((state) => state.sidebarCollapsed);
   const selectedView = useAppStore((state) => state.selectedView);
   const selectedArticleId = useAppStore((state) => state.selectedArticleId);
+  const feeds = useAppStore((state) => state.feeds);
+  const selectedFeedView = useAppStore(
+    (state) => state.feeds.find((feed) => feed.id === state.selectedView)?.view ?? null,
+  );
   const setSelectedArticle = useAppStore((state) => state.setSelectedArticle);
+  const setSelectedView = useAppStore((state) => state.setSelectedView);
   const general = useSettingsStore((state) => state.persistedSettings.general);
   const updateReaderLayoutSettings = useSettingsStore((state) => state.updateReaderLayoutSettings);
   const selectedArticleTitle = useAppStore(
@@ -199,6 +219,52 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
     return state.feeds.find((feed) => feed.id === state.selectedView)?.title ?? '订阅视图';
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSectionKey>('general');
+  const openSettings = useCallback((section?: SettingsSectionKey) => {
+    setSettingsInitialSection(section ?? 'general');
+    setSettingsOpen(true);
+  }, []);
+
+  // 三方授权回调结果消费（docs/arch-oauth-hub.md §3.3）：
+  // 平台 302 回站时带 ?settings=oauth&oauth=success|denied|failed&provider=...&reason=...，
+  // 挂载时读取一次 → 打开「三方授权」分区 + 对应 toast → 清理 query（防刷新重复提示）。
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('settings') !== 'oauth') {
+      return;
+    }
+
+    const outcome = params.get('oauth');
+    const provider = params.get('provider');
+    if (!isOAuthCallbackOutcome(outcome)) {
+      return;
+    }
+
+    const displayName = getOAuthProviderMeta(provider ?? '')?.displayName ?? provider ?? '';
+
+    if (outcome === 'success') {
+      runImmediateSuccess({ actionKey: 'oauth.authorize.result', context: { displayName } });
+    } else if (outcome === 'denied') {
+      // 用户主动取消不是错误：弹中性提示而非红色报错（路由侧同语义）。
+      toast.info('你在平台侧取消了授权');
+    } else {
+      runImmediateFailure({
+        actionKey: 'oauth.authorize.result',
+        err: resolveOAuthCallbackReason(params.get('reason')),
+        context: { displayName },
+      });
+    }
+
+    openSettings('oauth');
+
+    // 清理 query，避免刷新页面后重复弹提示。
+    const url = new URL(window.location.href);
+    url.searchParams.delete('settings');
+    url.searchParams.delete('oauth');
+    url.searchParams.delete('provider');
+    url.searchParams.delete('reason');
+    window.history.replaceState({}, '', url.toString());
+  }, [openSettings]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
   const [activeSearchHighlightQuery, setActiveSearchHighlightQuery] = useState('');
@@ -231,10 +297,15 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
   const feedSheetOpen = !isDesktop && feedSheetState.open && feedSheetState.selectionKey === selectionKey;
   const leftPaneWidth = sidebarCollapsed ? 0 : general.leftPaneWidth;
   const middlePaneWidth = general.middlePaneWidth;
+  const isMediaReaderView =
+    selectedView === VIDEO_VIEW_ID ||
+    selectedFeedView === 'video' ||
+    selectedFeedView === 'picture';
+  const expandMediaListPane = isDesktop && isMediaReaderView && !selectedArticleId;
   const mobileHeading = selectedArticleId ? selectedArticleTitle || '阅读文章' : selectedViewLabel;
   const mobileSurfaceClassName = cn(
     'overflow-hidden border border-border/60 bg-[color-mix(in_oklab,var(--color-background)_86%,white_14%)] shadow-none supports-[backdrop-filter]:bg-[color-mix(in_oklab,var(--color-background)_78%,white_22%)]',
-    'dark:border-white/[0.06] dark:bg-[linear-gradient(180deg,rgba(15,15,19,0.94),rgba(9,9,12,0.9))] dark:supports-[backdrop-filter]:bg-[linear-gradient(180deg,rgba(15,15,19,0.84),rgba(9,9,12,0.78))]',
+    'dark:border-white/[0.06] dark:bg-card/92 dark:supports-[backdrop-filter]:bg-card/81',
   );
 
   const setResizePreviewOffset = useCallback((target: ResizeTarget, offset: number) => {
@@ -565,21 +636,24 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
       ref={layoutRef}
       data-testid="reader-layout-root"
       className={cn(
-        'relative flex h-screen overflow-hidden bg-background text-foreground dark:bg-[radial-gradient(ellipse_at_top,rgba(15,15,22,0.98)_0%,rgba(7,7,10,0.98)_48%,rgba(2,2,3,1)_100%)]',
-        !isDesktop && 'flex-col',
+        'relative flex h-screen flex-col overflow-hidden bg-background text-foreground dark:bg-[radial-gradient(ellipse_at_top,var(--color-popover)_0%,var(--color-background)_48%,color-mix(in_oklab,var(--color-background)_70%,black_30%)_100%)]',
       )}
     >
       {isDesktop ? (
-        <>
+        <div className="flex min-h-0 flex-1 flex-row overflow-hidden">
           <div
             data-testid="reader-feed-pane"
             className={cn(
-              'shrink-0 overflow-hidden border-r bg-muted/55 transition-colors duration-200 dark:border-white/[0.05] dark:bg-[linear-gradient(180deg,rgba(14,14,18,0.96),rgba(9,9,12,0.94))]',
-              isResizeTargetActive('left') ? 'border-primary/60' : 'border-border',
+              'glass-surface-strong shrink-0 overflow-hidden rounded-none border-r transition-colors duration-200',
+              isResizeTargetActive('left') ? 'border-primary/60' : '',
             )}
             style={{ width: `${leftPaneWidth}px` }}
           >
-            <MemoizedFeedList initialSelectedView={initialSelectedView} />
+            <MemoizedFeedList
+            initialSelectedView={initialSelectedView}
+            onOpenSettings={openSettings}
+            onAddGithub={() => openSettings('github')}
+          />
           </div>
 
           <ResizeHandle
@@ -592,44 +666,64 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
             onPointerLeave={() => handleResizeHandleLeave('left')}
           />
 
-          <div
-            data-testid="reader-article-pane"
-            className={cn(
-              'shrink-0 border-r bg-muted/15 transition-colors duration-200 dark:border-white/[0.05] dark:bg-[linear-gradient(180deg,rgba(11,11,15,0.94),rgba(7,7,10,0.9))]',
-              isResizeTargetActive('middle') ? 'border-primary/60' : 'border-border',
-            )}
-            style={{ width: `${middlePaneWidth}px` }}
-          >
-            <MemoizedArticleList
-              key={selectedView}
-              renderedAt={renderedAt}
-              initialSelectedView={initialSelectedView}
-            />
-          </div>
+          {isReaderContentPageView(selectedView) ? (
+            /* 内容页视图：中栏+右栏合并为一个可滚动面板（左栏永在） */
+            <div
+              data-testid="reader-content-pane"
+              className="glass-surface-light min-w-0 flex-1 overflow-hidden rounded-none"
+            >
+              <ReaderContentPage view={selectedView} />
+            </div>
+          ) : (
+            <>
+              <div
+                data-testid="reader-article-pane"
+                className={cn(
+                  'glass-surface-light transition-colors duration-200',
+                  expandMediaListPane
+                    ? 'min-w-0 flex-1'
+                    : cn(
+                        'shrink-0',
+                        isResizeTargetActive('middle') ? 'border-primary/60' : '',
+                      ),
+                )}
+                style={expandMediaListPane ? undefined : { width: `${middlePaneWidth}px` }}
+              >
+                <MemoizedArticleList
+                  key={selectedView}
+                  renderedAt={renderedAt}
+                  initialSelectedView={initialSelectedView}
+                />
+              </div>
 
-          <ResizeHandle
-            testId="reader-resize-handle-middle"
-            active={isResizeTargetActive('middle')}
-            dragging={draggingTarget === 'middle'}
-            previewOffsetVariable={MIDDLE_RESIZE_PREVIEW_OFFSET_VARIABLE}
-            onPointerDown={startMiddleResize}
-            onPointerEnter={() => handleResizeHandleEnter('middle')}
-            onPointerLeave={() => handleResizeHandleLeave('middle')}
-          />
+              {!expandMediaListPane ? (
+                <>
+                  <ResizeHandle
+                    testId="reader-resize-handle-middle"
+                    active={isResizeTargetActive('middle')}
+                    dragging={draggingTarget === 'middle'}
+                    previewOffsetVariable={MIDDLE_RESIZE_PREVIEW_OFFSET_VARIABLE}
+                    onPointerDown={startMiddleResize}
+                    onPointerEnter={() => handleResizeHandleEnter('middle')}
+                    onPointerLeave={() => handleResizeHandleLeave('middle')}
+                  />
 
-          <div className="relative flex-1 overflow-hidden bg-background dark:bg-[radial-gradient(circle_at_top,rgba(94,106,210,0.09),transparent_26%),linear-gradient(180deg,rgba(8,8,11,0.95),rgba(3,3,4,1))]">
-            <MemoizedArticleView
-              renderedAt={renderedAt}
-              highlightQuery={activeSearchHighlightQuery}
-              onOpenSearch={() => setSearchOpen(true)}
-              onOpenSettings={() => setSettingsOpen(true)}
-            />
-          </div>
-        </>
+                  <div className="glass-surface-light relative flex-1 overflow-hidden">
+                    <MemoizedArticleView
+                      renderedAt={renderedAt}
+                      highlightQuery={activeSearchHighlightQuery}
+                      onOpenSearch={() => setSearchOpen(true)}
+                    />
+                  </div>
+                </>
+              ) : null}
+            </>
+          )}
+        </div>
       ) : (
         <>
           <div className="relative min-h-0 flex-1 overflow-hidden">
-            <div className="absolute inset-x-0 top-0 h-40 bg-[radial-gradient(circle_at_top,rgba(74,107,255,0.14),transparent_72%)] dark:bg-[radial-gradient(circle_at_top,rgba(94,106,210,0.2),transparent_72%)]" />
+            <div className="absolute inset-x-0 top-0 h-40 bg-[radial-gradient(circle_at_top,color-mix(in_oklab,var(--color-primary)_14%,transparent),transparent_72%)] dark:bg-[radial-gradient(circle_at_top,color-mix(in_oklab,var(--color-primary)_20%,transparent),transparent_72%)]" />
 
             <div className="relative flex h-full min-h-0 flex-col">
               <div
@@ -687,14 +781,29 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
                     size="icon"
                     aria-label="打开设置"
                     className="h-9 w-9 rounded-full"
-                    onClick={() => setSettingsOpen(true)}
+                    onClick={() => openSettings()}
                   >
                     <SettingsIcon className="h-4 w-4" />
                   </Button>
                 </div>
               </div>
 
-              {isTablet ? (
+              {isReaderContentPageView(selectedView) ? (
+                /* 内容页视图：平板/移动在内容区渲染同一内容页面板（左栏经抽屉保留） */
+                <div
+                  data-testid="reader-mobile-content-pane"
+                  className="min-h-0 flex-1 overflow-hidden px-3 pb-3 pt-3 sm:px-4 sm:pb-4"
+                >
+                  <div
+                    className={cn(
+                      'h-full overflow-hidden rounded-[1.5rem]',
+                      mobileSurfaceClassName,
+                    )}
+                  >
+                    <ReaderContentPage view={selectedView} />
+                  </div>
+                </div>
+              ) : isTablet ? (
                 <div className="flex min-h-0 flex-1 gap-3 px-3 pb-3 pt-3 sm:px-4 sm:pb-4">
                   <div
                     data-testid="reader-tablet-article-pane"
@@ -730,7 +839,7 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
                 >
                   <div
                     className={cn(
-                      'h-full min-h-0 bg-background/96 dark:bg-[linear-gradient(180deg,rgba(10,10,14,0.96),rgba(6,6,9,0.98))]',
+                      'h-full min-h-0 bg-background/96 dark:bg-background/97',
                       selectedArticleId
                         ? 'rounded-none'
                         : 'rounded-t-[1.35rem] border-t border-border/60 dark:border-white/[0.05]',
@@ -833,7 +942,12 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
         </DialogContent>
       </Dialog>
 
-      {settingsOpen && <SettingsCenterModal onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <SettingsCenterModal
+          onClose={() => setSettingsOpen(false)}
+          initialSection={settingsInitialSection}
+        />
+      )}
     </div>
   );
 }

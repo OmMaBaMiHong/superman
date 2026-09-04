@@ -1,0 +1,16 @@
+packages:
+  - .
+  - vendor/rsshub
+
+blockExoticSubdeps: false
+
+allowBuilds:
+  bufferutil: true
+  core-js: true
+  es5-ext: true
+  esbuild: true
+  msw: true
+  protobufjs: true
+  sharp: true
+  utf-8-validate: true
+  workerd: true

@@ -3,6 +3,8 @@ import Parser from 'rss-parser';
 import { ok } from '@/server/infra/http/apiResponse';
 import { fetchRssXml } from '@/server/infra/http/externalHttpClient';
 import { isSafeExternalUrl } from '@/server/integrations/rss/ssrfGuard';
+import { isRssHubUrl } from '@/lib/rsshub/url';
+import { fetchFeedXml } from '@/server/integrations/rss/fetchFeedXml';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -103,17 +105,18 @@ export async function GET(request: Request) {
     return toJson({ valid: false, reason: 'invalid_url', message: '链接格式不正确' });
   }
 
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+  const rssHubUrl = isRssHubUrl(urlParam);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:' && !rssHubUrl) {
     return toJson({
       valid: false,
       reason: 'invalid_url',
-      message: '链接必须使用 http 或 https',
+      message: '链接必须使用 http、https 或 rsshub',
     });
   }
 
   const normalizedUrl = url.toString();
 
-  if (!(await isSafeExternalUrl(normalizedUrl, feedUrlSafetyOptions))) {
+  if (!rssHubUrl && !(await isSafeExternalUrl(normalizedUrl, feedUrlSafetyOptions))) {
     return toJson({
       valid: false,
       reason: 'unsafe_url',
@@ -122,6 +125,33 @@ export async function GET(request: Request) {
   }
 
   try {
+    if (rssHubUrl) {
+      const res = await fetchFeedXml(normalizedUrl, {
+        timeoutMs: 10_000,
+        userAgent: 'FeedFuse RSS Validator',
+      });
+
+      if (res.status < 200 || res.status >= 300 || !res.xml) {
+        return toJson({
+          valid: false,
+          reason: 'not_feed',
+          message: '无法从内置 RSSHub 获取订阅内容',
+        });
+      }
+
+      const xml = res.xml;
+      const kind = detectKind(xml);
+      const feed = await parser.parseString(xml);
+      const parsedSiteUrl = normalizeHttpUrl(feed.link);
+
+      return toJson({
+        valid: true,
+        kind,
+        title: typeof feed.title === 'string' ? feed.title : undefined,
+        siteUrl: parsedSiteUrl ?? undefined,
+      });
+    }
+
     const res = await fetchRssXml(normalizedUrl, {
       timeoutMs: 10_000,
       userAgent: 'FeedFuse RSS Validator',

@@ -35,3 +35,21 @@ artifacts/
 .superpowers
 
 *.tsbuildinfo
+
+# 抖音发布服务运行时产物（虚拟环境、上传视频、登录 cookie、数据库）
+vendor/douyin-publish-service/.venv/
+vendor/douyin-publish-service/videoFile/
+vendor/douyin-publish-service/cookiesFile/
+vendor/douyin-publish-service/db/database.db
+
+# === superman 迁移排雷：大文件与敏感/本地产物 ===
+vendor/
+downloads/
+models/
+uploads/
+.next.bak/
+.douyin-migrate-tmp/
+.workbuddy/
+.codebase-memory/
+**/cookies/
+**/cookiesFile/

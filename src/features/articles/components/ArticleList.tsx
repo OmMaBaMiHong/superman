@@ -1,4 +1,4 @@
-import { CheckCheck, CircleDot, LayoutGrid, List, RefreshCw } from "lucide-react";
+import { CheckCheck, CircleDot, LayoutGrid, List, Play, RefreshCw } from "lucide-react";
 import {
   type KeyboardEvent,
   type UIEvent,
@@ -10,7 +10,7 @@ import {
   useState,
 } from "react";
 import { useAppStore } from "../../../store/appStore";
-import { formatRelativeTime } from "../../../utils/date";
+import { formatFullDateTime, formatRelativeTime } from "../../../utils/date";
 import {
   generateAiDigest,
   getAiDigestRunStatus,
@@ -26,11 +26,14 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import {
   AI_DIGEST_VIEW_ID,
+  ARTICLE_VIEW_ID,
+  VIDEO_VIEW_ID,
   isAggregateView as isAggregateReaderView,
   shouldUseDefaultUnreadOnly,
 } from "@/lib/reader/view";
 import type { ViewType } from "../../../types";
 import ReaderToolbarIconButton from "../../reader/components/ReaderToolbarIconButton";
+import GithubTypeBadge from "../../github/components/GithubTypeBadge";
 import {
   beginDeferredOperation,
   failDeferredOperation,
@@ -41,6 +44,9 @@ import {
 import { useHydratedSelectedView } from "../../../hooks";
 import { buildArticleListDerivedState } from "../utils";
 import { getFilteredReasonLabel } from "../utils";
+import { getArticleVideoMeta } from "@/lib/media/video";
+
+import VideoArticleGrid from "./VideoArticleGrid";
 import {
   getArticleVirtualAnchorCompensation,
   getArticleVirtualWindow,
@@ -135,12 +141,16 @@ const LOAD_MORE_THRESHOLD_PX = 320;
 const LOAD_MORE_FOOTER_CLASS_NAME = "flex justify-center px-4 py-3 text-center";
 const LOAD_MORE_HINT_CLASS_NAME = "text-xs text-muted-foreground";
 const SELECTED_ARTICLE_ROW_CLASS_NAME =
-  "border border-transparent bg-[color-mix(in_oklab,var(--color-primary)_11%,white_89%)] [&_[data-selected-row-feed]]:text-foreground/72 [&_[data-selected-row-time]]:text-foreground/72 [&_[data-selected-row-title]]:text-foreground dark:border-[rgba(94,106,210,0.26)] dark:!bg-[var(--reader-pane-active-strong)] dark:[&_[data-selected-row-feed]]:text-foreground/78 dark:[&_[data-selected-row-time]]:text-foreground/78 dark:[&_[data-selected-row-title]]:text-foreground";
+  "border border-transparent bg-[color-mix(in_oklab,var(--color-primary)_11%,white_89%)] [&_[data-selected-row-feed]]:text-foreground/72 [&_[data-selected-row-time]]:text-foreground/72 [&_[data-selected-row-title]]:text-foreground dark:border-primary/26 dark:!bg-[var(--reader-pane-active-strong)] dark:[&_[data-selected-row-feed]]:text-foreground/78 dark:[&_[data-selected-row-time]]:text-foreground/78 dark:[&_[data-selected-row-title]]:text-foreground";
 type PreviewImageStatus = "loading" | "ready" | "failed";
 const unreadSignalDotClassName =
-  "h-2 w-2 rounded-full bg-[color-mix(in_oklab,var(--color-primary)_70%,white_30%)] ring-2 ring-background/95 dark:bg-[color-mix(in_oklab,var(--color-primary)_90%,white_10%)] dark:ring-[rgba(5,5,6,0.96)]";
+  "h-2 w-2 rounded-full bg-[color-mix(in_oklab,var(--color-primary)_70%,white_30%)] ring-2 ring-background/95 dark:bg-[color-mix(in_oklab,var(--color-primary)_90%,white_10%)] dark:ring-background/96";
 const unreadSignalTimeClassName =
   "font-semibold text-[color-mix(in_oklab,var(--color-primary)_78%,white_22%)] dark:text-[color-mix(in_oklab,var(--color-primary)_72%,white_28%)]";
+const SMART_VIEW_TITLE_BY_ID: Partial<Record<ViewType, string>> = {
+  [ARTICLE_VIEW_ID]: "图文",
+  [VIDEO_VIEW_ID]: "视频",
+};
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -510,8 +520,17 @@ export default function ArticleList({
 
   const selectedFeed = isAggregateView ? null : feedById.get(renderedSelectedView) ?? selectedFeedFromStore;
   const headerTitle =
-    renderedSelectedView === AI_DIGEST_VIEW_ID ? "智能报告" : (selectedFeed?.title ?? "文章");
+    SMART_VIEW_TITLE_BY_ID[renderedSelectedView] ??
+    (renderedSelectedView === AI_DIGEST_VIEW_ID ? "智能报告" : (selectedFeed?.title ?? "文章"));
   const isAiDigestView = Boolean(selectedFeed && (selectedFeed.kind ?? "rss") === "ai_digest");
+  const mediaGridKind = (() => {
+    if (renderedSelectedView === VIDEO_VIEW_ID) return "video";
+    if (selectedFeed?.view === "video") return "video";
+    if (selectedFeed?.view === "picture") return "picture";
+    return null;
+  })();
+  const mediaCollectionLabel =
+    mediaGridKind === "video" ? "视频合集" : mediaGridKind === "picture" ? "图片合集" : null;
 
   useEffect(() => {
     if (effectiveDisplayMode !== "card") {
@@ -587,6 +606,14 @@ export default function ArticleList({
 
     if (renderedSelectedView === AI_DIGEST_VIEW_ID) {
       return "还没有智能报告";
+    }
+
+    if (renderedSelectedView === ARTICLE_VIEW_ID) {
+      return "还没有图文内容";
+    }
+
+    if (renderedSelectedView === VIDEO_VIEW_ID) {
+      return "还没有视频内容";
     }
 
     if (selectedFeed) {
@@ -719,7 +746,7 @@ export default function ArticleList({
             onClick={() => void loadMoreSnapshot()}
             className={cn(
               LOAD_MORE_HINT_CLASS_NAME,
-              "rounded-full border border-border/70 px-3 py-1 transition-colors hover:border-border hover:text-foreground dark:border-white/[0.08] dark:bg-[rgba(255,255,255,0.03)] dark:hover:border-[rgba(94,106,210,0.3)] dark:hover:bg-[rgba(94,106,210,0.1)]",
+              "rounded-full border border-border/70 px-3 py-1 transition-colors hover:border-border hover:text-foreground dark:border-white/[0.08] dark:bg-[var(--glass-bg-light)] dark:hover:border-primary/30 dark:hover:bg-primary/10",
             )}
           >
             加载更多时出了点小问题，再试一次
@@ -972,6 +999,12 @@ export default function ArticleList({
           contentHtml: article.content,
         })
       : article.summary;
+    const articleVideoMeta = getArticleVideoMeta({
+      link: article.link,
+      content: article.content,
+      previewImage: article.previewImage,
+      mediaAttachments: article.mediaAttachments,
+    });
 
     if (effectiveDisplayMode === "list") {
       return (
@@ -1015,6 +1048,9 @@ export default function ArticleList({
                 >
                   {getFeedTitle(article.feedId)}
                 </span>
+                {article.githubMeta ? (
+                  <GithubTypeBadge type={article.githubMeta.ghType} />
+                ) : null}
                 {articleFiltered ? (
                   <Badge variant="secondary" className="h-5 shrink-0 px-1.5 text-[10px] font-medium">
                     {getFilteredReasonLabel(article.filteredBy)}
@@ -1034,7 +1070,7 @@ export default function ArticleList({
                   data-selected-row-time
                   className={article.isRead ? "text-muted-foreground" : unreadSignalTimeClassName}
                 >
-                  {formatRelativeTime(article.publishedAt, referenceTime)}
+                  {formatFullDateTime(article.publishedAt)}
                 </span>
               </div>
             </div>
@@ -1048,6 +1084,13 @@ export default function ArticleList({
         key={row.key}
         data-article-nav="true"
         data-article-id={article.id}
+        data-testid={
+          articleVideoMeta
+              ? mediaGridKind === "video"
+                ? `article-video-smart-card-${article.id}`
+                : `article-video-card-${article.id}`
+            : undefined
+        }
         ref={(node) => {
           if (node) {
             articleCardRefs.current.set(article.id, node);
@@ -1110,6 +1153,9 @@ export default function ArticleList({
                 >
                   {getFeedTitle(article.feedId)}
                 </span>
+                {article.githubMeta ? (
+                  <GithubTypeBadge type={article.githubMeta.ghType} />
+                ) : null}
                 {articleFiltered ? (
                   <Badge variant="secondary" className="h-5 shrink-0 px-1.5 text-[10px] font-medium">
                     {getFilteredReasonLabel(article.filteredBy)}
@@ -1129,14 +1175,14 @@ export default function ArticleList({
                   data-selected-row-time
                   className={article.isRead ? "text-muted-foreground" : unreadSignalTimeClassName}
                 >
-                  {formatRelativeTime(article.publishedAt, referenceTime)}
+                  {formatFullDateTime(article.publishedAt)}
                 </span>
               </div>
             </div>
           </div>
 
           {showPreviewImage && previewImage ? (
-            <div className="h-full w-24 shrink-0 overflow-hidden rounded-lg bg-muted dark:bg-[linear-gradient(180deg,rgba(14,14,18,0.96),rgba(9,9,12,0.92))]">
+            <div className="relative h-full w-24 shrink-0 overflow-hidden rounded-lg bg-muted dark:bg-card">
               <img
                 src={previewImage.src}
                 alt=""
@@ -1159,6 +1205,15 @@ export default function ArticleList({
                   });
                 }}
               />
+              {articleVideoMeta ? (
+                <span
+                  aria-label="视频文章"
+                  className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full bg-black/65 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-white ring-1 ring-white/15 backdrop-blur-md"
+                >
+                  <Play className="h-3 w-3 fill-current" />
+                  Video
+                </span>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -1168,16 +1223,23 @@ export default function ArticleList({
 
   return (
     <div
-      className="flex h-full flex-col dark:bg-[linear-gradient(180deg,rgba(14,14,18,0.3),rgba(8,8,10,0))]"
+      className="flex h-full flex-col dark:bg-[linear-gradient(180deg,color-mix(in_oklab,var(--color-card)_30%,transparent),transparent)]"
       aria-busy={refreshing || displayModeSaving}
     >
       <div className="flex h-12 min-w-0 items-center justify-between gap-3 border-b border-transparent px-4 dark:border-white/[0.04]">
-        <h2
-          className="min-w-0 truncate text-[0.96rem] font-semibold tracking-[0.01em]"
-          title={headerTitle}
-        >
-          {headerTitle}
-        </h2>
+        <div className="flex min-w-0 items-center gap-2">
+          <h2
+            className="min-w-0 truncate text-[0.96rem] font-semibold tracking-[0.01em]"
+            title={headerTitle}
+          >
+            {headerTitle}
+          </h2>
+          {mediaCollectionLabel ? (
+            <span className="shrink-0 rounded-full border border-primary/15 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
+              {mediaCollectionLabel}
+            </span>
+          ) : null}
+        </div>
         <div className="shrink-0 flex items-center gap-2">
           <ReaderToolbarIconButton
             icon={RefreshCw}
@@ -1186,7 +1248,7 @@ export default function ArticleList({
             onClick={onRefreshClick}
             iconClassName={cn("h-3.5 w-3.5", refreshing && "animate-spin")}
           />
-          {!isAggregateView && selectedFeed && (
+          {!isAggregateView && selectedFeed && !mediaGridKind && (
             <ReaderToolbarIconButton
               icon={effectiveDisplayMode === "card" ? List : LayoutGrid}
               label={displayModeButtonTitle}
@@ -1223,13 +1285,26 @@ export default function ArticleList({
           <div className="flex min-h-full items-center justify-center px-6 py-10">
             <p className="text-center text-muted-foreground">{emptyStateMessage}</p>
           </div>
+        ) : mediaGridKind ? (
+          <VideoArticleGrid
+            articles={filteredArticles}
+            feedTitleById={feedTitleById}
+            kind={mediaGridKind}
+            referenceTime={referenceTime}
+            selectedArticleId={selectedArticleId}
+            onSelectArticle={setSelectedArticle}
+            onArticleKeyDown={handleArticleKeyDown}
+            renderFooter={renderLoadMoreFooter}
+          />
         ) : (
-          <>
-            <div aria-hidden="true" style={{ height: virtualWindow.topSpacerHeight }} />
-            {visibleRows.map(renderVirtualRow)}
-            <div aria-hidden="true" style={{ height: virtualWindow.bottomSpacerHeight }} />
-            {renderLoadMoreFooter()}
-          </>
+          <div className="flex min-h-full">
+            <div className="min-w-0 flex-1">
+              <div aria-hidden="true" style={{ height: virtualWindow.topSpacerHeight }} />
+              {visibleRows.map(renderVirtualRow)}
+              <div aria-hidden="true" style={{ height: virtualWindow.bottomSpacerHeight }} />
+              {renderLoadMoreFooter()}
+            </div>
+          </div>
         )}
       </div>
     </div>

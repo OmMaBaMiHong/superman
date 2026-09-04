@@ -105,6 +105,7 @@ describe('AddFeedDialog', () => {
       aiSummaryOnFetchEnabled: boolean;
       bodyTranslateOnFetchEnabled: boolean;
       bodyTranslateOnOpenEnabled: boolean;
+      view: string;
     }
   >;
 
@@ -135,6 +136,46 @@ describe('AddFeedDialog', () => {
           return jsonResponse({ ok: true, data: { enqueued: true, jobId: 'job-1' } });
         }
 
+        if (url.includes('/api/rsshub/status') && method === 'GET') {
+          return jsonResponse({
+            ok: true,
+            data: {
+              available: true,
+              mode: 'embedded',
+            },
+          });
+        }
+
+        if (url.includes('/api/rsshub/resolve') && method === 'GET') {
+          const sourceUrl = new URL(url).searchParams.get('url');
+          if (sourceUrl === 'https://v.douyin.com/Cp6D0GGQF4o/') {
+            return jsonResponse({
+              ok: true,
+              data: {
+                resolved: true,
+                inputUrl: sourceUrl,
+                finalUrl:
+                  'https://www.iesdouyin.com/share/user/MS4wLjABAAAAp6daEOfb2hRJxsXteimTyhVEMdleIodhtez1fYBTR5Q',
+                rssHubUrl:
+                  'rsshub://douyin/user/MS4wLjABAAAAp6daEOfb2hRJxsXteimTyhVEMdleIodhtez1fYBTR5Q',
+                routePath:
+                  '/douyin/user/MS4wLjABAAAAp6daEOfb2hRJxsXteimTyhVEMdleIodhtez1fYBTR5Q',
+                title: '抖音博主',
+                sourceDomain: 'iesdouyin.com',
+              },
+            });
+          }
+
+          return jsonResponse({
+            ok: true,
+            data: {
+              resolved: false,
+              inputUrl: sourceUrl,
+              message: '暂未找到匹配的 RSSHub 规则。',
+            },
+          });
+        }
+
         if (url.includes('/api/feeds') && method === 'POST') {
           const body = await getFetchCallJsonBody(input, init);
           lastCreateFeedBody = body;
@@ -148,6 +189,7 @@ describe('AddFeedDialog', () => {
             aiSummaryOnFetchEnabled: Boolean(body.aiSummaryOnFetchEnabled ?? false),
             bodyTranslateOnFetchEnabled: Boolean(body.bodyTranslateOnFetchEnabled ?? false),
             bodyTranslateOnOpenEnabled: Boolean(body.bodyTranslateOnOpenEnabled ?? false),
+            view: String(body.view ?? 'article'),
           });
           return jsonResponse({
             ok: true,
@@ -163,6 +205,7 @@ describe('AddFeedDialog', () => {
               aiSummaryOnFetchEnabled: Boolean(body.aiSummaryOnFetchEnabled ?? false),
               bodyTranslateOnFetchEnabled: Boolean(body.bodyTranslateOnFetchEnabled ?? false),
               bodyTranslateOnOpenEnabled: Boolean(body.bodyTranslateOnOpenEnabled ?? false),
+              view: String(body.view ?? 'article'),
               categoryId: body.categoryId ?? null,
               fetchIntervalMinutes: 30,
               unreadCount: 0,
@@ -193,6 +236,7 @@ describe('AddFeedDialog', () => {
                       aiSummaryOnFetchEnabled: createdFeed?.aiSummaryOnFetchEnabled ?? false,
                       bodyTranslateOnFetchEnabled: createdFeed?.bodyTranslateOnFetchEnabled ?? false,
                       bodyTranslateOnOpenEnabled: createdFeed?.bodyTranslateOnOpenEnabled ?? false,
+                      view: createdFeed?.view ?? 'article',
                       categoryId: createdFeed?.categoryId ?? null,
                       fetchIntervalMinutes: 30,
                       unreadCount: 1,
@@ -273,14 +317,24 @@ describe('AddFeedDialog', () => {
     expect(urlInput).toHaveFocus();
   });
 
-  it('add dialog only shows URL 名称 分类 fields', async () => {
+  it('add dialog shows URL 名称 分类 and view selector fields', async () => {
     renderWithNotifications();
     await openAddFeedDialog();
 
+    expect(screen.getByRole('search', { name: 'Discover 订阅源' })).toBeInTheDocument();
+    expect(screen.getByText('本地 RSSHub 已就绪')).toBeInTheDocument();
     expect(screen.getByLabelText('URL')).toBeInTheDocument();
     expect(screen.getByLabelText('名称')).toBeInTheDocument();
     expect(screen.getByLabelText('分类')).toBeInTheDocument();
+    expect(screen.getByRole('radiogroup', { name: '视图' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: '文章' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('radio', { name: '视频' })).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByText('输入 RSS 或 RSSHub 路由')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '内置 RSSHub 推荐源' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '普通 RSS 推荐源' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /订阅 Andrej Karpathy YouTube/i })).not.toBeInTheDocument();
     expect(screen.getByText('可直接输入新分类名称，保存时会自动创建并归类到该分类。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '识别 RSSHub 订阅' })).toBeInTheDocument();
 
     expect(screen.queryByRole('combobox', { name: '打开文章时抓取全文' })).not.toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: '收到新文章时自动生成摘要' })).not.toBeInTheDocument();
@@ -289,6 +343,131 @@ describe('AddFeedDialog', () => {
     expect(screen.queryByRole('combobox', { name: '收到新文章时自动翻译正文' })).not.toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: '打开文章时自动翻译正文' })).not.toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: '正文翻译' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the add feed form scrollable with visible footer actions', async () => {
+    renderWithNotifications();
+    const dialog = await openAddFeedDialog();
+
+    expect(dialog).toHaveClass('max-h-[min(720px,calc(100vh-2rem))]', 'overflow-hidden');
+    const scrollArea = screen.getByTestId('feed-dialog-scroll-area');
+    expect(scrollArea).toHaveClass('overflow-y-auto');
+    expect(screen.getByRole('button', { name: '取消' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '添加订阅源' })).toBeInTheDocument();
+  });
+
+  it('shows RSSHub native discovery hints while typing an rsshub route', async () => {
+    renderWithNotifications();
+    await openAddFeedDialog();
+
+    fireEvent.change(screen.getByLabelText('URL'), {
+      target: { value: 'rsshub://youtube/user/@AndrejKarpathy' },
+    });
+
+    expect(screen.getByText('已识别为内置 RSSHub 路由')).toBeInTheDocument();
+    expect(screen.getByText('保存后会通过本地 RSSHub 转换为可阅读 RSS。')).toBeInTheDocument();
+
+    fireEvent.blur(screen.getByLabelText('URL'));
+
+    await waitFor(() => {
+      expect(screen.getByText('已识别为内置 RSSHub 订阅地址。')).toBeInTheDocument();
+    });
+  });
+
+  it('submits the selected feed view independently from category', async () => {
+    renderWithNotifications();
+    await openAddFeedDialog();
+
+    fireEvent.click(screen.getByRole('radio', { name: '视频' }));
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: 'Video Feed' } });
+    fireEvent.change(screen.getByLabelText('URL'), {
+      target: { value: 'rsshub://youtube/user/@AndrejKarpathy' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '添加订阅源' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '添加 RSS 源' })).not.toBeInTheDocument();
+    });
+    expect(lastCreateFeedBody).toMatchObject({
+      title: 'Video Feed',
+      url: 'rsshub://youtube/user/@AndrejKarpathy',
+      categoryId: 'cat-tech',
+      view: 'video',
+    });
+  });
+
+  it('keeps selected feed view when category is changed manually', async () => {
+    renderWithNotifications();
+    await openAddFeedDialog();
+
+    fireEvent.click(screen.getByRole('radio', { name: '视频' }));
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: 'Andrej Karpathy YouTube' } });
+    fireEvent.change(screen.getByLabelText('URL'), {
+      target: { value: 'rsshub://youtube/user/@AndrejKarpathy' },
+    });
+    fireEvent.change(screen.getByLabelText('分类'), { target: { value: '设计' } });
+
+    fireEvent.click(screen.getByRole('button', { name: '添加订阅源' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '添加 RSS 源' })).not.toBeInTheDocument();
+    });
+    expect(lastCreateFeedBody).toMatchObject({
+      categoryId: 'cat-design',
+      view: 'video',
+    });
+  });
+
+  it('submits an rsshub url without requiring remote validation first', async () => {
+    renderWithNotifications();
+    await openAddFeedDialog();
+
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: 'Andrej Karpathy YouTube' } });
+    fireEvent.change(screen.getByLabelText('URL'), {
+      target: { value: 'rsshub://youtube/user/@AndrejKarpathy' },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '添加订阅源' })).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '添加订阅源' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '添加 RSS 源' })).not.toBeInTheDocument();
+    });
+    expect(lastCreateFeedBody?.url).toBe('rsshub://youtube/user/@AndrejKarpathy');
+  });
+
+  it('converts a source page link into an rsshub subscription before submit', async () => {
+    renderWithNotifications();
+    await openAddFeedDialog();
+
+    const urlInput = screen.getByLabelText('URL');
+    fireEvent.change(urlInput, {
+      target: { value: 'https://v.douyin.com/Cp6D0GGQF4o/' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '识别 RSSHub 订阅' }));
+
+    await waitFor(() => {
+      expect(urlInput).toHaveValue(
+        'rsshub://douyin/user/MS4wLjABAAAAp6daEOfb2hRJxsXteimTyhVEMdleIodhtez1fYBTR5Q',
+      );
+      expect(screen.getByLabelText('名称')).toHaveValue('抖音博主');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '添加订阅源' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '添加 RSS 源' })).not.toBeInTheDocument();
+    });
+    expect(lastCreateFeedBody).toMatchObject({
+      title: '抖音博主',
+      url: 'rsshub://douyin/user/MS4wLjABAAAAp6daEOfb2hRJxsXteimTyhVEMdleIodhtez1fYBTR5Q',
+      categoryId: 'cat-tech',
+    });
   });
 
   it('auto fills title when validation succeeds and title is empty', async () => {
@@ -384,6 +563,7 @@ describe('AddFeedDialog', () => {
             aiSummaryOnFetchEnabled: Boolean(body.aiSummaryOnFetchEnabled ?? false),
             bodyTranslateOnFetchEnabled: Boolean(body.bodyTranslateOnFetchEnabled ?? false),
             bodyTranslateOnOpenEnabled: Boolean(body.bodyTranslateOnOpenEnabled ?? false),
+            view: String(body.view ?? 'article'),
           });
           return jsonResponse({
             ok: true,
@@ -399,6 +579,7 @@ describe('AddFeedDialog', () => {
               aiSummaryOnFetchEnabled: Boolean(body.aiSummaryOnFetchEnabled ?? false),
               bodyTranslateOnFetchEnabled: Boolean(body.bodyTranslateOnFetchEnabled ?? false),
               bodyTranslateOnOpenEnabled: Boolean(body.bodyTranslateOnOpenEnabled ?? false),
+              view: String(body.view ?? 'article'),
               categoryId: body.categoryId ?? null,
               fetchIntervalMinutes: 30,
               unreadCount: 0,
@@ -495,6 +676,7 @@ describe('AddFeedDialog', () => {
       url: 'https://example.com/success.xml',
       siteUrl: 'https://example.com/',
       categoryId: 'cat-tech',
+      view: 'article',
     });
   });
 

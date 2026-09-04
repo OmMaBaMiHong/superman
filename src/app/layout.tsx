@@ -18,8 +18,11 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#f6f7f8' },
-    { media: '(prefers-color-scheme: dark)', color: '#111a30' },
+    // 浏览器 UI 主题色：Next.js metadata 要求字面量，无法引用 CSS 变量（token 铁律的合理豁免）。
+    // 取值必须与 globals.css 的 --color-background 同步：
+    // 浅色 hsl(210 20% 98%) ≈ #f9fafb；深色 hsl(240 15% 3%) ≈ #070709（旧靛蓝 #111a30 已废弃）。
+    { media: '(prefers-color-scheme: light)', color: '#f9fafb' },
+    { media: '(prefers-color-scheme: dark)', color: '#070709' },
   ],
 };
 

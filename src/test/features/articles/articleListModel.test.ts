@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { Article, Feed } from '../../../types';
-import { AI_DIGEST_VIEW_ID } from '@/lib/reader/view';
+import {
+  AI_DIGEST_VIEW_ID,
+  ARTICLE_VIEW_ID,
+  VIDEO_VIEW_ID,
+} from '@/lib/reader/view';
 import {
   ARTICLE_CARD_ROW_HEIGHT,
   ARTICLE_LIST_ROW_HEIGHT,
@@ -152,5 +156,55 @@ describe('buildArticleListDerivedState', () => {
       ARTICLE_SECTION_ROW_HEIGHT,
       ARTICLE_LIST_ROW_HEIGHT,
     ]);
+  });
+
+  it('filters articles into Folo-style smart media views', () => {
+    const articles = [
+      createArticle({
+        id: 'plain-article',
+        title: 'Plain article',
+        link: 'https://example.com/plain',
+        content: '<p>Long form writing</p>',
+      }),
+      createArticle({
+        id: 'picture-article',
+        title: 'Picture article',
+        link: 'https://example.com/gallery',
+        content: '<p>Photo story</p><img src="https://img.example/photo.jpg" />',
+      }),
+      createArticle({
+        id: 'video-article',
+        title: 'Video article',
+        link: 'https://www.youtube.com/watch?v=L_Guz73e6fw',
+        content: '<p>Video notes</p>',
+      }),
+      createArticle({
+        id: 'social-article',
+        title: 'Social article',
+        link: 'https://x.com/karpathy/status/1',
+        content: '<p>Short post</p>',
+      }),
+    ];
+
+    const baseInput = {
+      articles,
+      selectedArticleId: null,
+      displayMode: 'card' as const,
+      showUnreadFilterActive: false,
+      retainedVisibleArticleIds: new Set<string>(),
+      aiDigestFeedIds: new Set<string>(),
+      referenceTime: new Date('2026-02-25T12:00:00.000Z'),
+    };
+
+    expect(
+      buildArticleListDerivedState({ ...baseInput, selectedView: ARTICLE_VIEW_ID }).viewScopedArticles.map(
+        (article) => article.id,
+      ),
+    ).toEqual(['plain-article']);
+    expect(
+      buildArticleListDerivedState({ ...baseInput, selectedView: VIDEO_VIEW_ID }).viewScopedArticles.map(
+        (article) => article.id,
+      ),
+    ).toEqual(['video-article']);
   });
 });

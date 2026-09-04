@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import process from 'node:process';
 import type { PgBoss } from 'pg-boss';
-import { getPool } from '@/server/infra/db/pool';
+import { getPool, closePool } from '@/server/infra/db/pool';
 import {
   getFeedForFetch,
   listEnabledFeedsForFetch,
@@ -22,6 +22,7 @@ import {
   getUiSettings,
 } from '@/server/domains/settings/repositories/settingsRepo';
 import { fetchFeedXml } from '@/server/integrations/rss/fetchFeedXml';
+import { isRssHubUrl } from '@/lib/rsshub/url';
 import { parseFeed } from '@/server/integrations/rss/parseFeed';
 import { sanitizeContent } from '@/server/integrations/rss/sanitizeContent';
 import { isSafeExternalUrl } from '@/server/integrations/rss/ssrfGuard';
@@ -51,6 +52,8 @@ import {
   JOB_FEVER_SYNC,
   JOB_FEVER_SYNC_DUE,
   JOB_FEED_FETCH,
+  JOB_GITHUB_FETCH_REPO,
+  JOB_GITHUB_SYNC_DUE,
   JOB_REFRESH_ALL,
   JOB_SYSTEM_LOG_CLEANUP,
 } from '@/server/infra/queue/jobs';
@@ -70,6 +73,9 @@ import { enqueueFeverRefreshAllTargets } from '@/worker/feverRefreshAll';
 import { runFeverSyncWorker } from '@/worker/feverSync';
 import { runArticleFilterWorker, type ArticleFilterJobData } from '@/worker/articleFilterWorker';
 import { runSystemLogCleanup } from '@/worker/systemLogCleanup';
+import { runGithubSyncDue } from '@/worker/githubSyncDue';
+import { runGithubFetchWorker } from '@/worker/githubFetchWorker';
+import { listGithubSubscriptionFeedIds } from '@/server/domains/github/repositories/githubSubscriptionsRepo';
 import { normalizeUserId } from '@/server/domains/users/userScope';
 import { listUsers } from '@/server/domains/auth/repositories/usersRepo';
 import {
@@ -234,7 +240,22 @@ export async function enqueueRefreshAll(
       }
     }
   }
-  return { enqueued: targetFeeds.length + feverEnqueued.enqueued };
+
+  // 「刷新全部」强制模式：把启用的 GitHub 订阅也并入本轮同步。
+  let githubEnqueued = 0;
+  if (force) {
+    const githubFeedIds = await listGithubSubscriptionFeedIds(pool, scopedUserId);
+    for (const feedId of githubFeedIds) {
+      const jobId = await boss.send(
+        JOB_GITHUB_FETCH_REPO,
+        { userId: scopedUserId, feedId, force: true },
+        getQueueSendOptions(JOB_GITHUB_FETCH_REPO, { userId: scopedUserId, feedId }),
+      );
+      if (jobId) githubEnqueued += 1;
+    }
+  }
+
+  return { enqueued: targetFeeds.length + feverEnqueued.enqueued + githubEnqueued };
 }
 
 export async function fetchAndIngestFeed(
@@ -258,7 +279,7 @@ export async function fetchAndIngestFeed(
     return { inserted: 0, errorMessage: null };
   }
 
-  if (!(await deps.isSafeExternalUrl(feed.url))) {
+  if (!isRssHubUrl(feed.url) && !(await deps.isSafeExternalUrl(feed.url))) {
     const mapped = mapFeedFetchError('Unsafe URL');
     await deps.recordFeedFetchResult(pool, feedId, {
       userId: feed.userId,
@@ -981,12 +1002,44 @@ async function main() {
     }
   };
 
+  const githubSyncDueHandler = async (jobs: unknown[]) => {
+    for (const job of jobs) {
+      const userId = readStringField(getJobData(job), 'userId');
+      const userIds = userId ? [userId] : await listActiveWorkerUserIds(pool);
+
+      for (const activeUserId of userIds) {
+        await runGithubSyncDue({ pool, userId: activeUserId });
+      }
+    }
+  };
+
+  const githubFetchHandler = async (jobs: unknown[]) => {
+    for (const job of jobs) {
+      const data = getJobData(job);
+      const feedId = readStringField(data, 'feedId');
+      if (!feedId) {
+        continue;
+      }
+
+      const userId = readStringField(data, 'userId');
+      const force = readBooleanField(data, 'force') ?? false;
+
+      await runGithubFetchWorker({
+        pool,
+        boss,
+        data: { userId, feedId, force },
+      });
+    }
+  };
+
   await registerWorkers(boss, {
     [JOB_REFRESH_ALL]: refreshAllHandler,
     [JOB_AI_DIGEST_TICK]: aiDigestTickHandler,
     [JOB_AI_DIGEST_GENERATE]: aiDigestGenerateHandler,
     [JOB_FEVER_SYNC]: feverSyncHandler,
     [JOB_FEVER_SYNC_DUE]: feverAutoSyncHandler,
+    [JOB_GITHUB_SYNC_DUE]: githubSyncDueHandler,
+    [JOB_GITHUB_FETCH_REPO]: githubFetchHandler,
     [JOB_FEED_FETCH]: feedFetchHandler,
     [JOB_ARTICLE_FILTER]: articleFilterHandler,
     [JOB_ARTICLE_FULLTEXT_FETCH]: fulltextHandler,
@@ -1010,12 +1063,15 @@ async function main() {
   await boss.send(JOB_AI_DIGEST_TICK, {});
   await boss.schedule(JOB_FEVER_SYNC_DUE, '* * * * *');
   await boss.send(JOB_FEVER_SYNC_DUE, {}, getQueueSendOptions(JOB_FEVER_SYNC_DUE, {}));
+  await boss.schedule(JOB_GITHUB_SYNC_DUE, '* * * * *');
+  await boss.send(JOB_GITHUB_SYNC_DUE, {}, getQueueSendOptions(JOB_GITHUB_SYNC_DUE, {}));
   // Run cleanup hourly and trigger one immediate pass on worker boot.
   await boss.schedule(JOB_SYSTEM_LOG_CLEANUP, '0 * * * *');
   await boss.send(JOB_SYSTEM_LOG_CLEANUP, {});
 
   const shutdown = async () => {
     await boss.stop();
+    await closePool();
   };
 
   process.on('SIGINT', () => void shutdown());

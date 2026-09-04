@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { Article, Category, Feed, ViewType } from '../types';
 import { useSettingsStore } from './settingsStore';
-import { AI_DIGEST_VIEW_ID, shouldUseDefaultUnreadOnly } from '@/lib/reader/view';
+import { AI_DIGEST_VIEW_ID, isReaderContentPageView, shouldUseDefaultUnreadOnly } from '@/lib/reader/view';
 import {
   createAiDigest,
   createFeed,
@@ -27,7 +27,9 @@ import { AUTH_ANONYMOUS_STORAGE_USER_ID, getCurrentStorageUserId } from './authS
 const READER_SELECTION_VIEW_PARAM = 'view';
 const READER_SELECTION_ARTICLE_PARAM = 'article';
 const READER_UNREAD_ONLY_BY_VIEW_STORAGE_KEY = 'feedfuse.reader.unreadOnlyByView.v1';
+const READER_RAIL_ORDER_STORAGE_KEY = 'feedfuse.reader.railOrder.v1';
 type ReaderSelectionHistoryMode = 'replace' | 'push' | 'none';
+type ReaderRailOrder = { level1: string[] };
 type FeedUpdateOptions = {
   syncInBackground?: boolean;
   refreshAfterSave?: boolean;
@@ -146,6 +148,34 @@ function resolveUnreadOnlyForView(
   return useSettingsStore.getState().persistedSettings.general.defaultUnreadOnlyInAll;
 }
 
+function resolveReaderRailOrderStorageKey(): string {
+  return `${READER_RAIL_ORDER_STORAGE_KEY}:${getCurrentStorageUserId()}`;
+}
+
+function readReaderRailOrderFromStorage(): ReaderRailOrder {
+  if (typeof window === 'undefined') return { level1: [] };
+  try {
+    const raw = window.localStorage.getItem(resolveReaderRailOrderStorageKey());
+    if (!raw) return { level1: [] };
+    const parsed = JSON.parse(raw) as Partial<ReaderRailOrder>;
+    const level1 = Array.isArray(parsed.level1)
+      ? parsed.level1.filter((item): item is string => typeof item === 'string')
+      : [];
+    return { level1 };
+  } catch {
+    return { level1: [] };
+  }
+}
+
+function persistReaderRailOrderToStorage(order: ReaderRailOrder): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(resolveReaderRailOrderStorageKey(), JSON.stringify(order));
+  } catch {
+    // 忽略隐私模式或受限浏览环境中的存储写入失败。
+  }
+}
+
 interface AppState {
   feeds: Feed[];
   categories: Category[];
@@ -165,6 +195,13 @@ interface AppState {
   articleListInitialLoading: boolean;
   articleListLoadingMore: boolean;
   articleListLoadMoreError: boolean;
+
+  workbenchTab: 'workspace' | 'publish' | 'douyin' | 'knowledge';
+  setWorkbenchTab: (tab: 'workspace' | 'publish' | 'douyin' | 'knowledge') => void;
+
+  // 最左侧边栏轨道的一级 / 二级 Tab 自定义顺序（localStorage 持久化，按用户隔离）。
+  readerRailOrder: ReaderRailOrder;
+  setReaderRailOrder: (order: ReaderRailOrder) => void;
 
   setSelectedView: (view: ViewType, options?: { history?: ReaderSelectionHistoryMode }) => void;
   setSelectedArticle: (id: string | null, options?: { history?: ReaderSelectionHistoryMode }) => void;
@@ -616,8 +653,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   showUnreadOnly: resolveUnreadOnlyForView(initialReaderSelection.selectedView, initialUnreadOnlyByView),
   unreadOnlyByView: initialUnreadOnlyByView,
   snapshotLoading: false,
+  workbenchTab: 'workspace',
+  readerRailOrder: readReaderRailOrderFromStorage(),
   ...INITIAL_ARTICLE_LIST_SESSION,
 
+  setWorkbenchTab: (tab) => set({ workbenchTab: tab }),
+  setReaderRailOrder: (order) => {
+    persistReaderRailOrderToStorage(order);
+    set({ readerRailOrder: order });
+  },
   setSelectedView: (view, options) => {
     queueReaderSelectionHistoryMode(options?.history ?? 'replace');
     set(() => {
@@ -743,6 +787,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   loadSnapshot: async (input) => {
     const view = input?.view ?? get().selectedView;
+
+    // 内容页视图（发现/知识库）不走 snapshot API：入口早退，覆盖
+    // selectedView 联动 effect、visibilitychange 自动刷新等全部调用方（arch-ui-integration §1.1）。
+    if (isReaderContentPageView(view)) {
+      return;
+    }
+
     const requestId = snapshotRequestId + 1;
     snapshotRequestId = requestId;
     latestSnapshotRequestIdByView.set(view, requestId);

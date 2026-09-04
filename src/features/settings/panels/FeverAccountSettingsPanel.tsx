@@ -93,7 +93,7 @@ export default function FeverAccountSettingsPanel() {
       : '填写连接信息后即可把远端订阅同步到本地。';
   const dialogSubmitLabel = dialogMode === 'edit' ? '保存服务设置' : '保存服务';
   const passwordPlaceholder =
-    dialogMode === 'edit' ? '留空表示不修改' : '请输入 API Key';
+    dialogMode === 'edit' ? '留空表示不修改' : '请输入 API 密钥';
 
   const reloadAccounts = useCallback(async () => {
     const nextAccounts = await listFeverAccounts({ notifyOnError: false });

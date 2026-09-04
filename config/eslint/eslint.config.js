@@ -9,6 +9,7 @@ export default defineConfig([
     '**/dist/**',
     '**/.next/**',
     '**/node_modules/**',
+    'vendor/**',
     '.worktrees/**',
     '.pnpm-store/**',
     'artifacts/**',

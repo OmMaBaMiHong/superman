@@ -2,7 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ViewType } from '../../../types';
-import { AI_DIGEST_VIEW_ID } from '@/lib/reader/view';
+import { AI_DIGEST_VIEW_ID, VIDEO_VIEW_ID } from '@/lib/reader/view';
 
 type ArticleListModule = typeof import('../../../features/articles/components/ArticleList');
 type AppStoreModule = typeof import('../../../store/appStore');
@@ -173,6 +173,14 @@ describe('ArticleList', () => {
     }));
   }
 
+  function formatTimelineTime(dateString: string) {
+    return new Date(dateString).toLocaleTimeString('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+  }
+
   beforeEach(async () => {
     vi.resetModules();
     fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -310,6 +318,56 @@ describe('ArticleList', () => {
     expect(screen.getByText('译文标题')).toBeInTheDocument();
     expect(screen.getByText('Only original title')).toBeInTheDocument();
     expect(screen.queryByText('Original title')).not.toBeInTheDocument();
+  });
+
+  it('renders a flat timeline rail beside article rows and uses time points for navigation', () => {
+    const firstPublishedAt = new Date(2026, 1, 25, 9, 20).toISOString();
+    const secondPublishedAt = new Date(2026, 1, 25, 9, 19).toISOString();
+
+    useAppStore.setState({
+      articles: [
+        {
+          id: 'timeline-1',
+          feedId: 'feed-1',
+          title: 'Timeline First',
+          content: '',
+          summary: 'Summary',
+          publishedAt: firstPublishedAt,
+          link: 'https://example.com/timeline-1',
+          isRead: false,
+          isStarred: false,
+        },
+        {
+          id: 'timeline-2',
+          feedId: 'feed-1',
+          title: 'Timeline Second',
+          content: '',
+          summary: 'Summary',
+          publishedAt: secondPublishedAt,
+          link: 'https://example.com/timeline-2',
+          isRead: false,
+          isStarred: false,
+        },
+      ],
+      selectedArticleId: 'timeline-1',
+      showUnreadOnly: true,
+    });
+
+    renderWithNotifications();
+
+    const timeline = screen.getByRole('navigation', { name: '文章时间线' });
+    expect(timeline).toHaveClass('border-r');
+    expect(timeline).not.toHaveClass('rounded-2xl');
+    expect(within(timeline).getByText('2026年02月25日')).toBeInTheDocument();
+
+    const secondTimePoint = within(timeline).getByRole('button', {
+      name: `${formatTimelineTime(secondPublishedAt)} Timeline Second`,
+    });
+    expect(secondTimePoint).toBeInTheDocument();
+
+    fireEvent.click(secondTimePoint);
+
+    expect(useAppStore.getState().selectedArticleId).toBe('timeline-2');
   });
 
   it('keeps selected read article visible when showUnreadOnly is enabled (fresh session)', () => {
@@ -930,6 +988,160 @@ describe('ArticleList', () => {
       preload.restore();
       observer.restore();
     }
+  });
+
+  it('renders a video affordance for YouTube article cards without breaking selection', async () => {
+    const preload = setupImagePreloadMock();
+    const observer = setupIntersectionObserverMock();
+
+    useAppStore.setState((state) => ({
+      ...state,
+      articles: state.articles.map((article) =>
+        article.id === 'art-2'
+          ? {
+              ...article,
+              title: 'How I use LLMs',
+              previewImage: undefined,
+              link: 'https://www.youtube.com/watch?v=zjkBMFhNj_g',
+            }
+          : article,
+      ),
+      selectedArticleId: 'art-1',
+    }));
+
+    try {
+      renderWithNotifications();
+
+      act(() => {
+        observer.triggerIntersect(['art-2']);
+      });
+      expect(preload.instances[0].src).toBe('https://i.ytimg.com/vi/zjkBMFhNj_g/hqdefault.jpg');
+
+      act(() => {
+        preload.instances[0].triggerLoad();
+      });
+
+      const card = await screen.findByTestId('article-video-card-art-2');
+      expect(within(card).getByLabelText('视频文章')).toBeInTheDocument();
+
+      fireEvent.click(card);
+      expect(useAppStore.getState().selectedArticleId).toBe('art-2');
+    } finally {
+      preload.restore();
+      observer.restore();
+    }
+  });
+
+  it('renders video smart view as a responsive grid and keeps click selection', () => {
+    useAppStore.setState((state) => ({
+      ...state,
+      selectedView: VIDEO_VIEW_ID,
+      selectedArticleId: null,
+      articles: state.articles.map((article) =>
+        article.id === 'art-2'
+          ? {
+              ...article,
+              title: 'Andrej Karpathy lecture',
+              link: 'https://www.youtube.com/watch?v=zjkBMFhNj_g',
+              mediaAttachments: [
+                {
+                  id: 'media-1',
+                  url: 'https://example.com/video.mp4',
+                  mimeType: 'video/mp4',
+                  sizeBytes: null,
+                  durationSeconds: 125,
+                },
+              ],
+            }
+          : article,
+      ),
+    }));
+
+    renderWithNotifications();
+
+    expect(screen.getByRole('heading', { name: '视频' })).toBeInTheDocument();
+    expect(screen.getByText('视频合集')).toBeInTheDocument();
+    expect(screen.getByTestId('article-video-grid')).toBeInTheDocument();
+    const card = screen.getByTestId('article-video-grid-card-art-2');
+    expect(card).toBeInTheDocument();
+    expect(screen.getByText('Andrej Karpathy lecture')).toBeInTheDocument();
+    expect(within(card).getByText('2:05')).toBeInTheDocument();
+    expect(card.querySelector('img')).toHaveAttribute(
+      'src',
+      'https://i.ytimg.com/vi/zjkBMFhNj_g/hqdefault.jpg',
+    );
+    expect(screen.queryByText('Selected Article')).not.toBeInTheDocument();
+
+    fireEvent.click(card);
+    expect(useAppStore.getState().selectedArticleId).toBe('art-2');
+  });
+
+  it('renders a concrete video feed with the same media grid as the video tab', () => {
+    useAppStore.setState((state) => ({
+      ...state,
+      feeds: state.feeds.map((feed) =>
+        feed.id === 'feed-1' ? { ...feed, view: 'video' as const } : feed,
+      ),
+      selectedView: 'feed-1',
+      selectedArticleId: null,
+      articles: state.articles.map((article) => ({
+        ...article,
+        link: `https://www.youtube.com/watch?v=${article.id === 'art-1' ? 'zjkBMFhNj_g' : 'aircAruvnKk'}`,
+      })),
+    }));
+
+    renderWithNotifications();
+
+    expect(screen.getByRole('heading', { name: 'Example Feed' })).toBeInTheDocument();
+    expect(screen.getByText('视频合集')).toBeInTheDocument();
+    expect(screen.getByTestId('article-video-grid')).toBeInTheDocument();
+    expect(screen.getByTestId('article-video-grid-card-art-1')).toBeInTheDocument();
+    expect(screen.queryByTestId('article-card-art-1-title')).not.toBeInTheDocument();
+  });
+
+  it('renders a picture-content feed as a media grid without video chrome', () => {
+    useAppStore.setState((state) => ({
+      ...state,
+      selectedView: 'feed-1',
+      selectedArticleId: null,
+      feeds: (state.feeds.length > 0
+        ? state.feeds
+        : [
+            {
+              id: 'feed-1',
+              kind: 'rss',
+              provider: 'local_rss',
+              title: 'Example Feed',
+              url: 'https://example.com/rss.xml',
+              unreadCount: 0,
+              enabled: true,
+              fullTextOnOpenEnabled: false,
+              fullTextOnFetchEnabled: false,
+              aiSummaryOnOpenEnabled: false,
+              aiSummaryOnFetchEnabled: false,
+              bodyTranslateOnFetchEnabled: false,
+              bodyTranslateOnOpenEnabled: false,
+              titleTranslateEnabled: false,
+              bodyTranslateEnabled: false,
+              articleListDisplayMode: 'card',
+              fetchStatus: null,
+              fetchError: null,
+            },
+          ]
+      ).map((feed) => (feed.id === 'feed-1' ? { ...feed, view: 'picture' } : feed)),
+      articles: state.articles.map((article) => ({
+        ...article,
+        previewImage: `https://example.com/${article.id}.jpg`,
+      })),
+    }));
+
+    renderWithNotifications();
+
+    expect(screen.getByText('图片合集')).toBeInTheDocument();
+    expect(screen.getByTestId('article-media-grid')).toBeInTheDocument();
+    const card = screen.getByTestId('article-media-grid-card-art-1');
+    expect(card).toBeInTheDocument();
+    expect(within(card).queryByLabelText('视频文章')).not.toBeInTheDocument();
   });
 
   it('keeps preview image hidden when preload fails', () => {

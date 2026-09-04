@@ -496,7 +496,7 @@ export default function SecuritySettingsPanel() {
             </div>
 
             {usersMessage ? (
-              <p className={isUsersError ? 'mt-3 text-sm text-red-600' : 'mt-3 text-sm text-muted-foreground'}>
+              <p className={isUsersError ? 'mt-3 text-sm text-error' : 'mt-3 text-sm text-muted-foreground'}>
                 {usersMessage}
               </p>
             ) : null}
@@ -565,7 +565,7 @@ export default function SecuritySettingsPanel() {
 
           <DialogFooter className="items-center gap-3">
             {securityMessage ? (
-              <p className={isSecurityError ? 'text-sm text-red-600' : 'text-sm text-muted-foreground'}>
+              <p className={isSecurityError ? 'text-sm text-error' : 'text-sm text-muted-foreground'}>
                 {securityMessage}
               </p>
             ) : null}
@@ -671,7 +671,7 @@ export default function SecuritySettingsPanel() {
             </div>
 
             {isUsersError && usersMessage ? (
-              <p className="text-sm text-red-600">{usersMessage}</p>
+              <p className="text-sm text-error">{usersMessage}</p>
             ) : null}
           </div>
 
