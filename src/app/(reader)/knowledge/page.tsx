@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import { isAuthenticated } from '@/server/domains/auth/services/session';
 
 export const metadata = {
-  title: '知识库 - FeedFuse',
+  title: '知识库 - Superman',
   description: '基于订阅源的智能知识问答',
 };
 

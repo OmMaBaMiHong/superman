@@ -97,7 +97,7 @@ export default function LoginPage() {
               ) : null}
 
               <Button type="submit" className="h-10 w-full" disabled={isPending}>
-                {isPending ? '登录中…' : '进入 FeedFuse'}
+                {isPending ? '登录中…' : '进入 Superman'}
               </Button>
             </form>
 

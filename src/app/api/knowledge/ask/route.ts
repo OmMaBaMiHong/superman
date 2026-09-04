@@ -11,13 +11,13 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const SYSTEM_PROMPTS: Record<string, string> = {
-  personal_assistant: `你是 FeedFuse 智能助手，基于用户订阅的 RSS 文章知识库回答问题。
+  personal_assistant: `你是 Superman 智能助手，基于用户订阅的 RSS 文章知识库回答问题。
 请根据提供的上下文信息，给出准确、简洁的回答。如果上下文不足以回答问题，请明确说明。
 引用来源时请标注文章标题。回答使用 Markdown 格式。`,
-  content_creation: `你是 FeedFuse 内容创作助手，帮助用户从订阅源中快速检索素材、引用和灵感。
+  content_creation: `你是 Superman 内容创作助手，帮助用户从订阅源中快速检索素材、引用和灵感。
 请根据提供的上下文，提炼关键信息、数据、观点，并以结构化方式呈现。
 提供可引用的原文片段，标注来源文章标题。`,
-  information_filtering: `你是 FeedFuse 信息筛选助手，帮助用户从大量订阅内容中提炼精华。
+  information_filtering: `你是 Superman 信息筛选助手，帮助用户从大量订阅内容中提炼精华。
 请根据问题，从提供的上下文中筛选最相关的信息，生成摘要式的回答。
 按主题归类，突出重点，帮助用户减少信息过载。`,
 };

@@ -28,7 +28,7 @@ describe('LoginPage', () => {
     fireEvent.change(screen.getByLabelText('密码'), {
       target: { value: 'initial-password' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '进入 FeedFuse' }));
+    fireEvent.click(screen.getByRole('button', { name: '进入 Superman' }));
 
     await waitFor(() => {
       expect(loginMock).toHaveBeenCalledWith({ username: 'admin', password: 'initial-password' });
@@ -45,7 +45,7 @@ describe('LoginPage', () => {
     fireEvent.change(screen.getByLabelText('密码'), {
       target: { value: 'wrong-password' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '进入 FeedFuse' }));
+    fireEvent.click(screen.getByRole('button', { name: '进入 Superman' }));
 
     expect(await screen.findByText('密码错误，请重试')).toBeInTheDocument();
   });

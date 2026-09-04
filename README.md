@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="./public/feedfuse-logo.svg" alt="FeedFuse" width="88" />
+  <img src="./public/feedfuse-logo.svg" alt="Superman" width="88" />
 </p>
 
-<h1 align="center">FeedFuse</h1>
+<h1 align="center">Superman</h1>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Next.js-16-black" alt="Next.js" />
@@ -30,15 +30,17 @@
   <a href="./LICENSE">开源协议</a>
 </p>
 
-## FeedFuse 是什么
+## Superman 是什么
 
-FeedFuse 想解决的不是“信息从哪里来”，而是“订阅之后怎样更稳定地读完、理解并整理这些信息”。
+Superman 想解决的不是“信息从哪里来”，而是“订阅之后怎样更稳定地读完、理解并整理这些信息”。
 
 它保留了 RSS 最有价值的部分：开放、可迁移、可掌控。同时把全文抓取、文章过滤、AI 摘要、翻译和 `AI解读` 放进同一条阅读工作流里，让你不用在 RSS 工具、稍后阅读工具和聊天工具之间来回切换。
 
-FeedFuse 不替你决定看什么。订阅源由你决定，阅读节奏由你决定，AI 只在你需要的时候参与。
+Superman 不替你决定看什么。订阅源由你决定，阅读节奏由你决定，AI 只在你需要的时候参与。
 
-## 为什么用 FeedFuse
+> 项目前身是开源 RSS 阅读器 FeedFuse，Superman 在其基础上继续演进。
+
+## 为什么用 Superman
 
 - 不依赖推荐算法，信息入口仍然掌握在你自己手里
 - 把 “RSS 收集 → 过滤 → 阅读 → 理解 → 汇总” 串成一条连续工作流
@@ -74,20 +76,20 @@ FeedFuse 不替你决定看什么。订阅源由你决定，阅读节奏由你�
 
 ## 预览
 
-![FeedFuse 首页 / 三栏阅读视图](./.github/assets/readme/home.png)
+![Superman 首页 / 三栏阅读视图](./.github/assets/readme/home.png)
 
 <p align="center">首页 / 三栏阅读视图</p>
 
-![FeedFuse AI 解读阅读视图](./.github/assets/readme/ai-read.png)
+![Superman AI 解读阅读视图](./.github/assets/readme/ai-read.png)
 
 <p align="center">AI解读阅读视图</p>
 
 ## 开源协议
 
-FeedFuse 采用 [GNU Affero General Public License v3.0](./LICENSE) 开源。
+Superman 采用 [GNU Affero General Public License v3.0](./LICENSE) 开源。
 
 ## 社区支持
 
-你可以在这些社区里提问，或者分享你对 FeedFuse 的想法和需求。
+你可以在这些社区里提问，或者分享你对 Superman 的想法和需求。
 
 [LinuxDo](https://linux.do/)

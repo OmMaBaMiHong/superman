@@ -33,13 +33,13 @@ export default function FeedListHeader({
       <h1 className="flex items-center gap-2">
         <img
           src="/feedfuse-logo.svg"
-          alt="FeedFuse"
+          alt="Superman"
           width={28}
           height={28}
           className="h-7 w-7 shrink-0"
         />
         <span className="text-[15px] font-semibold leading-none tracking-tight dark:bg-gradient-to-b dark:from-white dark:via-white/95 dark:to-white/72 dark:bg-clip-text dark:text-transparent">
-          FeedFuse
+          Superman
         </span>
       </h1>
       <Popover open={addMenuOpen} onOpenChange={onAddMenuOpenChange}>

@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import { isAuthenticated } from '@/server/domains/auth/services/session';
 
 export const metadata = {
-  title: '发现 - FeedFuse',
+  title: '发现 - Superman',
   description: '发现热门订阅源，一键订阅关注',
 };
 

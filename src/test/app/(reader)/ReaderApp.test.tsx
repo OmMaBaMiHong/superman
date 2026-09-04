@@ -118,7 +118,7 @@ describe('ReaderApp', () => {
     await act(async () => {
       render(<ReaderApp />);
     });
-    expect(screen.getByAltText('FeedFuse')).toBeInTheDocument();
+    expect(screen.getByAltText('Superman')).toBeInTheDocument();
     expect(screen.getByText('文章')).toBeInTheDocument();
     expect(screen.getByLabelText('打开设置')).toBeInTheDocument();
 

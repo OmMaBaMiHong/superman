@@ -313,7 +313,7 @@ export default function SettingsCenterDrawer({ onClose, initialSection }: Settin
                   {currentStatusMeta.label}
                 </span>
               </div>
-              <SheetDescription className="sr-only">FeedFuse 设置中心</SheetDescription>
+              <SheetDescription className="sr-only">Superman 设置中心</SheetDescription>
             </div>
 
             {draft ? (

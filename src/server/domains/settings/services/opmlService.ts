@@ -122,7 +122,7 @@ export async function exportOpml(
 
   return {
     xml: buildOpmlDocument({
-      title: 'FeedFuse Subscriptions',
+      title: 'Superman Subscriptions',
       categories,
       feeds: rssFeeds,
     }),

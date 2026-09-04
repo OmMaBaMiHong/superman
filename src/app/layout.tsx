@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'FeedFuse',
+  title: 'Superman',
   description: 'Modern RSS reader',
   icons: {
     icon: [
