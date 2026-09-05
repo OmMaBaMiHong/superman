@@ -25,7 +25,7 @@
 | 三省六部现有部署 | 保留作个人阅读复习工具（SM-2 复习 FeedFuse 没有），不进生产链路 | |
 | TrendRadar | **原版保留、独立运行**，作为「热点雷达」采集引擎；通过 SQLite 同步 + 通用 Webhook 双轨接入，不 fork 不改码，保持跟随上游 v6.x 升级 | 它是热搜聚合+通知工具，不是社媒分发工具（无公众号/小红书发布能力） |
 | maigret + Aliens_eye | 封装为独立 Python OSINT worker（FastAPI 包 HTTP），Aliens_eye 做发现层（842 站、变更监控）、maigret 做深挖层（3221 站、资料抽取） | 两者都是 Python 异步程序，不能直接 import 进 Node |
-| DeepSeek Harness | **不作为核心，作为 AI 执行引擎层**：Superman 保持核心（多用户/Postgres/pg-boss/H5/PWA/公网分享），DSH 通过 `dsh sdk`（JSON-RPC）或 headless 承接 M4 级复杂多步 agent 任务；轻量路径 = Superman 暴露 MCP server 给 DSH | DSH 无 cron、无持久队列、单用户无认证、无移动端/PWA（0.1.3-alpha 开发者预览，有破坏性变更风险）；以其为核心会失去产品形态 |
+| DeepSeek Harness | **产品的 AI 编排内核 + 桌面宿主**：业务围绕它做成 DSH 原生插件（apps/dsh-plugin），生态插件即插即用；但领域核心抽为宿主无关的 `packages/core` 库，Next.js 服务为第二宿主（公网/移动/多用户）。详见 `2026-09-05-dsh-kernel-topology.md` | 用户拍板方向（2026-09-05）；实现纪律：core 不 import 任何 dsh 包，插件只是宿主，防 alpha 漂移 |
 | 前端 | 保留三栏阅读器，新增「审批台」「选题卡」「提词器」「流水线」四个视图 | 见 §4 |
 
 ## 1. 目标架构
