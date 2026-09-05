@@ -11,6 +11,21 @@ const GovernanceConsole = lazy(() => import('@/features/governance/components/Go
 const TrendingConsole = lazy(() => import('@/features/trending/components/TrendingConsole'));
 const StudioConsole = lazy(() => import('@/features/studio/components/StudioConsole'));
 const H5ReaderPage = lazy(() => import('./pages/ReaderPage'));
+const H5AssistantPage = lazy(() => import('./pages/AssistantPage'));
+
+/** 「问 AI」浮动入口：审批台/热点页右上角常驻，跳 #/assistant（K4 指挥台）。 */
+function AskAiEntry() {
+  return (
+    <button
+      type="button"
+      aria-label="问 AI"
+      onClick={() => navigateTo('/assistant')}
+      className="fixed right-4 top-4 z-50 rounded-full border bg-card/90 px-3.5 py-2 text-xs font-medium shadow-lg backdrop-blur-md"
+    >
+      🦸 问 AI
+    </button>
+  );
+}
 
 function ViewLoading() {
   return (
@@ -66,6 +81,9 @@ export default function App() {
     case '/settings':
       view = <H5SettingsPage username={session.username} />;
       break;
+    case '/assistant':
+      view = <H5AssistantPage />;
+      break;
     case '/':
     case '/reader':
     default:
@@ -73,5 +91,10 @@ export default function App() {
       break;
   }
 
-  return <Suspense fallback={<ViewLoading />}>{view}</Suspense>;
+  return (
+    <>
+      {(route === '/governance' || route === '/trending') && <AskAiEntry />}
+      <Suspense fallback={<ViewLoading />}>{view}</Suspense>
+    </>
+  );
 }

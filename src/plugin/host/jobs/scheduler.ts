@@ -56,6 +56,35 @@ export function isSchedulerEnabled(config: PluginSchedulerConfig): boolean {
   return process.env.SUPERMAN_SCHEDULER_ENABLED === 'true'
 }
 
+/**
+ * 手动触发一轮到期订阅源抓取（agent 工具 superman_fetch_trigger 与调度 tick 共用）。
+ * 只执行一轮，不改变 schedulerEnabled 开关；单用户内核固定扫初始管理员的源。
+ */
+export async function fetchDueFeedsOnce(
+  pool: PgPoolLike,
+  logger?: Logger,
+): Promise<{ feeds: number; inserted: number }> {
+  const users = await listUsers(pool as never)
+  let feeds = 0
+  let inserted = 0
+  for (const user of users.filter((u) => u.status === 'active')) {
+    const feedRows = await listEnabledFeedsForFetch(pool as never, user.id)
+    const due = selectFeedsForRefreshAll(feedRows, new Date(), { force: false })
+    for (const feed of due) {
+      feeds += 1
+      const result = await fetchAndIngestFeed(noopBoss, feed.id, {
+        userId: feed.userId ?? user.id,
+        deps: { getPool: () => pool as never },
+      })
+      inserted += result.inserted
+      if (result.errorMessage) {
+        logger?.warn(`[superman] feed.fetch: feed=${feed.id} ${result.errorMessage}`)
+      }
+    }
+  }
+  return { feeds, inserted }
+}
+
 export function startPluginScheduler(
   pool: PgPoolLike,
   config: PluginSchedulerConfig,
@@ -93,21 +122,9 @@ export function startPluginScheduler(
   })
 
   every('feed.fetch', config.feedRefreshIntervalMs ?? FEED_TICK_INTERVAL, async () => {
-    const users = await listUsers(pool as never)
-    for (const user of users.filter((u) => u.status === 'active')) {
-      const feeds = await listEnabledFeedsForFetch(pool as never, user.id)
-      const due = selectFeedsForRefreshAll(feeds, new Date(), { force: false })
-      for (const feed of due) {
-        const result = await fetchAndIngestFeed(noopBoss, feed.id, {
-          userId: feed.userId ?? user.id,
-          deps: { getPool: () => pool as never },
-        })
-        if (result.errorMessage) {
-          logger.warn(`[superman] feed.fetch: feed=${feed.id} ${result.errorMessage}`)
-        } else if (result.inserted > 0) {
-          logger.log(`feed.fetch: feed=${feed.id} inserted=${result.inserted}`)
-        }
-      }
+    const result = await fetchDueFeedsOnce(pool, logger)
+    if (result.inserted > 0) {
+      logger.log(`feed.fetch: feeds=${result.feeds} inserted=${result.inserted}`)
     }
   })
 

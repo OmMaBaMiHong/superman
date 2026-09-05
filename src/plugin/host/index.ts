@@ -19,7 +19,8 @@ import { registerRoutes, type RoutesDeps } from './routes.js'
 import { BUSINESS_API_LIST } from './api.js'
 import { loadMigrations, runMigrations, startHeartbeat } from './scheduler.js'
 import { registerTools } from './tools.js'
-import { startPluginScheduler, type PluginSchedulerConfig } from './jobs/scheduler.js'
+import { startPluginScheduler, fetchDueFeedsOnce, type PluginSchedulerConfig } from './jobs/scheduler.js'
+import { registerSkills } from './skills.js'
 import { getAuthSettings } from '@/server/domains/settings/repositories/settingsRepo'
 
 export const name = 'superman'
@@ -108,7 +109,16 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
     apiList: BUSINESS_API_LIST,
   }
   registerRoutes(ctx, deps)
-  registerTools(ctx, deps)
+  registerTools(ctx, {
+    get db() {
+      return db
+    },
+    fetchTrigger: () => {
+      if (!db) return Promise.reject(new Error('数据库未连接'))
+      return fetchDueFeedsOnce(db, { log, warn })
+    },
+  })
+  registerSkills(ctx)
 
-  log(`host 半已挂载：/s/api（health/auth + ${BUSINESS_API_LIST.length} 条业务 API）+ /s/app（H5）+ 工具 superman.ping`)
+  log(`host 半已挂载：/s/api（health/auth + ${BUSINESS_API_LIST.length} 条业务 API）+ /s/app（H5）+ agent 工具集 + superman 技能`)
 }
