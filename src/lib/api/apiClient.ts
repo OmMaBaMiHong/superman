@@ -2270,3 +2270,52 @@ export async function restoreGovernanceItem(
     options,
   );
 }
+
+/* ── 热点雷达（TrendRadar）── */
+
+export interface TrendRadarItem {
+  id: string;
+  platform: string;
+  platformName: string;
+  title: string;
+  url: string;
+  rank: number | null;
+  previousRank: number | null;
+  hotValue: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  sourceDate: string;
+  promotedAt: string | null;
+  promotedArticleId: string | null;
+}
+
+export interface TrendRadarPlatformGroup {
+  platform: string;
+  platformName: string;
+  items: TrendRadarItem[];
+}
+
+export interface TrendRadarToday {
+  date: string;
+  total: number;
+  platforms: TrendRadarPlatformGroup[];
+}
+
+export async function getTrendRadarToday(
+  input?: { date?: string },
+  options?: RequestApiOptions,
+): Promise<TrendRadarToday> {
+  const suffix = input?.date ? `?date=${encodeURIComponent(input.date)}` : '';
+  return requestApi(`/api/trend-radar/today${suffix}`, undefined, options);
+}
+
+export async function promoteTrendRadarItem(
+  id: string,
+  options?: RequestApiOptions,
+): Promise<{ itemId: string; articleId: string; alreadyPromoted: boolean }> {
+  return requestApi(
+    `/api/trend-radar/items/${encodeURIComponent(id)}/promote`,
+    { method: 'POST' },
+    options,
+  );
+}

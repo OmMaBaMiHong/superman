@@ -184,6 +184,18 @@ const envSchema = z
     GITHUB_API_BASE_URL: githubApiBaseUrlSchema,
     GITHUB_USER_AGENT: z.preprocess(parseOptionalString, z.string().optional()),
     GITHUB_API_TIMEOUT_MS: positiveIntSchema,
+    /**
+     * TrendRadar 热点雷达接入令牌（Phase 1b）。
+     * POST /api/ingest/trendradar 的 X-Ingest-Token 需与此值一致；
+     * 未配置时 ingest 路由返回 503（与 AUTH_INITIAL_PASSWORD 同一 env 模式）。
+     */
+    TRENDRADAR_INGEST_TOKEN: z.preprocess(
+      (value) =>
+        typeof value === 'string' && value.trim().length === 0 ? undefined : value,
+      z.string().min(1).optional(),
+    ),
+    /** TrendRadar 本地数据目录（其仓库根目录），sync job 从这里找 output/news/*.db。 */
+    TRENDRADAR_HOME: z.preprocess(parseOptionalString, z.string().optional()),
   })
   .transform((env) => ({
     ...env,

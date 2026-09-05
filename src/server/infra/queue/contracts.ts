@@ -166,6 +166,12 @@ export const QUEUE_CONTRACTS: Record<string, QueueContract> = {
     worker: { localConcurrency: 1, batchSize: 1 },
     send: () => ({ singletonKey: 'system_logs.cleanup', singletonSeconds: 3600 }),
   },
+  'trendradar.sync': {
+    queue: { retryLimit: 2, retryDelay: 60, warningQueueSize: 5 },
+    worker: { localConcurrency: 1, batchSize: 1 },
+    // 30 分钟一轮，singleton 覆盖整个周期，避免上一轮卡住时堆积。
+    send: () => ({ singletonKey: 'trendradar.sync', singletonSeconds: 1740 }),
+  },
 };
 
 export function getQueueCreateOptions(name: string): QueueCreateOptions {

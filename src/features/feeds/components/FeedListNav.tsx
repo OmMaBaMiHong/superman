@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Stamp, Star } from 'lucide-react';
+import { Flame, Stamp, Star } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { getGovernanceStats } from '@/lib/api/apiClient';
 import {
@@ -83,6 +83,20 @@ export default function FeedListNav({
             {governanceQueueSize}
           </Badge>
         ) : null}
+      </Link>
+      <Link
+        href="/trending"
+        data-testid="trending-nav-link"
+        className={cn(
+          'flex w-full items-center justify-between gap-2 rounded-xl border border-transparent px-3 py-2 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset dark:border-white/[0.03]',
+          'text-foreground hover:text-accent-foreground',
+          READER_PANE_HOVER_BACKGROUND_CLASS_NAME,
+        )}
+      >
+        <div className="flex min-w-0 items-center">
+          <Flame aria-hidden="true" className="mr-2 inline-block h-4 w-4 shrink-0 align-[-2px]" />
+          <span>热点</span>
+        </div>
       </Link>
       <button
         type="button"

@@ -14,6 +14,8 @@ const PUBLIC_PATHS = [
   // OpenChatCut 去剪辑需要免鉴权拉取工作区素材（仅本地开发用）
   '/api/workspace/serve',
   '/api/workspace/material-data',
+  // TrendRadar generic_webhook 推送入口：无 session，走 X-Ingest-Token 独立鉴权
+  '/api/ingest/trendradar',
 ];
 
 function isPublicApiPath(pathname: string): boolean {

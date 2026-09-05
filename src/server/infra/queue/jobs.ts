@@ -14,3 +14,5 @@ export const JOB_GITHUB_FETCH_REPO = 'github.fetch_repo';
 export const JOB_ARTICLE_FILTER = 'article.filter';
 export const JOB_ARTICLE_FULLTEXT_FETCH = 'article.fetch_fulltext';
 export const JOB_SYSTEM_LOG_CLEANUP = 'system_logs.cleanup';
+/** 每 30 分钟：读 TrendRadar 当天 SQLite，全量 upsert 热点雷达条目 */
+export const JOB_TRENDRADAR_SYNC = 'trendradar.sync';

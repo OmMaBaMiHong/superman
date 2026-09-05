@@ -60,6 +60,7 @@ import {
   JOB_GITHUB_SYNC_DUE,
   JOB_REFRESH_ALL,
   JOB_SYSTEM_LOG_CLEANUP,
+  JOB_TRENDRADAR_SYNC,
 } from '@/server/infra/queue/jobs';
 import { sampleQueueStats } from '@/server/infra/queue/observability';
 import { mapFeedFetchError } from '@/server/domains/feeds/tasks/feedFetchErrorMapping';
@@ -79,6 +80,7 @@ import { runArticleFilterWorker, type ArticleFilterJobData } from '@/worker/arti
 import { runSystemLogCleanup } from '@/worker/systemLogCleanup';
 import { runGithubSyncDue } from '@/worker/githubSyncDue';
 import { runGithubFetchWorker } from '@/worker/githubFetchWorker';
+import { runTrendRadarSync } from '@/worker/trendradarSync';
 import { listGithubSubscriptionFeedIds } from '@/server/domains/github/repositories/githubSubscriptionsRepo';
 import { normalizeUserId } from '@/server/domains/users/userScope';
 import { listUsers } from '@/server/domains/auth/repositories/usersRepo';
@@ -1064,6 +1066,22 @@ async function main() {
     }
   };
 
+  const trendRadarSyncHandler = async (jobs: unknown[]) => {
+    for (const job of jobs) {
+      const userId = readStringField(getJobData(job), 'userId');
+      const userIds = userId ? [userId] : await listActiveWorkerUserIds(pool);
+
+      for (const activeUserId of userIds) {
+        const result = await runTrendRadarSync({ pool, userId: activeUserId });
+        if (result.status === 'ok') {
+          console.log(
+            `[trendradar.sync] user=${activeUserId} upserted=${result.upserted} platforms=${result.platforms}`,
+          );
+        }
+      }
+    }
+  };
+
   const githubFetchHandler = async (jobs: unknown[]) => {
     for (const job of jobs) {
       const data = getJobData(job);
@@ -1098,6 +1116,7 @@ async function main() {
     [JOB_AI_TRANSLATE]: aiTranslateHandler,
     [JOB_AI_TRANSLATE_TITLE]: aiTitleTranslateHandler,
     [JOB_SYSTEM_LOG_CLEANUP]: systemLogCleanupHandler,
+    [JOB_TRENDRADAR_SYNC]: trendRadarSyncHandler,
   });
 
   const queueNames = Object.keys(QUEUE_CONTRACTS);
@@ -1119,6 +1138,9 @@ async function main() {
   // Run cleanup hourly and trigger one immediate pass on worker boot.
   await boss.schedule(JOB_SYSTEM_LOG_CLEANUP, '0 * * * *');
   await boss.send(JOB_SYSTEM_LOG_CLEANUP, {});
+  // 热点雷达主链路：每 30 分钟同步 TrendRadar 当天 SQLite。
+  await boss.schedule(JOB_TRENDRADAR_SYNC, '*/30 * * * *');
+  await boss.send(JOB_TRENDRADAR_SYNC, {}, getQueueSendOptions(JOB_TRENDRADAR_SYNC, {}));
 
   const shutdown = async () => {
     await boss.stop();
