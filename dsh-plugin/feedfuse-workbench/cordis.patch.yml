@@ -1,5 +1,0 @@
-# feedfuse-workbench bundle patch: 挂载 host 半（Node 数据代理）。
-# client 半由 dsh.client 声明（见 package.json），被 client-modules 扫描进 window.__DSH_BOOT__。
-- insert:
-    - id: feedfuse-workbench
-      name: 'feedfuse-workbench'
