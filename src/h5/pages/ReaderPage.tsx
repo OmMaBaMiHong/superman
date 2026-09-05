@@ -1,14 +1,18 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, BookOpen } from 'lucide-react';
+import { ArrowLeft, BookOpen, Rss, Stamp } from 'lucide-react';
 import {
   getGovernanceItemDetail,
   getGovernanceQueue,
+  requeueGovernanceItem,
   type GovernanceItemDetail,
   type GovernanceQueueItem,
 } from '@/lib/api/apiClient';
+import { toast } from '@/features/toast/toast';
+import FeedsManagerSheet from '../components/FeedsManagerSheet';
 import ContentTypeBadge from '@/components/ui/content-type-badge';
+import VideoEmbed from '@/components/ui/video-embed';
 import QualityScore from '@/features/governance/components/QualityScore';
 import { formatPublishedAt } from '@/features/governance/components/GovernanceQueueCard';
 import MobileTabBar from '@/features/mobile/components/MobileTabBar';
@@ -29,21 +33,37 @@ export default function H5ReaderPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<GovernanceItemDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [feedsManagerOpen, setFeedsManagerOpen] = useState(false);
+  const [requeuing, setRequeuing] = useState<Record<string, boolean>>({});
+
+  const loadArticles = useCallback(async () => {
+    try {
+      const result = await getGovernanceQueue({ statuses: ['archived'], page: 1, pageSize: PAGE_SIZE });
+      setItems(result.items);
+    } catch {
+      // apiClient 已统一 toast 错误
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    void getGovernanceQueue({ statuses: ['archived'], page: 1, pageSize: PAGE_SIZE })
-      .then((result) => {
-        if (!cancelled) setItems(result.items);
+    void loadArticles();
+  }, [loadArticles]);
+
+  /** 送审批：archived → candidate，从阅读列表移除（阅读器只展示归档）。 */
+  const handleRequeue = useCallback((item: GovernanceQueueItem) => {
+    if (requeuing[item.id]) return;
+    setRequeuing((current) => ({ ...current, [item.id]: true }));
+    void requeueGovernanceItem(item.id)
+      .then(() => {
+        toast.success('已送入审批台');
+        setItems((current) => current.filter((entry) => entry.id !== item.id));
+        setSelectedId((current) => (current === item.id ? null : current));
       })
       .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+      .finally(() => setRequeuing((current) => ({ ...current, [item.id]: false })));
+  }, [requeuing]);
 
   const feeds = useMemo(() => {
     const counts = new Map<string, number>();
@@ -130,7 +150,25 @@ export default function H5ReaderPage() {
               >
                 <div className="flex items-center gap-1.5">
                   <ContentTypeBadge type={item.contentType} />
-                  <span className="ml-auto">
+                  <span className="ml-auto flex items-center gap-1">
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`送审批：${item.title}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleRequeue(item);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.stopPropagation();
+                          handleRequeue(item);
+                        }
+                      }}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors duration-150 hover:bg-warning/10 hover:text-warning"
+                    >
+                      <Stamp aria-hidden="true" className="h-3.5 w-3.5" />
+                    </span>
                     <QualityScore score={item.qualityScore} />
                   </span>
                 </div>
@@ -163,6 +201,20 @@ export default function H5ReaderPage() {
           <ArrowLeft aria-hidden="true" className="h-4 w-4" />
         </button>
         <span className="truncate text-sm font-medium text-foreground">阅读</span>
+      </div>
+
+      <div className="flex h-12 shrink-0 items-center justify-end gap-1 border-b border-border/60 px-3">
+        {selectedId && detail ? (
+          <button
+            type="button"
+            onClick={() => handleRequeue(detail)}
+            disabled={requeuing[detail.id]}
+            className="inline-flex h-9 items-center gap-1.5 rounded-full border border-warning/40 bg-warning/10 px-3 text-xs font-medium text-warning transition-colors duration-150 hover:bg-warning/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-warning disabled:opacity-50"
+          >
+            <Stamp aria-hidden="true" className="h-3.5 w-3.5" />
+            {requeuing[detail.id] ? '送审中…' : '送审批'}
+          </button>
+        ) : null}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -207,7 +259,10 @@ export default function H5ReaderPage() {
                 </a>
               ) : null}
             </div>
-            {detail.previewImage ? (
+            {detail.contentType === 'video' ? (
+              <VideoEmbed sourceUrl={detail.sourceUrl} previewImage={detail.previewImage} title={detail.title} />
+            ) : null}
+            {detail.previewImage && detail.contentType !== 'video' ? (
               <img
                 src={detail.previewImage}
                 alt=""
@@ -248,6 +303,15 @@ export default function H5ReaderPage() {
             <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
               {filteredItems.length} 篇
             </span>
+            <button
+              type="button"
+              onClick={() => setFeedsManagerOpen(true)}
+              aria-label="订阅管理"
+              className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-full border border-border px-3 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            >
+              <Rss aria-hidden="true" className="h-3.5 w-3.5" />
+              订阅管理
+            </button>
           </div>
           {articleList}
         </div>
@@ -265,6 +329,12 @@ export default function H5ReaderPage() {
           )}
         </div>
       </div>
+
+      <FeedsManagerSheet
+        open={feedsManagerOpen}
+        onClose={() => setFeedsManagerOpen(false)}
+        onChanged={() => void loadArticles()}
+      />
 
       {!selectedId ? <MobileTabBar /> : null}
     </div>

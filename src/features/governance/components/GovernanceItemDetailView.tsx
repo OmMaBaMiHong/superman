@@ -3,6 +3,7 @@
 import { Check, ExternalLink, RotateCcw, X } from 'lucide-react';
 import type { GovernanceItemDetail } from '@/lib/api/apiClient';
 import ContentTypeBadge from '@/components/ui/content-type-badge';
+import VideoEmbed from '@/components/ui/video-embed';
 import { cn } from '@/lib/utils';
 import { formatPublishedAt } from './GovernanceQueueCard';
 import QualityScore from './QualityScore';
@@ -97,6 +98,11 @@ export default function GovernanceItemDetailView({
           loading="lazy"
           className="mt-4 max-h-64 w-full rounded-2xl border border-border/60 object-cover"
         />
+      ) : null}
+
+      {/* 视频条目：嵌入播放器（B站 iframe / 抖音封面+外链） */}
+      {detail.contentType === 'video' ? (
+        <VideoEmbed sourceUrl={detail.sourceUrl} previewImage={detail.previewImage} title={detail.title} />
       ) : null}
 
       {/* 全文（入库时已服务端消毒） */}

@@ -3,17 +3,17 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { fetchSession, type H5Session } from './lib/auth';
 import { navigateTo, useHashPath } from './lib/router';
+import { ToastHost } from '@/features/toast/components/ToastHost';
 import H5LoginPage from './pages/LoginPage';
 import H5SettingsPage from './pages/SettingsPage';
 
 // 路由级 code splitting：移动端首屏只载当前视图 bundle
-const GovernanceConsole = lazy(() => import('@/features/governance/components/GovernanceConsole'));
 const TrendingConsole = lazy(() => import('@/features/trending/components/TrendingConsole'));
 const StudioConsole = lazy(() => import('@/features/studio/components/StudioConsole'));
 const H5ReaderPage = lazy(() => import('./pages/ReaderPage'));
 const H5AssistantPage = lazy(() => import('./pages/AssistantPage'));
 
-/** 「问 AI」浮动入口：审批台/热点页右上角常驻，跳 #/assistant（K4 指挥台）。 */
+/** 「问 AI」浮动入口：创作台/热点页右上角常驻，跳 #/assistant（K4 指挥台）。 */
 function AskAiEntry() {
   return (
     <button
@@ -67,16 +67,20 @@ export default function App() {
     return null; // 重定向中
   }
 
+  // 旧链接不死：/#/governance → /#/studio?tab=queue（审批台已并入创作台）
+  if (route === '/governance') {
+    navigateTo('/studio?tab=queue');
+    return <ViewLoading />;
+  }
+
   let view: React.ReactNode;
+  const tabParam = path.includes('?') ? new URLSearchParams(path.split('?')[1]).get('tab') : null;
   switch (route) {
-    case '/governance':
-      view = <GovernanceConsole />;
-      break;
     case '/trending':
       view = <TrendingConsole />;
       break;
     case '/studio':
-      view = <StudioConsole />;
+      view = <StudioConsole initialSection={tabParam === 'queue' ? 'queue' : undefined} />;
       break;
     case '/settings':
       view = <H5SettingsPage username={session.username} />;
@@ -93,8 +97,9 @@ export default function App() {
 
   return (
     <>
-      {(route === '/governance' || route === '/trending') && <AskAiEntry />}
+      {(route === '/studio' || route === '/trending') && <AskAiEntry />}
       <Suspense fallback={<ViewLoading />}>{view}</Suspense>
+      <ToastHost />
     </>
   );
 }

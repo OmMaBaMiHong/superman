@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BookOpen, Flame, PenLine, Settings, Stamp } from 'lucide-react';
+import { BookOpen, Flame, PenLine, Settings } from 'lucide-react';
 import { useGovernanceQueueSize } from '@/features/governance/hooks/useGovernanceQueueSize';
 import { cn } from '@/lib/utils';
 
@@ -13,7 +13,7 @@ interface MobileTabBarProps {
 
 /**
  * 移动端底部 tab bar（<768px 显示，桌面端由 md:hidden 隐藏）：
- * 阅读 / 审批台（带待批数徽章）/ 热点 / 设置。触控目标 ≥44px。
+ * 阅读 / 创作（审批台并入，带待批数徽章）/ 热点 / 设置。触控目标 ≥44px。
  */
 export default function MobileTabBar({ onOpenSettings }: MobileTabBarProps) {
   const pathname = usePathname();
@@ -72,21 +72,21 @@ export default function MobileTabBar({ onOpenSettings }: MobileTabBarProps) {
           <span>阅读</span>
         </Link>
         <Link
-          href="/governance"
-          aria-label="审批台"
-          aria-current={pathname === '/governance' ? 'page' : undefined}
-          className={tabClass(pathname === '/governance')}
+          href="/studio"
+          aria-label="创作"
+          aria-current={pathname === '/studio' || pathname === '/governance' ? 'page' : undefined}
+          className={tabClass(pathname === '/studio' || pathname === '/governance')}
         >
-          {indicator(pathname === '/governance')}
+          {indicator(pathname === '/studio' || pathname === '/governance')}
           <span className="relative">
-            <Stamp aria-hidden="true" className="h-5 w-5" />
+            <PenLine aria-hidden="true" className="h-5 w-5" />
             {queueSize > 0 ? (
               <span className="absolute -right-2.5 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-warning px-1 font-mono text-[9px] font-semibold tabular-nums text-warning-foreground">
                 {queueSize > 99 ? '99+' : queueSize}
               </span>
             ) : null}
           </span>
-          <span>审批台</span>
+          <span>创作</span>
         </Link>
         <Link
           href="/trending"
@@ -97,16 +97,6 @@ export default function MobileTabBar({ onOpenSettings }: MobileTabBarProps) {
           {indicator(pathname === '/trending')}
           <Flame aria-hidden="true" className="h-5 w-5" />
           <span>热点</span>
-        </Link>
-        <Link
-          href="/studio"
-          aria-label="创作"
-          aria-current={pathname === '/studio' ? 'page' : undefined}
-          className={tabClass(pathname === '/studio')}
-        >
-          {indicator(pathname === '/studio')}
-          <PenLine aria-hidden="true" className="h-5 w-5" />
-          <span>创作</span>
         </Link>
         {settingsItem}
       </div>

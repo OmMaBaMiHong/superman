@@ -53,8 +53,9 @@ function isEditableTarget(target: EventTarget | null): boolean {
   );
 }
 
-/** 审批台主控台：统计条 + 待批队列 + 三键操作 + 快捷键。 */
-export default function GovernanceConsole() {
+/** 审批台主控台：统计条 + 待批队列 + 三键操作 + 快捷键。
+ *  embedded=true 时嵌进创作台（隐藏自身 header / MobileTabBar / 底部留白）。 */
+export default function GovernanceConsole({ embedded = false }: { embedded?: boolean }) {
   const reducedMotion = usePrefersReducedMotion();
 
   const [stats, setStats] = useState<GovernanceStats | null>(null);
@@ -297,7 +298,8 @@ export default function GovernanceConsole() {
 
   return (
     <div className="min-h-screen">
-      {/* 顶部指挥条 */}
+      {/* 顶部指挥条（嵌入创作台时隐藏） */}
+      {!embedded ? (
       <header className="glass-surface-strong sticky top-0 z-10 rounded-none border-x-0 border-t-0">
         <div className="mx-auto flex h-14 max-w-4xl items-center justify-between gap-4 px-4 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
@@ -332,8 +334,9 @@ export default function GovernanceConsole() {
           </div>
         </div>
       </header>
+      ) : null}
 
-      <main className="mx-auto max-w-4xl space-y-6 px-4 pb-24 pt-6 sm:px-6 md:pb-6">
+      <main className={embedded ? 'space-y-5 pt-1' : 'mx-auto max-w-4xl space-y-6 px-4 pb-24 pt-6 sm:px-6 md:pb-6'}>
         <GovernanceStatsBar stats={stats} />
 
         {/* 工具行：状态 tab + 分类筛选 */}
@@ -479,7 +482,7 @@ export default function GovernanceConsole() {
         ) : null}
       </GlassDetailSheet>
 
-      <MobileTabBar />
+      {!embedded ? <MobileTabBar /> : null}
     </div>
   );
 }

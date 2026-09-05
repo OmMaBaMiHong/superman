@@ -19,6 +19,7 @@ import {
   type RewritePlatform,
 } from '@/lib/api/apiClient';
 import GlassDetailSheet from '@/components/ui/glass-detail-sheet';
+import GovernanceConsole from '@/features/governance/components/GovernanceConsole';
 import MobileTabBar from '@/features/mobile/components/MobileTabBar';
 import { cn } from '@/lib/utils';
 import DraftCompareView from './DraftCompareView';
@@ -33,9 +34,10 @@ import {
   similarityToneClass,
 } from '../lib/platforms';
 
-type StudioSection = 'topics' | 'jobs' | 'drafts';
+type StudioSection = 'queue' | 'topics' | 'jobs' | 'drafts';
 
 const SECTIONS: Array<{ id: StudioSection; name: string }> = [
+  { id: 'queue', name: '审批' },
   { id: 'topics', name: '选题池' },
   { id: 'jobs', name: '流水线任务' },
   { id: 'drafts', name: '草稿箱' },
@@ -56,9 +58,9 @@ function triggerDownload(fileName: string, content: string) {
   URL.revokeObjectURL(url);
 }
 
-/** 创作页主控台：选题池 / 流水线任务 / 草稿箱 三分区。 */
-export default function StudioConsole() {
-  const [section, setSection] = useState<StudioSection>('topics');
+/** 创作页主控台：审批 / 选题池 / 流水线任务 / 草稿箱 四分区（审批台整体嵌入）。 */
+export default function StudioConsole({ initialSection }: { initialSection?: 'queue' }) {
+  const [section, setSection] = useState<StudioSection>(initialSection === 'queue' ? 'queue' : 'topics');
 
   // ── 选题池（archived 文章）──
   const [topics, setTopics] = useState<GovernanceQueueItem[]>([]);
@@ -309,6 +311,13 @@ export default function StudioConsole() {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 pb-28 pt-5 sm:px-6 md:pb-10">
+        {/* ── 审批（治理队列整体嵌入） ── */}
+        {section === 'queue' ? (
+          <section aria-label="审批">
+            <GovernanceConsole embedded />
+          </section>
+        ) : null}
+
         {/* ── 选题卡池 ── */}
         {section === 'topics' ? (
           <section aria-label="选题池">
