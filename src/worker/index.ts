@@ -396,6 +396,8 @@ export async function fetchAndIngestFeed(
                 status: decision.status,
                 qualityScore: draft?.qualityScore ?? null,
                 aiReason: draft?.aiReason ?? null,
+                directionKey: decision.directionKey ?? null,
+                directionReason: decision.directionReason ?? null,
               }
             : null,
       });

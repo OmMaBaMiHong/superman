@@ -215,6 +215,9 @@ export interface ArticleGovernanceInput {
   summary?: string | null;
   qualityScore: number | null;
   aiReason: string | null;
+  /** 治理 v2：方向分类结果（关键词命中或兜底 general）。 */
+  directionKey?: string | null;
+  directionReason?: string | null;
 }
 
 export async function insertArticleIgnoreDuplicate(
@@ -280,9 +283,11 @@ export async function insertArticleIgnoreDuplicate(
         governance_status,
         quality_score,
         ai_reason,
-        governance_updated_at
+        governance_updated_at,
+        direction_key,
+        direction_reason
       )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
       on conflict (feed_id, dedupe_key) do nothing
       returning ${articleRowColumnsSql}
     `,
@@ -308,6 +313,8 @@ export async function insertArticleIgnoreDuplicate(
       input.governance?.qualityScore ?? null,
       input.governance?.aiReason ?? null,
       governanceUpdatedAt,
+      input.governance?.directionKey ?? null,
+      input.governance?.directionReason ?? null,
     ],
   );
   const article = rows[0] ?? null;

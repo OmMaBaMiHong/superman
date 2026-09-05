@@ -1,11 +1,12 @@
 /**
  * 治理摄取管线：feed 抓取到的候选文章在落库前过一遍治理。
  *
- * 流程（概念移植自三省六部 scheduler.ts）：
- *   URL 精确去重（含 7 天驳回记忆）
- *   → 标题 bigram ≥ 0.78 相似去重（含 7 天驳回记忆 + 本批次内互查）
+ * 流程（概念移植自三省六部 scheduler.ts，v2 加入归一化与方向分类）：
+ *   URL 精确去重（先剥追踪参数；含 7 天驳回记忆）
+ *   → 标题归一化（NFKC/全半角/表情）+ bigram ≥ 0.78 相似去重（含 7 天驳回记忆 + 本批次内互查）
  *   → 排除关键词（governance_preferences.exclude_keywords）
  *   → AI 拟折（失败回退，不阻塞）
+ *   → 方向分类（策略模板关键词 DSL，未命中归兜底 general；AI 分类是 P2c）
  *   → 配额分桶（每类 daily_limit / focusRatio，今日已占用配额计入）
  *   → 定状态（autoApproveThreshold 达标直接 archived，否则 candidate）
  *
@@ -15,6 +16,12 @@
 import type { Pool, PoolClient } from 'pg';
 import { normalizeUserId } from '@/server/domains/users/userScope';
 import { isDuplicateTitle, matchExcludeKeyword } from '@/core/governance/dedup';
+import { normalizeUrl } from '@/core/governance/normalize';
+import {
+  FALLBACK_DIRECTION_KEY,
+  classifyByKeywords,
+  listDirectionStrategies,
+} from '@/core/governance/directions';
 import {
   draftGovernanceArticle,
   type GovernanceDraft,
@@ -58,6 +65,9 @@ export interface GovernanceIngestDecision {
   skipDetail?: string;
   status?: 'candidate' | 'archived';
   draft?: GovernanceDraft;
+  /** 方向分类结果（insert 决策必有值；关键词命中或兜底 general）。 */
+  directionKey?: string;
+  directionReason?: string;
 }
 
 export interface GovernanceIngestDeps {
@@ -87,17 +97,18 @@ export async function evaluateGovernanceBatch(
   const autoApproveThreshold = preference?.autoApproveThreshold ?? 0;
   const excludeKeywords = preference?.excludeKeywords ?? [];
 
-  // 去重数据：一次取齐，逐条内存判断。
+  // 去重数据：一次取齐，逐条内存判断。URL 先剥追踪参数再比对（v2 归一化）。
   const links = input.items.map((item) => item.link).filter((link): link is string => Boolean(link));
-  const [existingLinks, rejectMemory, recentTitles] = await Promise.all([
+  const [existingLinks, rejectMemory, recentTitles, strategies] = await Promise.all([
     listExistingArticleLinks(db, links, scopedUserId),
     listRecentRejectMemory(db, { userId: scopedUserId }),
     listRecentArticleTitles(db, { userId: scopedUserId }),
+    listDirectionStrategies(db, { userId: scopedUserId, enabledOnly: true }),
   ]);
   const knownLinks = new Set([
     ...existingLinks,
     ...rejectMemory.map((row) => row.sourceUrl).filter((url): url is string => Boolean(url)),
-  ]);
+  ].map(normalizeUrl));
   const knownTitles = [...recentTitles, ...rejectMemory.map((row) => row.title)];
 
   const draftFn = deps?.draft ?? draftGovernanceArticle;
@@ -108,7 +119,7 @@ export async function evaluateGovernanceBatch(
   for (const [index, item] of input.items.entries()) {
     const decision: GovernanceIngestDecision = { index, item, action: 'skip' };
 
-    if (item.link && knownLinks.has(item.link)) {
+    if (item.link && knownLinks.has(normalizeUrl(item.link))) {
       decisions.push({ ...decision, skipReason: 'duplicate_url', skipDetail: item.link });
       continue;
     }
@@ -140,12 +151,21 @@ export async function evaluateGovernanceBatch(
       input.aiConfig,
     );
     batchTitles.push(item.title);
+    // ③ 方向分类（关键词派）：按模板 sort 先中先得，未命中归兜底 general。
+    const classified = classifyByKeywords(item.title, item.summary ?? '', strategies);
+    const strategyName = classified
+      ? strategies.find((s) => s.key === classified.directionKey)?.name ?? classified.directionKey
+      : null;
     const accepted: GovernanceIngestDecision = {
       index,
       item,
       action: 'insert',
       status: 'candidate',
       draft,
+      directionKey: classified?.directionKey ?? FALLBACK_DIRECTION_KEY,
+      directionReason: classified
+        ? `命中关键词「${classified.matchedKeyword ?? ''}」，归入「${strategyName}」`
+        : '未命中方向关键词，归入「其他」（AI 分类待 P2c）',
     };
     scored.push({ decision: accepted, qualityScore: draft.qualityScore });
     decisions.push(accepted);

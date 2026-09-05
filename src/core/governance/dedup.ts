@@ -1,18 +1,22 @@
 /**
  * 治理去重（纯函数部分）。
  *
- * 两层去重（概念移植自三省六部 scheduler.ts）：
- *   1. URL 精确去重（含 7 天内驳回记忆的 source_url）——DB 查询在 repository.ts。
- *   2. 标题 bigram（Dice 系数）相似度 >= 0.78 视为重复。
+ * 三层去重（v2 升级，概念移植自三省六部 scheduler.ts + hotspot 归一化）：
+ *   1. URL 精确去重（先经 normalize.ts 剥追踪参数；含 7 天驳回记忆）——DB 查询在 repository.ts。
+ *   2. 归一化标题精确匹配（NFKC/全半角/表情差异清理后相同即同一事件，跨平台合并语义）。
+ *   3. 标题 bigram（Dice 系数）相似度 >= 0.78 模糊去重。
  */
+import { normalizeHeadline } from '@/core/governance/normalize';
+
 export const TITLE_SIMILARITY_THRESHOLD = 0.78;
 export const REJECT_MEMORY_DAYS = 7;
 
+/**
+ * 去重用标题归一化（v2 起委托 normalizeHeadline：NFKC 全半角统一 +
+ * 去空白 + 去标点/符号/emoji）。保留导出名以兼容既有调用方与测试。
+ */
 export function normalizeTitle(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[\s\p{P}\p{S}]+/gu, '')
-    .trim();
+  return normalizeHeadline(title);
 }
 
 function bigrams(value: string): Set<string> {

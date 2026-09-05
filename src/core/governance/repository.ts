@@ -422,6 +422,8 @@ export interface GovernanceQueueItemRow {
   sourceUrl: string | null;
   governanceStatus: GovernanceStatus;
   redraftCount: number;
+  directionKey: string | null;
+  directionReason: string | null;
   contentType: ContentType;
 }
 
@@ -431,6 +433,8 @@ export async function listGovernanceQueue(
     /** 状态过滤；缺省返回 candidate + pending（待批队列）。 */
     statuses?: GovernanceStatus[];
     categoryId?: string;
+    /** 方向筛选（direction_key 精确匹配）。 */
+    direction?: string;
     /** 选题搜索：标题/摘要模糊匹配（ILIKE）。 */
     keyword?: string;
     page?: number;
@@ -452,6 +456,10 @@ export async function listGovernanceQueue(
   if (input.categoryId) {
     conditions.push(`f.category_id = $${paramIndex++}`);
     values.push(input.categoryId);
+  }
+  if (input.direction) {
+    conditions.push(`a.direction_key = $${paramIndex++}`);
+    values.push(input.direction);
   }
   if (input.keyword) {
     conditions.push(
@@ -488,6 +496,8 @@ export async function listGovernanceQueue(
         a.link as "sourceUrl",
         a.governance_status as "governanceStatus",
         a.redraft_count as "redraftCount",
+        a.direction_key as "directionKey",
+        a.direction_reason as "directionReason",
         ${contentTypeSignalSelectSql}
       from articles a
       join feeds f on f.id = a.feed_id and f.user_id = a.user_id
@@ -539,6 +549,8 @@ export async function getGovernanceItemDetail(
         a.link as "sourceUrl",
         a.governance_status as "governanceStatus",
         a.redraft_count as "redraftCount",
+        a.direction_key as "directionKey",
+        a.direction_reason as "directionReason",
         ${contentTypeSignalSelectSql}
       from articles a
       join feeds f on f.id = a.feed_id and f.user_id = a.user_id

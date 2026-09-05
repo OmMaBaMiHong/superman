@@ -15,6 +15,11 @@ import {
   getTrendRadarItem,
   markTrendRadarItemPromoted,
 } from '@/core/trendradar/repository';
+import {
+  FALLBACK_DIRECTION_KEY,
+  classifyByKeywords,
+  listDirectionStrategies,
+} from '@/core/governance/directions';
 
 type DbClient = Pool | PoolClient;
 
@@ -76,6 +81,10 @@ export async function promoteTrendRadarItem(
   const platformLabel = item.platformName || item.platform;
   const link = /^https?:\/\//.test(item.url) ? item.url : null;
 
+  // 热榜条目进治理走同一方向分类（关键词派，先中先得；未命中兜底 general）。
+  const strategies = await listDirectionStrategies(db, { userId: scopedUserId, enabledOnly: true });
+  const classified = classifyByKeywords(item.title, '', strategies);
+
   const article = await insertArticleIgnoreDuplicate(db, {
     feedId,
     dedupeKey,
@@ -92,6 +101,10 @@ export async function promoteTrendRadarItem(
       status: 'candidate',
       qualityScore: null,
       aiReason: `手动转自热点雷达（${platformLabel}，${item.sourceDate}）`,
+      directionKey: classified?.directionKey ?? FALLBACK_DIRECTION_KEY,
+      directionReason: classified
+        ? `命中关键词「${classified.matchedKeyword ?? ''}」（转自热点雷达）`
+        : '未命中方向关键词，归入「其他」（转自热点雷达）',
     },
     userId: scopedUserId,
   });
