@@ -18,8 +18,16 @@ import {
   approveGovernanceItem,
   redraftGovernanceItem,
   rejectGovernanceItem,
+  requeueGovernanceItem,
   restoreGovernanceItem,
 } from '@/core/governance/services/governanceActionsService'
+import { isSafeExternalUrl } from '@/server/integrations/rss/ssrfGuard'
+import { isRssHubUrl } from '@/lib/rsshub/url'
+import { createFeedWithCategoryResolution } from '@/server/domains/feeds/services/feedCategoryLifecycleService'
+import {
+  FALLBACK_RECOMMENDED_FEEDS,
+  inferFeedPlatform,
+} from '@/core/feeds/recommendedFallback'
 import { listTrendRadarItemsByDate, type TrendRadarItemRow } from '@/core/trendradar/repository'
 import { promoteTrendRadarItem } from '@/core/trendradar/promote'
 import { isRewritePlatform, type RewritePlatform } from '@/core/pipelines/rewriteProfiles'
@@ -333,6 +341,165 @@ const ROUTES: RouteDef[] = [
       'content-length': String(data.length),
     })
     res.end(data)
+  }),
+
+  // —— 治理补充：送回审批台（P1-A，archived → candidate）——
+  route('POST', '/governance/items/:id/requeue', async ({ res, params, session, db }) => {
+    const item = await requeueGovernanceItem(db as never, {
+      id: requireId(params.id, '条目 ID'),
+      userId: session.userId,
+    })
+    json(res, 200, { ok: true, data: { item } })
+  }),
+
+  // —— 订阅源（P1-A）——
+  route('GET', '/feeds', async ({ res, session, db }) => {
+    const { rows } = await db.query(
+      `
+        select
+          f.id::text as "id",
+          f.title,
+          f.url,
+          f.site_url as "siteUrl",
+          f.kind,
+          f.view,
+          f.enabled,
+          f.category_id as "categoryId",
+          c.name as "categoryTitle",
+          f.last_fetch_status as "lastFetchStatus",
+          f.last_fetch_error as "lastFetchError",
+          f.last_fetched_at as "lastFetchedAt",
+          (select count(*)::int from articles a where a.feed_id = f.id and a.user_id = f.user_id) as "articleCount"
+        from feeds f
+        left join categories c on c.id = f.category_id and c.user_id = f.user_id
+        where f.user_id = $1
+        order by f.created_at desc, f.id desc
+      `,
+      [session.userId],
+    )
+    json(res, 200, { ok: true, data: { items: rows } })
+  }),
+
+  route('POST', '/feeds', async ({ req, res, session, db }) => {
+    const body = await readJsonBody(req)
+    const title = typeof body.title === 'string' ? body.title.trim() : ''
+    const url = typeof body.url === 'string' ? body.url.trim() : ''
+    const categoryId = typeof body.categoryId === 'string' && body.categoryId.trim() ? body.categoryId.trim() : undefined
+    const categoryName = typeof body.categoryName === 'string' && body.categoryName.trim() ? body.categoryName.trim() : undefined
+    const siteUrl = typeof body.siteUrl === 'string' && body.siteUrl.trim() ? body.siteUrl.trim() : undefined
+
+    if (!title) throw new ValidationError('请求参数非法', { title: '标题不能为空' })
+    if (!url) throw new ValidationError('请求参数非法', { url: '链接不能为空' })
+    if (categoryId && parsePositiveInt(categoryId) === null) {
+      throw new ValidationError('请求参数非法', { categoryId: '必须为正整数' })
+    }
+
+    // rsshub:// 协议走本地 RSSHub，跳过 SSRF 外呼校验；http(s) 必须过安全校验
+    if (isRssHubUrl(url)) {
+      // 合法 rsshub 路由直接放行
+    } else {
+      if (!/^https?:\/\//i.test(url)) {
+        throw new ValidationError('请求参数非法', { url: '链接必须以 http(s):// 或 rsshub:// 开头' })
+      }
+      const safe = await isSafeExternalUrl(url, { allowUnresolvedHostname: true })
+      if (!safe) {
+        throw new ValidationError('请求参数非法', { url: '链接不安全或无法解析' })
+      }
+    }
+
+    try {
+      const feed = await createFeedWithCategoryResolution(db as never, {
+        title,
+        url,
+        siteUrl: siteUrl ?? null,
+        categoryId: categoryId ?? null,
+        categoryName: categoryName ?? null,
+        userId: session.userId,
+      })
+      json(res, 200, { ok: true, data: feed })
+    } catch (err) {
+      // 唯一约束：同用户同 URL 重复订阅
+      if (typeof err === 'object' && err !== null && (err as { code?: unknown }).code === '23505') {
+        throw new ConflictError('该链接已订阅', { url: '重复订阅' })
+      }
+      throw err
+    }
+  }),
+
+  route('GET', '/feeds/recommended', async ({ res, db }) => {
+    const { rows: rawBuiltinRows } = await db.query(
+      `
+        select id::text, title, url, site_url as "siteUrl", icon_url as "iconUrl", description
+        from recommended_feeds
+        order by position asc, id asc
+      `,
+      [],
+    )
+
+    const builtinRows = rawBuiltinRows as Array<{
+      id: string; title: string; url: string; siteUrl: string | null; iconUrl: string | null; description: string | null
+    }>
+    const builtinUrls = new Set(builtinRows.map((r) => r.url))
+    const { rows: rawAggregatedRows } = await db.query(
+      `
+        select url, title, site_url as "siteUrl", icon_url as "iconUrl",
+               count(distinct user_id)::int as "subscriberCount"
+        from feeds
+        where provider = 'local_rss' and kind = 'rss'
+        group by url, title, site_url, icon_url
+        order by "subscriberCount" desc, url asc
+      `,
+      [],
+    )
+
+    const aggregatedRows = rawAggregatedRows as Array<{
+      url: string; title: string; siteUrl: string | null; iconUrl: string | null; subscriberCount: number
+    }>
+    const items = [
+      ...builtinRows.map((row) => ({
+        id: `builtin-${row.id}`,
+        title: row.title,
+        url: row.url,
+        siteUrl: row.siteUrl ?? null,
+        iconUrl: row.iconUrl ?? null,
+        description: row.description ?? null,
+        subscriberCount: 0,
+        source: 'builtin',
+        platform: inferFeedPlatform(row.url),
+      })),
+      ...aggregatedRows
+        .filter((row) => !builtinUrls.has(row.url))
+        .map((row) => ({
+          id: `agg-${row.url}`,
+          title: row.title,
+          url: row.url,
+          siteUrl: row.siteUrl ?? null,
+          iconUrl: row.iconUrl ?? null,
+          description: null,
+          subscriberCount: row.subscriberCount,
+          source: 'aggregated',
+          platform: inferFeedPlatform(row.url),
+        })),
+    ]
+
+    // 表空时的内置精选兜底（科技/AI/B站头部）
+    if (items.length === 0) {
+      items.push(
+        ...FALLBACK_RECOMMENDED_FEEDS.map((entry, index) => ({
+          id: `fallback-${index}`,
+          title: entry.title,
+          url: entry.url,
+          siteUrl: entry.siteUrl ?? null,
+          iconUrl: null,
+          description: entry.description ?? null,
+          subscriberCount: 0,
+          source: 'builtin',
+          platform: entry.platform,
+        })),
+      )
+    }
+
+    json(res, 200, { ok: true, data: items })
   }),
 ]
 

@@ -20,6 +20,7 @@ const LEGAL: Array<[GovernanceStatus, GovernanceStatus]> = [
   ['pending', 'archived'],
   ['pending', 'rejected'],
   ['archived', 'used'],
+  ['archived', 'candidate'],
   ['rejected', 'archived'],
 ];
 
@@ -41,8 +42,8 @@ describe('governance stateMachine', () => {
     }
   });
 
-  it('archived → candidate 非法（不可回到待批）', () => {
-    expect(canTransition('archived', 'candidate')).toBe(false);
+  it('archived → candidate 合法（requeue 送回审批台专用开口）', () => {
+    expect(canTransition('archived', 'candidate')).toBe(true); // requeue 开口
     expect(canTransition('archived', 'pending')).toBe(false);
     expect(canTransition('archived', 'rejected')).toBe(false);
   });

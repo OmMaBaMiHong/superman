@@ -36,22 +36,24 @@ describe('MobileTabBar（移动端底部导航）', () => {
 
     expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '阅读' })).toHaveAttribute('href', '/');
-    expect(screen.getByRole('link', { name: '审批台' })).toHaveAttribute('href', '/governance');
+    // P1-A 菜单合并：审批台并入创作，tab 收敛为 阅读/创作/热点/设置
+    expect(screen.queryByRole('link', { name: '审批台' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '创作' })).toHaveAttribute('href', '/studio');
     expect(screen.getByRole('link', { name: '热点' })).toHaveAttribute('href', '/trending');
     // 缺省（阅读器外）：设置跳回阅读器并消费 ?settings=open
     expect(screen.getByRole('link', { name: '设置' })).toHaveAttribute('href', '/?settings=open');
 
-    const tab = screen.getByRole('link', { name: '审批台' });
+    const tab = screen.getByRole('link', { name: '创作' });
     expect(tab.className).toContain('min-h-[44px]');
   });
 
-  it('按当前路由高亮激活 tab', () => {
+  it('按当前路由高亮激活 tab（/governance 旧路由也高亮创作）', () => {
     render(<MobileTabBar />);
-    expect(screen.getByRole('link', { name: '审批台' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: '创作' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('link', { name: '阅读' })).not.toHaveAttribute('aria-current');
   });
 
-  it('审批台 tab 显示待批数徽章', async () => {
+  it('创作 tab 显示待批数徽章（审批台并入后徽章迁移）', async () => {
     render(<MobileTabBar />);
     await waitFor(() => {
       expect(screen.getByText('7')).toBeInTheDocument();

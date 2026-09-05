@@ -2520,3 +2520,50 @@ export async function exportDraftMarkdown(
       `draft-${id}.md`,
   };
 }
+
+/* ── 订阅源管理（P1-A，H5/插件侧使用）── */
+
+export interface FeedListItem {
+  id: string;
+  title: string;
+  url: string;
+  siteUrl: string | null;
+  kind: string;
+  view: string;
+  enabled: boolean;
+  categoryId: string | null;
+  categoryTitle: string | null;
+  lastFetchStatus: number | null;
+  lastFetchError: string | null;
+  lastFetchedAt: string | null;
+  articleCount: number;
+}
+
+export async function listFeedItems(
+  options?: RequestApiOptions,
+): Promise<{ items: FeedListItem[] }> {
+  return requestApi('/api/feeds', undefined, options);
+}
+
+/** 推荐条目带平台标签（插件侧 inferFeedPlatform 派生）。 */
+export interface RecommendedFeedEntry extends RecommendedFeedItem {
+  platform?: 'rss' | 'bilibili' | 'douyin' | 'ai' | 'tech';
+}
+
+export async function listRecommendedFeeds(
+  options?: RequestApiOptions,
+): Promise<RecommendedFeedEntry[]> {
+  return requestApi('/api/feeds/recommended', undefined, options);
+}
+
+/** 送回审批台：archived → candidate（阅读器「送审批」）。 */
+export async function requeueGovernanceItem(
+  id: string,
+  options?: RequestApiOptions,
+): Promise<unknown> {
+  return requestApi(
+    `/api/governance/items/${encodeURIComponent(id)}/requeue`,
+    { method: 'POST' },
+    options,
+  );
+}

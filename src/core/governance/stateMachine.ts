@@ -2,6 +2,7 @@
  * 治理状态机（纯函数）。
  *
  * 状态流：candidate → pending → archived → used
+ *          archived →（requeue）→ candidate
  *          candidate/pending ↘ rejected →（restore）→ archived
  * used 为终态。全部非法迁移一律拒绝，由调用方（repository / API）转成 409。
  */
@@ -23,7 +24,7 @@ export const GOVERNANCE_STATUSES: readonly GovernanceStatus[] = [
 const TRANSITIONS: Record<GovernanceStatus, readonly GovernanceStatus[]> = {
   candidate: ['pending', 'archived', 'rejected'],
   pending: ['archived', 'rejected'],
-  archived: ['used'],
+  archived: ['used', 'candidate'], // candidate 仅 requeue（送回审批台）使用
   rejected: ['archived'], // restore
   used: [],
 };

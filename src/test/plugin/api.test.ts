@@ -28,6 +28,22 @@ vi.mock('@/core/governance/services/governanceActionsService', () => ({
   })),
   redraftGovernanceItem: vi.fn(async () => ({ item: { id: '11', status: 'candidate' }, draft: null })),
   restoreGovernanceItem: vi.fn(async (_db: unknown, input: { id: string }) => ({ id: input.id, status: 'candidate' })),
+  requeueGovernanceItem: vi.fn(async (_db: unknown, input: { id: string }) => ({ id: input.id, status: 'candidate' })),
+}));
+
+vi.mock('@/server/integrations/rss/ssrfGuard', () => ({
+  isSafeExternalUrl: vi.fn(async (url: string) => !url.includes('unsafe')),
+}));
+
+vi.mock('@/server/domains/feeds/services/feedCategoryLifecycleService', () => ({
+  createFeedWithCategoryResolution: vi.fn(async (_db: unknown, input: { title: string; url: string }) => {
+    if (input.url.includes('duplicate')) {
+      const err = new Error('duplicate key') as Error & { code?: string };
+      err.code = '23505';
+      throw err;
+    }
+    return { id: 'f-new', title: input.title, url: input.url };
+  }),
 }));
 
 vi.mock('@/core/trendradar/repository', () => ({
@@ -186,5 +202,80 @@ describe('plugin/host/api · 热点路由', () => {
     const missing = makeRes();
     await handler(makeReq('POST', '/s/api/trend-radar/items/999/promote', cookie), missing as never);
     expect(missing.status).toBe(404);
+  });
+});
+
+describe('plugin/host/api · 订阅源与 requeue（P1-A）', () => {
+  it('POST requeue：archived → candidate 返回条目', async () => {
+    const { auth, handler } = makeHandler();
+    const cookie = await login(auth);
+    const res = makeRes();
+    await handler(makeReq('POST', '/s/api/governance/items/11/requeue', cookie), res as never);
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).data.item).toMatchObject({ id: '11', status: 'candidate' });
+  });
+
+  it('GET /feeds 返回订阅列表结构', async () => {
+    const { auth, handler } = makeHandler();
+    const cookie = await login(auth);
+    const res = makeRes();
+    await handler(makeReq('GET', '/s/api/feeds', cookie), res as never);
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).data).toMatchObject({ items: [] });
+  });
+
+  it('GET /feeds/recommended 表空时回落内置精选（含 B站 rsshub 博主）', async () => {
+    const { auth, handler } = makeHandler();
+    const cookie = await login(auth);
+    const res = makeRes();
+    await handler(makeReq('GET', '/s/api/feeds/recommended', cookie), res as never);
+    expect(res.status).toBe(200);
+    const items = JSON.parse(res.body).data as Array<{ id: string; platform: string; url: string }>;
+    // fakeDb 返回空 → 走兜底列表
+    expect(items.length).toBeGreaterThanOrEqual(18);
+    expect(items.some((entry) => entry.platform === 'bilibili' && entry.url.startsWith('rsshub://bilibili/'))).toBe(true);
+    expect(items.every((entry) => entry.id.startsWith('fallback-'))).toBe(true);
+  });
+
+  it('POST /feeds 创建订阅：合法链接 200，重复 409，不安全 400，缺字段 400', async () => {
+    const { auth, handler } = makeHandler();
+    const cookie = await login(auth);
+
+    const okRes = makeRes();
+    await handler(
+      makeReq('POST', '/s/api/feeds', cookie, { title: 'HelloGitHub', url: 'https://hellogithub.com/rss' }),
+      okRes as never,
+    );
+    expect(okRes.status).toBe(200);
+    expect(JSON.parse(okRes.body).data).toMatchObject({ id: 'f-new', title: 'HelloGitHub' });
+
+    const dupRes = makeRes();
+    await handler(
+      makeReq('POST', '/s/api/feeds', cookie, { title: '重复', url: 'https://example.com/duplicate' }),
+      dupRes as never,
+    );
+    expect(dupRes.status).toBe(409);
+
+    const unsafeRes = makeRes();
+    await handler(
+      makeReq('POST', '/s/api/feeds', cookie, { title: '坏', url: 'https://unsafe.internal/feed' }),
+      unsafeRes as never,
+    );
+    expect(unsafeRes.status).toBe(400);
+
+    const emptyRes = makeRes();
+    await handler(makeReq('POST', '/s/api/feeds', cookie, { title: '', url: '' }), emptyRes as never);
+    expect(emptyRes.status).toBe(400);
+  });
+
+  it('POST /feeds 接受 rsshub:// 链接（跳过 SSRF 外呼校验）', async () => {
+    const { auth, handler } = makeHandler();
+    const cookie = await login(auth);
+    const res = makeRes();
+    await handler(
+      makeReq('POST', '/s/api/feeds', cookie, { title: '何同学', url: 'rsshub://bilibili/user/video/163637592' }),
+      res as never,
+    );
+    expect(res.status).toBe(200);
   });
 });

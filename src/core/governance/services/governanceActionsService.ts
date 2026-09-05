@@ -1,5 +1,5 @@
 /**
- * 审批动作服务：approve / reject / redraft / restore。
+ * 审批动作服务：approve / reject / redraft / restore / requeue。
  * 状态合法性由 stateMachine.canTransition 保证，repo 返回判别联合，
  * 这里统一翻译成 HTTP 错误（404 / 409），路由保持薄壳。
  */
@@ -66,6 +66,17 @@ export async function rejectGovernanceItem(
     sourceUrl: item.link,
   });
   return updated;
+}
+
+/**
+ * 送回审批台：archived → candidate（阅读器「送审批」动作）。
+ * 这是 archived 唯一的回头路（K2 状态机原本只出不进，P1 按需求开口）。
+ */
+export async function requeueGovernanceItem(
+  db: DbClient,
+  input: { id: string; userId?: string },
+): Promise<GovernanceItemRow> {
+  return transitionOrThrow(db, { id: input.id, userId: input.userId, to: 'candidate' });
 }
 
 export async function restoreGovernanceItem(
