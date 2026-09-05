@@ -7,7 +7,7 @@
  * superman 技能正文里。
  *
  * 命名纪律：下划线命名（superman_xxx），不用点号（部分 LLM wire 格式不允许）。
- * K1 的 superman.ping 保留作连通性测试（兼容既有验收）。
+ * 连通性测试工具（原 K1 superman.ping，点号在 LLM wire 非法，已改下划线）。
  *
  * 错误约定：领域失败（参数非法/状态不允许/不存在）返回 { ok: false, error }
  * 规范值；只有基础设施故障（数据库断连等）才抛异常（注册表转为 isError）。
@@ -87,7 +87,7 @@ function text(text: string): { type: 'text'; text: string }[] {
 export function buildSupermanTools(deps: ToolsDeps): ToolDef[] {
   return [
     {
-      name: 'superman.ping',
+      name: 'superman_ping',
       description: 'Superman 插件连通性测试：返回 pong、服务端当前时间与 Postgres 连接状态。',
       parameters: { type: 'object', properties: {} },
       execute: async () => ({ pong: true, time: new Date().toISOString(), db: deps.db !== null }),

@@ -72,8 +72,8 @@ describe('plugin/host/tools · 工具表结构', () => {
     for (const tool of tools) {
       expect(tool.description.length).toBeGreaterThan(10);
       expect(tool.parameters).toMatchObject({ type: 'object' });
-      // 新工具一律下划线；superman.ping 是 K1 遗留的唯一例外
-      if (tool.name !== 'superman.ping') expect(tool.name).toMatch(/^superman_[a-z_]+$/);
+      // 全部下划线命名（LLM wire 格式只允许 [a-zA-Z0-9_-]，点号会导致 400）
+      expect(tool.name).toMatch(/^superman_[a-z_]+$/);
     }
   });
 

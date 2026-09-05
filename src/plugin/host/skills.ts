@@ -51,7 +51,7 @@ rejected → archived（restore 恢复）
 - superman_drafts_list(platform?, limit?)：草稿箱
 - superman_draft_read(id)：读草稿全文
 - superman_fetch_trigger(scope?)：手动触发一轮到期源抓取（单次，不动调度开关）
-- superman.ping：连通性自检
+- superman_ping：连通性自检
 
 ## 安全边界（红线，违反即错误操作）
 1. 不批量准奏：逐条看详情（superman_item_detail）后再批准；用户没点名就不要连续批准多条。
