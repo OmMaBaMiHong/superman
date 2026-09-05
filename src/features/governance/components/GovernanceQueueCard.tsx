@@ -3,6 +3,7 @@
 import { Check, ExternalLink, RotateCcw, X } from 'lucide-react';
 import type { GovernanceQueueItem } from '@/lib/api/apiClient';
 import ContentTypeBadge from '@/components/ui/content-type-badge';
+import DirectionBadge from '@/components/ui/direction-badge';
 import { cn } from '@/lib/utils';
 import { useCardSwipe } from '../hooks/useCardSwipe';
 import QualityScore from './QualityScore';
@@ -110,6 +111,7 @@ export default function GovernanceQueueCard({
         {/* 徽标行：形态 + 状态 + 重拟计数 + 质量分 */}
         <div className="flex items-center gap-1.5">
           <ContentTypeBadge type={item.contentType} />
+          <DirectionBadge directionKey={item.directionKey} reason={item.directionReason} />
           <span
             aria-hidden="true"
             className={cn(

@@ -47,6 +47,8 @@ export interface TrendRadarItemRow {
   promotedAt: string | null;
   promotedArticleId: string | null;
   contentType: ContentType;
+  /** 已转选题条目的治理方向（join 成稿文章；未转/存量为 null）。 */
+  directionKey: string | null;
   payload: Record<string, unknown>;
 }
 
@@ -161,6 +163,7 @@ interface RawTrendRadarRow {
   sourceDate: string;
   promotedAt: string | null;
   promotedArticleId: string | null;
+  directionKey: string | null;
   payload: unknown;
 }
 
@@ -179,19 +182,20 @@ function mapRow(row: RawTrendRadarRow): TrendRadarItemRow {
 }
 
 const trendRadarRowSelectSql = `
-  id::text as "id",
-  platform as "platform",
-  platform_name as "platformName",
-  title as "title",
-  url as "url",
-  rank as "rank",
-  hot_value as "hotValue",
-  first_seen_at as "firstSeenAt",
-  last_seen_at as "lastSeenAt",
-  source_date::text as "sourceDate",
-  promoted_at as "promotedAt",
-  promoted_article_id::text as "promotedArticleId",
-  payload_json as "payload"
+  t.id::text as "id",
+  t.platform as "platform",
+  t.platform_name as "platformName",
+  t.title as "title",
+  t.url as "url",
+  t.rank as "rank",
+  t.hot_value as "hotValue",
+  t.first_seen_at as "firstSeenAt",
+  t.last_seen_at as "lastSeenAt",
+  t.source_date::text as "sourceDate",
+  t.promoted_at as "promotedAt",
+  t.promoted_article_id::text as "promotedArticleId",
+  pa.direction_key as "directionKey",
+  t.payload_json as "payload"
 `;
 
 /** 某日（缺省今天）的热榜条目，按平台 + 排名排序，user_id 严格隔离。 */
@@ -202,10 +206,11 @@ export async function listTrendRadarItemsByDate(
   const { rows } = await db.query<RawTrendRadarRow>(
     `
       select ${trendRadarRowSelectSql}
-      from trend_radar_items
-      where user_id = $1
-        and source_date = coalesce($2::date, current_date)
-      order by platform asc, rank asc nulls last, id asc
+      from trend_radar_items t
+      left join articles pa on pa.id = t.promoted_article_id and pa.user_id = t.user_id
+      where t.user_id = $1
+        and t.source_date = coalesce($2::date, current_date)
+      order by t.platform asc, t.rank asc nulls last, t.id asc
     `,
     [normalizeUserId(input.userId), input.date ?? null],
   );
@@ -220,9 +225,10 @@ export async function getTrendRadarItem(
   const { rows } = await db.query<RawTrendRadarRow>(
     `
       select ${trendRadarRowSelectSql}
-      from trend_radar_items
-      where id = $1
-        and user_id = $2
+      from trend_radar_items t
+      left join articles pa on pa.id = t.promoted_article_id and pa.user_id = t.user_id
+      where t.id = $1
+        and t.user_id = $2
       limit 1
     `,
     [id, normalizeUserId(userId)],

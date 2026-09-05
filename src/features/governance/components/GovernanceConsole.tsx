@@ -20,6 +20,7 @@ import {
 import GlassDetailSheet from '@/components/ui/glass-detail-sheet';
 import { cn } from '@/lib/utils';
 import MobileTabBar from '@/features/mobile/components/MobileTabBar';
+import { useDirectionTemplates } from '../hooks/useDirectionTemplates';
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
 import GovernanceItemDetailView from './GovernanceItemDetailView';
 import GovernanceQueueCard, { type CardExitKind } from './GovernanceQueueCard';
@@ -57,6 +58,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
  *  embedded=true 时嵌进创作台（隐藏自身 header / MobileTabBar / 底部留白）。 */
 export default function GovernanceConsole({ embedded = false }: { embedded?: boolean }) {
   const reducedMotion = usePrefersReducedMotion();
+  const directionTemplates = useDirectionTemplates();
 
   const [stats, setStats] = useState<GovernanceStats | null>(null);
   const [items, setItems] = useState<GovernanceQueueItem[]>([]);
@@ -64,6 +66,7 @@ export default function GovernanceConsole({ embedded = false }: { embedded?: boo
   const [page, setPage] = useState(1);
   const [tab, setTab] = useState<QueueTab>('all');
   const [categoryId, setCategoryId] = useState<string>('');
+  const [direction, setDirection] = useState<string>('');
   const [categories, setCategories] = useState<CategoryDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -91,6 +94,7 @@ export default function GovernanceConsole({ embedded = false }: { embedded?: boo
       const result = await getGovernanceQueue({
         statuses: TAB_STATUSES[tab],
         categoryId: categoryId || undefined,
+        direction: direction || undefined,
         page: nextPage,
         pageSize: PAGE_SIZE,
       });
@@ -98,7 +102,7 @@ export default function GovernanceConsole({ embedded = false }: { embedded?: boo
       setItems((current) => (append ? [...current, ...result.items] : result.items));
       setPage(nextPage);
     },
-    [tab, categoryId],
+    [tab, categoryId, direction],
   );
 
   // 首屏 + 筛选切换：重置队列
@@ -285,6 +289,17 @@ export default function GovernanceConsole({ embedded = false }: { embedded?: boo
     node?.scrollIntoView({ block: 'nearest' });
   }, [selectedIndex, items]);
 
+  // 方向 mini 分布（简单版）：当前已加载队列条目按方向聚合，点段即筛选
+  const directionCounts = new Map<string, number>();
+  let undirectedCount = 0;
+  for (const entry of items) {
+    if (entry.directionKey) {
+      directionCounts.set(entry.directionKey, (directionCounts.get(entry.directionKey) ?? 0) + 1);
+    } else {
+      undirectedCount += 1;
+    }
+  }
+
   const hasMore = items.length < total;
   const emptyCopy = useMemo(() => {
     if (tab === 'pending') {
@@ -339,6 +354,38 @@ export default function GovernanceConsole({ embedded = false }: { embedded?: boo
       <main className={embedded ? 'space-y-5 pt-1' : 'mx-auto max-w-4xl space-y-6 px-4 pb-24 pt-6 sm:px-6 md:pb-6'}>
         <GovernanceStatsBar stats={stats} />
 
+        {/* 队列深度方向 mini 分布条（当前已加载条目的方向构成，点段即筛选） */}
+        {items.length > 0 && directionCounts.size > 0 ? (
+          <div className="space-y-1.5" data-testid="direction-distribution">
+            <div className="flex h-1.5 w-full gap-px overflow-hidden rounded-full">
+              {Array.from(directionCounts.entries()).map(([key, count]) => {
+                const template = directionTemplates.get(key);
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    title={`${template ? `${template.icon} ${template.name}` : key}：${count} 条（点击筛选）`}
+                    aria-label={`按方向 ${template?.name ?? key} 筛选`}
+                    onClick={() => setDirection((current) => (current === key ? '' : key))}
+                    className="h-full transition-opacity duration-150 hover:opacity-75"
+                    style={{
+                      width: `${(count / items.length) * 100}%`,
+                      backgroundColor: template?.color ?? '#6b7280',
+                    }}
+                  />
+                );
+              })}
+              {undirectedCount > 0 ? (
+                <span
+                  title={`未分类：${undirectedCount} 条`}
+                  className="h-full bg-muted"
+                  style={{ width: `${(undirectedCount / items.length) * 100}%` }}
+                />
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
         {/* 工具行：状态 tab + 分类筛选 */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div role="tablist" aria-label="队列状态" className="glass-surface-light flex items-center gap-1 rounded-full p-1">
@@ -360,6 +407,52 @@ export default function GovernanceConsole({ embedded = false }: { embedded?: boo
                 {entry.name}
               </button>
             ))}
+          </div>
+
+          {/* 方向筛选 pill 组（模板动态选项带色点，小屏横滑） */}
+          <div
+            role="group"
+            aria-label="按方向筛选"
+            className="flex max-w-full items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            <button
+              type="button"
+              aria-pressed={direction === ''}
+              onClick={() => setDirection('')}
+              className={cn(
+                'flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-xs font-medium transition-colors duration-150',
+                'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                direction === ''
+                  ? 'border-primary/40 bg-primary/10 text-primary'
+                  : 'border-border text-muted-foreground hover:text-foreground',
+              )}
+            >
+              全部方向
+            </button>
+            {Array.from(directionTemplates.values())
+              .sort((a, b) => a.sort - b.sort)
+              .map((template) => (
+                <button
+                  key={template.key}
+                  type="button"
+                  aria-pressed={direction === template.key}
+                  onClick={() => setDirection((current) => (current === template.key ? '' : template.key))}
+                  className={cn(
+                    'flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-xs font-medium transition-colors duration-150',
+                    'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                    direction === template.key
+                      ? 'border-primary/40 bg-primary/10 text-primary'
+                      : 'border-border text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  <span
+                    aria-hidden="true"
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{ backgroundColor: template.color }}
+                  />
+                  {template.icon} {template.name}
+                </button>
+              ))}
           </div>
 
           <select

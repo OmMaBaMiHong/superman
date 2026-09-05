@@ -3,6 +3,7 @@
 import { Check, ExternalLink, RotateCcw, X } from 'lucide-react';
 import type { GovernanceItemDetail } from '@/lib/api/apiClient';
 import ContentTypeBadge from '@/components/ui/content-type-badge';
+import DirectionBadge from '@/components/ui/direction-badge';
 import VideoEmbed from '@/components/ui/video-embed';
 import { cn } from '@/lib/utils';
 import { formatPublishedAt } from './GovernanceQueueCard';
@@ -36,6 +37,7 @@ export default function GovernanceItemDetailView({
       {/* 徽标行 */}
       <div className="flex flex-wrap items-center gap-1.5">
         <ContentTypeBadge type={detail.contentType} />
+        <DirectionBadge directionKey={detail.directionKey} reason={detail.directionReason} />
         <QualityScore score={detail.qualityScore} />
         {detail.redraftCount > 0 ? (
           <span className="rounded-full border border-primary/40 bg-primary/10 px-1.5 py-px font-mono text-[10px] tabular-nums text-primary">
@@ -81,6 +83,12 @@ export default function GovernanceItemDetailView({
           </a>
         ) : null}
       </div>
+
+      {detail.directionReason ? (
+        <p className="mt-2.5 text-[11px] text-muted-foreground">
+          方向判断：{detail.directionReason}
+        </p>
+      ) : null}
 
       {detail.aiReason ? (
         <blockquote className="mt-4 rounded-2xl border border-border/60 bg-secondary/60 px-4 py-3">

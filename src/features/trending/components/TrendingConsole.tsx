@@ -20,6 +20,7 @@ import {
   type TrendRadarToday,
 } from '@/lib/api/apiClient';
 import ContentTypeBadge from '@/components/ui/content-type-badge';
+import DirectionBadge from '@/components/ui/direction-badge';
 import GlassDetailSheet from '@/components/ui/glass-detail-sheet';
 import MobileTabBar from '@/features/mobile/components/MobileTabBar';
 import { cn } from '@/lib/utils';
@@ -79,6 +80,7 @@ function TrendRadarRow({
           {item.title}
         </span>
         <ContentTypeBadge type={item.contentType} />
+        {promoted ? <DirectionBadge directionKey={item.directionKey} /> : null}
         {item.hotValue ? (
           <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/70">
             {item.hotValue}

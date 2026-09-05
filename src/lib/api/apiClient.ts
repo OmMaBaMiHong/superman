@@ -2188,6 +2188,9 @@ export interface GovernanceQueueItem {
   governanceStatus: GovernanceStatus;
   redraftCount: number;
   contentType: ContentType;
+  /** 治理方向（P2b；存量为 null）。 */
+  directionKey: string | null;
+  directionReason: string | null;
 }
 
 /** 治理条目详情：全文/图/来源，供详情 sheet 渲染。 */
@@ -2216,6 +2219,8 @@ export async function getGovernanceQueue(
     statuses?: GovernanceStatus[];
     categoryId?: string;
     keyword?: string;
+    /** 方向筛选（direction_key 精确匹配，P2b）。 */
+    direction?: string;
     page?: number;
     pageSize?: number;
   },
@@ -2227,6 +2232,7 @@ export async function getGovernanceQueue(
   }
   if (input?.categoryId) params.set('categoryId', input.categoryId);
   if (input?.keyword) params.set('keyword', input.keyword);
+  if (input?.direction) params.set('direction', input.direction);
   if (typeof input?.page === 'number') params.set('page', String(input.page));
   if (typeof input?.pageSize === 'number') params.set('pageSize', String(input.pageSize));
 
@@ -2320,6 +2326,8 @@ export interface TrendRadarItem {
   promotedAt: string | null;
   promotedArticleId: string | null;
   contentType: ContentType;
+  /** 已转选题条目的治理方向（未转为 null，P2b）。 */
+  directionKey: string | null;
 }
 
 /** 热榜详情：行字段 + payload_json 全量（有啥返回啥）。 */
@@ -2621,4 +2629,26 @@ export async function markAllNotificationsRead(
   options?: RequestApiOptions,
 ): Promise<{ updated: number }> {
   return requestApi('/api/notifications/read-all', { method: 'POST' }, options);
+}
+
+/* ── 治理方向模板（P2b）── */
+
+export interface DirectionTemplate {
+  id: string;
+  key: string;
+  name: string;
+  color: string;
+  icon: string;
+  keywordsDsl: string;
+  aiHint: string;
+  quotaWeight: number;
+  enabled: boolean;
+  sort: number;
+  builtin: boolean;
+}
+
+export async function listDirections(
+  options?: RequestApiOptions,
+): Promise<{ items: DirectionTemplate[] }> {
+  return requestApi('/api/directions', undefined, options);
 }
