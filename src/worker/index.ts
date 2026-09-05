@@ -61,6 +61,7 @@ import {
   JOB_REFRESH_ALL,
   JOB_SYSTEM_LOG_CLEANUP,
   JOB_TRENDRADAR_SYNC,
+  JOB_PIPELINE_REWRITE,
 } from '@/server/infra/queue/jobs';
 import { sampleQueueStats } from '@/server/infra/queue/observability';
 import { mapFeedFetchError } from '@/server/domains/feeds/tasks/feedFetchErrorMapping';
@@ -81,6 +82,7 @@ import { runSystemLogCleanup } from '@/worker/systemLogCleanup';
 import { runGithubSyncDue } from '@/worker/githubSyncDue';
 import { runGithubFetchWorker } from '@/worker/githubFetchWorker';
 import { runTrendRadarSync } from '@/worker/trendradarSync';
+import { runPipelineRewriteWorker } from '@/worker/pipelineRewrite';
 import { listGithubSubscriptionFeedIds } from '@/server/domains/github/repositories/githubSubscriptionsRepo';
 import { normalizeUserId } from '@/server/domains/users/userScope';
 import { listUsers } from '@/server/domains/auth/repositories/usersRepo';
@@ -1082,6 +1084,19 @@ async function main() {
     }
   };
 
+  const pipelineRewriteHandler = async (jobs: unknown[]) => {
+    for (const job of jobs) {
+      const data = getJobData(job);
+      const jobId = readStringField(data, 'jobId');
+      if (!jobId) {
+        console.warn('[pipeline.rewrite] 缺少 jobId，跳过');
+        continue;
+      }
+      const userId = readStringField(data, 'userId') ?? undefined;
+      await runPipelineRewriteWorker({ jobId, userId });
+    }
+  };
+
   const githubFetchHandler = async (jobs: unknown[]) => {
     for (const job of jobs) {
       const data = getJobData(job);
@@ -1117,6 +1132,7 @@ async function main() {
     [JOB_AI_TRANSLATE_TITLE]: aiTitleTranslateHandler,
     [JOB_SYSTEM_LOG_CLEANUP]: systemLogCleanupHandler,
     [JOB_TRENDRADAR_SYNC]: trendRadarSyncHandler,
+    [JOB_PIPELINE_REWRITE]: pipelineRewriteHandler,
   });
 
   const queueNames = Object.keys(QUEUE_CONTRACTS);

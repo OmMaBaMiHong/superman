@@ -21,6 +21,8 @@ type SendContext = {
   accountId?: string;
   feedId?: string;
   runId?: string;
+  /** pipeline_jobs 业务任务 ID（pipeline.* 系列 job 的 singleton 粒度）。 */
+  jobId?: string;
   force?: boolean;
 };
 
@@ -171,6 +173,20 @@ export const QUEUE_CONTRACTS: Record<string, QueueContract> = {
     worker: { localConcurrency: 1, batchSize: 1 },
     // 30 分钟一轮，singleton 覆盖整个周期，避免上一轮卡住时堆积。
     send: () => ({ singletonKey: 'trendradar.sync', singletonSeconds: 1740 }),
+  },
+  'pipeline.rewrite': {
+    queue: {
+      // 业务状态由 pipeline_jobs 自管（failed + 手动重试），关掉 pg-boss 自动重试。
+      retryLimit: 0,
+      heartbeatSeconds: 60,
+      expireInSeconds: 1800,
+      deadLetter: 'dlq.pipeline.rewrite',
+      warningQueueSize: 100,
+    },
+    // 并发上限 2：LLM 调用别打爆。
+    worker: { localConcurrency: 2, batchSize: 1 },
+    send: (ctx) =>
+      ctx.jobId ? { singletonKey: `pipeline.rewrite:${ctx.jobId}`, singletonSeconds: 1800 } : {},
   },
 };
 

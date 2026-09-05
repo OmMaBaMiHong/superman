@@ -16,3 +16,5 @@ export const JOB_ARTICLE_FULLTEXT_FETCH = 'article.fetch_fulltext';
 export const JOB_SYSTEM_LOG_CLEANUP = 'system_logs.cleanup';
 /** 每 30 分钟：读 TrendRadar 当天 SQLite，全量 upsert 热点雷达条目 */
 export const JOB_TRENDRADAR_SYNC = 'trendradar.sync';
+/** 洗稿流水线：选题卡（archived article）→ LLM 按平台 profile 改写 → drafts */
+export const JOB_PIPELINE_REWRITE = 'pipeline.rewrite';
