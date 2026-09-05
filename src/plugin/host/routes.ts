@@ -177,7 +177,7 @@ interface WebServerScope {
   effect(fn: () => () => void, reason?: string): unknown
 }
 
-/** 把 /s/api 与 /s/app 挂到 DSH webServer。webServer 只在 web profile 存在，故用 scoped inject。 */
+/** 把 /s/api、/s/app 与 PWA 端点挂到 DSH webServer。webServer 只在 web profile 存在，故用 scoped inject。 */
 export function registerRoutes(ctx: MinimalContext, deps: RoutesDeps): void {
   const tag = deps.pluginName ?? PLUGIN_NAME
   ctx.inject(['webServer'], (scope: WebServerScope) => {
@@ -190,6 +190,67 @@ export function registerRoutes(ctx: MinimalContext, deps: RoutesDeps): void {
     scope.effect(
       () => scope.webServer.register({ kind: 'prefix', path: '/s/app', handler: app }),
       `${tag}: route /s/app`,
+    )
+
+    // PWA：manifest + service worker 由插件吐出（图标在 /s/app/brand/ 静态目录）
+    const pwaRoot = join(deps.staticRoot, '..', 'pwa')
+    const manifestBody = Buffer.from(
+      JSON.stringify({
+        name: 'Superman 情报指挥中心',
+        short_name: 'Superman',
+        description: '个人创作指挥中心：RSS 阅读、AI 审批台、热点雷达、洗稿流水线',
+        start_url: '/s/app/',
+        scope: '/s/app/',
+        display: 'standalone',
+        orientation: 'any',
+        background_color: '#f5f5f7',
+        theme_color: '#f5f5f7',
+        icons: [
+          { src: '/s/app/brand/pwa-icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/s/app/brand/pwa-icon-512.png', sizes: '512x512', type: 'image/png' },
+          { src: '/s/app/brand/pwa-icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        ],
+      }),
+      'utf8',
+    )
+    scope.effect(
+      () =>
+        scope.webServer.register({
+          kind: 'exact',
+          path: '/s/manifest.webmanifest',
+          handler: (_req, res) => {
+            res.writeHead(200, {
+              'content-type': 'application/manifest+json',
+              'content-length': String(manifestBody.length),
+            })
+            res.end(manifestBody)
+          },
+        }),
+      `${tag}: route /s/manifest.webmanifest`,
+    )
+    scope.effect(
+      () =>
+        scope.webServer.register({
+          kind: 'exact',
+          path: '/s/sw.js',
+          handler: async (_req, res) => {
+            const file = join(pwaRoot, 'sw.js')
+            if (!existsSync(file)) {
+              res.writeHead(404)
+              res.end()
+              return
+            }
+            const body = await readFile(file)
+            res.writeHead(200, {
+              'content-type': 'text/javascript; charset=utf-8',
+              'content-length': String(body.length),
+              // SW 更新必须每次拉新，禁缓存
+              'cache-control': 'no-store',
+            })
+            res.end(body)
+          },
+        }),
+      `${tag}: route /s/sw.js`,
     )
   })
 }
