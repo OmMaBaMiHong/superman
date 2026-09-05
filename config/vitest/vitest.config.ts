@@ -18,6 +18,7 @@ const nodeTestGlobs = [
   'src/test/lib/**/*.test.ts',
   'src/test/utils/**/*.test.ts',
   'src/test/data/**/*.test.ts',
+  'src/test/plugin/**/*.test.ts',
 ];
 
 export default defineConfig({

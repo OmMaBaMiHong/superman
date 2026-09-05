@@ -7,12 +7,31 @@
   "engines": {
     "node": ">=20.19.0"
   },
+  "main": "dist/plugin/host/index.js",
+  "exports": {
+    ".": "./dist/plugin/host/index.js",
+    "./client": "./dist/plugin/client/index.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ],
+      "platform": "web"
+    }
+  },
   "scripts": {
     "rsshub:build": "pnpm --dir vendor/rsshub build:lib",
     "dev": "pnpm rsshub:build && WATCHPACK_POLLING=true next dev --webpack -p 9559",
     "dev:turbo": "pnpm rsshub:build && next dev -p 9559",
     "build:clean": "node scripts/build/clean-build-artifacts.mjs",
     "build": "pnpm build:clean && pnpm rsshub:build && next build",
+    "build:plugin": "node scripts/build/build-plugin.mjs",
     "start": "next start -p 9559",
     "worker:dev": "tsx --tsconfig config/typescript/tsconfig.json src/worker/index.ts",
     "worker:start": "tsx --tsconfig config/typescript/tsconfig.json src/worker/index.ts",

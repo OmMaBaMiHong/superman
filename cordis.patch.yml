@@ -1,0 +1,10 @@
+# superman bundle patch：挂载 host 半（/s/api 应用 API · /s/app H5 · 心跳调度 · agent 工具）。
+# client 半由 package.json 的 dsh.client 声明，被 client-modules 扫描进 window.__DSH_BOOT__。
+#
+# 可覆盖配置：
+#   databaseUrl: Postgres 连接串（缺省读 SUPERMAN_DATABASE_URL / DATABASE_URL 环境变量，
+#                再缺省 postgresql://feedfuse:feedfuse@127.0.0.1:55432/feedfuse）
+#   heartbeatIntervalMs: 心跳间隔毫秒（缺省 60000，0 = 关闭）
+- insert:
+    - id: superman
+      name: 'superman'
