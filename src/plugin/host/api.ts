@@ -28,6 +28,13 @@ import {
   FALLBACK_RECOMMENDED_FEEDS,
   inferFeedPlatform,
 } from '@/core/feeds/recommendedFallback'
+import {
+  countUnreadNotifications,
+  listNotifications,
+  markAllNotificationsRead,
+  markNotificationRead,
+} from '@/core/notify/repository'
+import { notify } from '@/core/notify/service'
 import { listTrendRadarItemsByDate, type TrendRadarItemRow } from '@/core/trendradar/repository'
 import { promoteTrendRadarItem } from '@/core/trendradar/promote'
 import { isRewritePlatform, type RewritePlatform } from '@/core/pipelines/rewriteProfiles'
@@ -178,6 +185,14 @@ const ROUTES: RouteDef[] = [
       reason,
       userId: session.userId,
     })
+    // P2a 事件：重拟完成 → 消息中心（静默失败）
+    void notify(db as never, {
+      userId: session.userId,
+      kind: 'redraft_done',
+      title: `「${result.item.title}」已重新拟稿`,
+      body: reason ? `重拟意见：${reason.slice(0, 200)}` : 'AI 已按默认方向重新拟稿。',
+      link: '/studio?tab=queue',
+    }).catch(() => {})
     json(res, 200, { ok: true, data: result })
   }),
   route('POST', '/governance/items/:id/restore', async ({ res, params, session, db }) => {
@@ -500,6 +515,35 @@ const ROUTES: RouteDef[] = [
     }
 
     json(res, 200, { ok: true, data: items })
+  }),
+
+  // —— 消息中心（P2a）——
+  route('GET', '/notifications', async ({ res, query, session, db }) => {
+    const unreadOnly = query.get('unreadOnly') === 'true'
+    const result = await listNotifications(db as never, {
+      userId: session.userId,
+      unreadOnly,
+      page: parsePositiveInt(query.get('page')) ?? 1,
+      pageSize: parsePositiveInt(query.get('pageSize')) ?? 30,
+    })
+    json(res, 200, { ok: true, data: result })
+  }),
+  // 注意：须在 /notifications/:id/read 之前注册（'unread-count' 会命中 :id）
+  route('GET', '/notifications/unread-count', async ({ res, session, db }) => {
+    const count = await countUnreadNotifications(db as never, session.userId)
+    json(res, 200, { ok: true, data: { count } })
+  }),
+  route('POST', '/notifications/:id/read', async ({ res, params, session, db }) => {
+    const item = await markNotificationRead(db as never, {
+      id: requireId(params.id, '通知 ID'),
+      userId: session.userId,
+    })
+    if (!item) throw new NotFoundError('通知不存在')
+    json(res, 200, { ok: true, data: { item } })
+  }),
+  route('POST', '/notifications/read-all', async ({ res, session, db }) => {
+    const result = await markAllNotificationsRead(db as never, session.userId)
+    json(res, 200, { ok: true, data: result })
   }),
 ]
 

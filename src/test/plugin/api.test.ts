@@ -52,6 +52,30 @@ vi.mock('@/core/trendradar/repository', () => ({
   ]),
 }));
 
+const markReadMock = vi.fn(async () => ({ id: 'n1', readAt: '2026-09-05T12:00:00Z' }));
+const markAllMock = vi.fn(async () => ({ updated: 3 }));
+const notifyMock = vi.fn(async () => ({ id: 'n-new' }));
+
+vi.mock('@/core/notify/repository', () => ({
+  listNotifications: vi.fn(async () => ({
+    items: [
+      {
+        id: 'n1', userId: '1', kind: 'pipeline_done', title: '改写完成', body: '平台：wechat',
+        link: '/studio?tab=drafts', readAt: null, createdAt: '2026-09-05T10:00:00Z',
+      },
+    ],
+    total: 1,
+  })),
+  countUnreadNotifications: vi.fn(async () => 2),
+  markNotificationRead: (...args: unknown[]) => markReadMock(...args),
+  markAllNotificationsRead: (...args: unknown[]) => markAllMock(...args),
+}));
+
+vi.mock('@/core/notify/service', () => ({
+  notify: (...args: unknown[]) => notifyMock(...args),
+  notifyOncePerWindow: vi.fn(async () => null),
+}));
+
 vi.mock('@/core/trendradar/promote', () => ({
   promoteTrendRadarItem: vi.fn(async (_db: unknown, input: { id: string }) =>
     input.id === '5'
@@ -277,5 +301,57 @@ describe('plugin/host/api · 订阅源与 requeue（P1-A）', () => {
       res as never,
     );
     expect(res.status).toBe(200);
+  });
+});
+
+describe('plugin/host/api · 消息中心（P2a）', () => {
+  it('GET /notifications 分页返回列表', async () => {
+    const { auth, handler } = makeHandler();
+    const cookie = await login(auth);
+    const res = makeRes();
+    await handler(makeReq('GET', '/s/api/notifications?page=1&pageSize=30', cookie), res as never);
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.data.items[0]).toMatchObject({ id: 'n1', kind: 'pipeline_done' });
+    expect(body.data.total).toBe(1);
+  });
+
+  it('GET /notifications/unread-count 返回未读数（优先于 :id 路由匹配）', async () => {
+    const { auth, handler } = makeHandler();
+    const cookie = await login(auth);
+    const res = makeRes();
+    await handler(makeReq('GET', '/s/api/notifications/unread-count', cookie), res as never);
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).data).toEqual({ count: 2 });
+  });
+
+  it('POST /notifications/:id/read 标记已读；POST read-all 全清', async () => {
+    const { auth, handler } = makeHandler();
+    const cookie = await login(auth);
+
+    const readRes = makeRes();
+    await handler(makeReq('POST', '/s/api/notifications/1/read', cookie), readRes as never);
+    expect(readRes.status).toBe(200);
+    expect(markReadMock).toHaveBeenCalled();
+
+    const allRes = makeRes();
+    await handler(makeReq('POST', '/s/api/notifications/read-all', cookie), allRes as never);
+    expect(allRes.status).toBe(200);
+    expect(JSON.parse(allRes.body).data).toEqual({ updated: 3 });
+  });
+
+  it('redraft 成功后写 redraft_done 通知（链接指向创作台审批区）', async () => {
+    const { auth, handler } = makeHandler();
+    const cookie = await login(auth);
+    const res = makeRes();
+    await handler(
+      makeReq('POST', '/s/api/governance/items/11/redraft', cookie, { reason: '标题太平' }),
+      res as never,
+    );
+    expect(res.status).toBe(200);
+    expect(notifyMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ kind: 'redraft_done', link: '/studio?tab=queue' }),
+    );
   });
 });

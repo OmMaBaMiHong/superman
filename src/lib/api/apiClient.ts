@@ -2567,3 +2567,58 @@ export async function requeueGovernanceItem(
     options,
   );
 }
+
+/* ── 消息中心（P2a）── */
+
+export type NotificationKind =
+  | 'fetch_failed'
+  | 'pending_backlog'
+  | 'pipeline_done'
+  | 'redraft_done'
+  | 'system';
+
+export interface NotificationItem {
+  id: string;
+  userId: string;
+  kind: NotificationKind;
+  title: string;
+  body: string;
+  link: string | null;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export async function listNotifications(
+  input?: { unreadOnly?: boolean; page?: number; pageSize?: number },
+  options?: RequestApiOptions,
+): Promise<{ items: NotificationItem[]; total: number }> {
+  const params = new URLSearchParams();
+  if (input?.unreadOnly) params.set('unreadOnly', 'true');
+  if (typeof input?.page === 'number') params.set('page', String(input.page));
+  if (typeof input?.pageSize === 'number') params.set('pageSize', String(input.pageSize));
+  const suffix = params.size > 0 ? `?${params.toString()}` : '';
+  return requestApi(`/api/notifications${suffix}`, undefined, options);
+}
+
+export async function getUnreadNotificationCount(
+  options?: RequestApiOptions,
+): Promise<{ count: number }> {
+  return requestApi('/api/notifications/unread-count', undefined, options);
+}
+
+export async function markNotificationRead(
+  id: string,
+  options?: RequestApiOptions,
+): Promise<{ item: NotificationItem }> {
+  return requestApi(
+    `/api/notifications/${encodeURIComponent(id)}/read`,
+    { method: 'POST' },
+    options,
+  );
+}
+
+export async function markAllNotificationsRead(
+  options?: RequestApiOptions,
+): Promise<{ updated: number }> {
+  return requestApi('/api/notifications/read-all', { method: 'POST' }, options);
+}

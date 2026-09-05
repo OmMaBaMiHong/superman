@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BookOpen, Flame, PenLine, Settings } from 'lucide-react';
+import { Bell, BookOpen, Flame, PenLine, Settings } from 'lucide-react';
 import { useGovernanceQueueSize } from '@/features/governance/hooks/useGovernanceQueueSize';
+import { useUnreadNotificationCount } from '@/features/notifications/useUnreadNotificationCount';
 import { cn } from '@/lib/utils';
 
 interface MobileTabBarProps {
@@ -13,11 +14,12 @@ interface MobileTabBarProps {
 
 /**
  * 移动端底部 tab bar（<768px 显示，桌面端由 md:hidden 隐藏）：
- * 阅读 / 创作（审批台并入，带待批数徽章）/ 热点 / 设置。触控目标 ≥44px。
+ * 阅读 / 创作（审批台并入）/ 热点 / 消息（未读徽章）/ 设置。触控目标 ≥44px。
  */
 export default function MobileTabBar({ onOpenSettings }: MobileTabBarProps) {
   const pathname = usePathname();
   const queueSize = useGovernanceQueueSize();
+  const unreadNotifications = useUnreadNotificationCount();
 
   const tabClass = (active: boolean) =>
     cn(
@@ -97,6 +99,26 @@ export default function MobileTabBar({ onOpenSettings }: MobileTabBarProps) {
           {indicator(pathname === '/trending')}
           <Flame aria-hidden="true" className="h-5 w-5" />
           <span>热点</span>
+        </Link>
+        <Link
+          href="/notifications"
+          aria-label="消息"
+          aria-current={pathname === '/notifications' ? 'page' : undefined}
+          className={tabClass(pathname === '/notifications')}
+        >
+          {indicator(pathname === '/notifications')}
+          <span className="relative">
+            <Bell aria-hidden="true" className="h-5 w-5" />
+            {unreadNotifications > 0 ? (
+              <span
+                data-testid="notification-badge"
+                className="absolute -right-2.5 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-error px-1 font-mono text-[9px] font-semibold tabular-nums text-destructive-foreground"
+              >
+                {unreadNotifications > 99 ? '99+' : unreadNotifications}
+              </span>
+            ) : null}
+          </span>
+          <span>消息</span>
         </Link>
         {settingsItem}
       </div>

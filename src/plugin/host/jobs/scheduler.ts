@@ -19,6 +19,8 @@ import type { PgBoss } from 'pg-boss'
 import { listUsers } from '@/core/auth/usersRepo'
 import { runTrendRadarSync } from '@/core/trendradar/sync'
 import { executeRewriteJob } from '@/core/pipelines/services/rewriteService'
+import { notify, notifyOncePerWindow } from '@/core/notify/service'
+import { getGovernanceStats } from '@/core/governance/repository'
 import { fetchAndIngestFeed } from '@/worker/index'
 import { listEnabledFeedsForFetch } from '@/server/domains/feeds/repositories/feedsRepo'
 import { selectFeedsForRefreshAll } from '@/worker/refreshAll'
@@ -48,6 +50,10 @@ const PIPELINE_POLL_INTERVAL = 15_000
 /** 每条 tick 最多执行的洗稿任务数（防雪崩）。 */
 const PIPELINE_BATCH_LIMIT = 10
 
+/** 待批积压提醒：阈值与 24h 去重窗口。 */
+const PENDING_BACKLOG_THRESHOLD = 10
+const PENDING_BACKLOG_WINDOW_SECONDS = 24 * 3600
+
 /** fetchAndIngestFeed 只需要 boss.send 投递后续任务；插件侧不接管队列消费，投 no-op。 */
 const noopBoss = { send: async () => null } as unknown as PgBoss
 
@@ -69,6 +75,7 @@ export async function fetchDueFeedsOnce(
   let inserted = 0
   for (const user of users.filter((u) => u.status === 'active')) {
     const feedRows = await listEnabledFeedsForFetch(pool as never, user.id)
+    const feedTitleById = new Map(feedRows.map((feed) => [feed.id, feed.title]))
     const due = selectFeedsForRefreshAll(feedRows, new Date(), { force: false })
     for (const feed of due) {
       feeds += 1
@@ -79,6 +86,14 @@ export async function fetchDueFeedsOnce(
       inserted += result.inserted
       if (result.errorMessage) {
         logger?.warn(`[superman] feed.fetch: feed=${feed.id} ${result.errorMessage}`)
+        // P2a 事件：采集失败 → 消息中心（静默失败不阻断抓取轮）
+        await notify(pool as never, {
+          userId: feed.userId ?? user.id,
+          kind: 'fetch_failed',
+          title: `订阅源「${feedTitleById.get(feed.id) ?? feed.id}」采集失败`,
+          body: result.errorMessage.slice(0, 500),
+          link: '/reader',
+        }).catch(() => {})
       }
     }
   }
@@ -126,22 +141,50 @@ export function startPluginScheduler(
     if (result.inserted > 0) {
       logger.log(`feed.fetch: feeds=${result.feeds} inserted=${result.inserted}`)
     }
+    // P2a 事件：待批积压（>10 条提醒，每 24h 最多一条，静默失败）
+    const users = await listUsers(pool as never)
+    for (const user of users.filter((u) => u.status === 'active')) {
+      const stats = await getGovernanceStats(pool as never, user.id)
+      if (stats.queueSize > PENDING_BACKLOG_THRESHOLD) {
+        await notifyOncePerWindow(pool as never, {
+          userId: user.id,
+          kind: 'pending_backlog',
+          title: `有 ${stats.queueSize} 条内容待审批`,
+          body: '队列积压超过 10 条，建议抽空去创作台的审批区处理一下。',
+          link: '/studio?tab=queue',
+          windowSeconds: PENDING_BACKLOG_WINDOW_SECONDS,
+        }).catch(() => {})
+      }
+    }
   })
 
   every('pipeline.rewrite', config.pipelinePollIntervalMs ?? PIPELINE_POLL_INTERVAL, async () => {
     const { rows } = await pool.query(
-      `SELECT id, user_id AS "userId" FROM pipeline_jobs
-       WHERE status = 'queued' AND kind = 'rewrite'
-       ORDER BY created_at ASC LIMIT $1`,
+      `SELECT j.id, j.user_id AS "userId", j.platform, a.title AS "articleTitle"
+       FROM pipeline_jobs j
+       JOIN articles a ON a.id = j.article_id AND a.user_id = j.user_id
+       WHERE j.status = 'queued' AND j.kind = 'rewrite'
+       ORDER BY j.created_at ASC LIMIT $1`,
       [PIPELINE_BATCH_LIMIT],
     )
-    for (const row of rows as { id: string; userId: string | null }[]) {
+    for (const row of rows as { id: string; userId: string | null; platform: string; articleTitle: string }[]) {
       const result = await executeRewriteJob(pool as never, { jobId: row.id, userId: row.userId ?? undefined })
-      if (result.status === 'failed') {
+      const succeeded = result.status !== 'failed'
+      if (!succeeded) {
         logger.warn(`[superman] pipeline.rewrite: job=${row.id} failed: ${result.error}`)
       } else {
-        logger.log(`pipeline.rewrite: job=${row.id} ${result.status}`)
+        logger.log(`[superman] pipeline.rewrite: job=${row.id} ${result.status}`)
       }
+      // P2a 事件：洗稿任务完成/失败 → 消息中心（静默失败）
+      await notify(pool as never, {
+        userId: row.userId ?? undefined,
+        kind: 'pipeline_done',
+        title: succeeded ? `「${row.articleTitle}」改写完成` : `「${row.articleTitle}」改写失败`,
+        body: succeeded
+          ? `平台：${row.platform}，成稿已进草稿箱。`
+          : `平台：${row.platform}。${('error' in result && typeof result.error === 'string' ? result.error : '').slice(0, 300)}`,
+        link: succeeded ? '/studio?tab=drafts' : '/studio?tab=jobs',
+      }).catch(() => {})
     }
   })
 

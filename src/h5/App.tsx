@@ -4,6 +4,7 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { fetchSession, type H5Session } from './lib/auth';
 import { navigateTo, useHashPath } from './lib/router';
 import { ToastHost } from '@/features/toast/components/ToastHost';
+import H5DesktopRail from './components/DesktopRail';
 import H5LoginPage from './pages/LoginPage';
 import H5SettingsPage from './pages/SettingsPage';
 
@@ -12,6 +13,7 @@ const TrendingConsole = lazy(() => import('@/features/trending/components/Trendi
 const StudioConsole = lazy(() => import('@/features/studio/components/StudioConsole'));
 const H5ReaderPage = lazy(() => import('./pages/ReaderPage'));
 const H5AssistantPage = lazy(() => import('./pages/AssistantPage'));
+const H5NotificationsPage = lazy(() => import('./pages/NotificationsPage'));
 
 /** 「问 AI」浮动入口：创作台/热点页右上角常驻，跳 #/assistant（K4 指挥台）。 */
 function AskAiEntry() {
@@ -82,6 +84,9 @@ export default function App() {
     case '/studio':
       view = <StudioConsole initialSection={tabParam === 'queue' ? 'queue' : undefined} />;
       break;
+    case '/notifications':
+      view = <H5NotificationsPage />;
+      break;
     case '/settings':
       view = <H5SettingsPage username={session.username} />;
       break;
@@ -98,6 +103,7 @@ export default function App() {
   return (
     <>
       {(route === '/studio' || route === '/trending') && <AskAiEntry />}
+      <H5DesktopRail />
       <Suspense fallback={<ViewLoading />}>{view}</Suspense>
       <ToastHost />
     </>

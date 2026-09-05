@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getGovernanceStats } from '@/lib/api/apiClient';
+import { getGovernanceStats, getUnreadNotificationCount } from '@/lib/api/apiClient';
 import MobileTabBar from '../../../features/mobile/components/MobileTabBar';
 
 let mockPathname = '/governance';
@@ -14,13 +14,16 @@ vi.mock('@/lib/api/apiClient', async (importOriginal) => {
   return {
     ...original,
     getGovernanceStats: vi.fn(),
+    getUnreadNotificationCount: vi.fn(),
   };
 });
 
 const mockedGetStats = vi.mocked(getGovernanceStats);
+const mockedUnreadCount = vi.mocked(getUnreadNotificationCount);
 
 beforeEach(() => {
   mockPathname = '/governance';
+  mockedUnreadCount.mockResolvedValue({ count: 0 });
   mockedGetStats.mockResolvedValue({
     todayPending: 2,
     todayArchived: 5,
@@ -61,7 +64,8 @@ describe('MobileTabBar（移动端底部导航）', () => {
   });
 
   it('待批数为 0 时不渲染徽章', async () => {
-    mockedGetStats.mockResolvedValue({
+    mockedUnreadCount.mockResolvedValue({ count: 0 });
+  mockedGetStats.mockResolvedValue({
       todayPending: 0,
       todayArchived: 0,
       todayFetchSucceeded: 0,
@@ -73,6 +77,16 @@ describe('MobileTabBar（移动端底部导航）', () => {
       expect(mockedGetStats).toHaveBeenCalled();
     });
     expect(screen.queryByText('0')).not.toBeInTheDocument();
+  });
+
+  it('消息 tab 指向 /notifications，未读数显示徽章（P2a 第五 tab）', async () => {
+    mockedUnreadCount.mockResolvedValue({ count: 4 });
+    render(<MobileTabBar />);
+
+    expect(screen.getByRole('link', { name: '消息' })).toHaveAttribute('href', '/notifications');
+    await waitFor(() => {
+      expect(screen.getByTestId('notification-badge')).toHaveTextContent('4');
+    });
   });
 
   it('阅读器内传入 onOpenSettings 时渲染按钮而非链接', () => {
