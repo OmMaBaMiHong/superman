@@ -16,6 +16,7 @@ import {
   type GovernanceStatus,
 } from '@/lib/api/apiClient';
 import { cn } from '@/lib/utils';
+import MobileTabBar from '@/features/mobile/components/MobileTabBar';
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
 import GovernanceQueueCard, { type CardExitKind } from './GovernanceQueueCard';
 import GovernanceStatsBar from './GovernanceStatsBar';
@@ -309,7 +310,7 @@ export default function GovernanceConsole() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-4xl space-y-6 px-4 py-6 sm:px-6">
+      <main className="mx-auto max-w-4xl space-y-6 px-4 pb-24 pt-6 sm:px-6 md:pb-6">
         <GovernanceStatsBar stats={stats} />
 
         {/* 工具行：状态 tab + 分类筛选 */}
@@ -405,14 +406,25 @@ export default function GovernanceConsole() {
         ) : null}
 
         {/* 快捷键提示 */}
-        <footer className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 pt-4 font-mono text-[10px] text-muted-foreground/70">
+        <footer className="hidden flex-wrap items-center justify-center gap-x-4 gap-y-1 pt-4 font-mono text-[10px] text-muted-foreground/70 md:flex">
           <span><kbd className="rounded border border-border px-1">J</kbd>/<kbd className="rounded border border-border px-1">K</kbd> 移动</span>
           <span><kbd className="rounded border border-border px-1">A</kbd> 准奏</span>
           <span><kbd className="rounded border border-border px-1">R</kbd> 驳回</span>
           <span><kbd className="rounded border border-border px-1">Enter</kbd> 提交理由</span>
           <span><kbd className="rounded border border-border px-1">Esc</kbd> 取消</span>
         </footer>
+
+        {/* 移动端手势提示（桌面端显示快捷键条，二者互斥） */}
+        <footer className="flex items-center justify-center gap-2 pt-4 font-mono text-[10px] text-muted-foreground/70 md:hidden">
+          <span>右滑 准奏</span>
+          <span aria-hidden="true">·</span>
+          <span>左滑 驳回</span>
+          <span aria-hidden="true">·</span>
+          <span>点按卡片选中</span>
+        </footer>
       </main>
+
+      <MobileTabBar />
     </div>
   );
 }

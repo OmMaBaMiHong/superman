@@ -11,6 +11,7 @@ import {
 import ArticleList from '../../articles/components/ArticleList';
 import ArticleView, { dispatchReaderArticleCommand } from '../../articles/components/ArticleView';
 import FeedList from '../../feeds/components/FeedList';
+import MobileTabBar from '@/features/mobile/components/MobileTabBar';
 import ResizeHandle from './ResizeHandle';
 import GlobalSearchDialog from './GlobalSearchDialog';
 import ReaderContentPage from './ReaderContentPage';
@@ -264,6 +265,22 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
     url.searchParams.delete('provider');
     url.searchParams.delete('reason');
     window.history.replaceState({}, '', url.toString());
+  }, [openSettings]);
+
+  // 移动端 tab bar 跨页入口：从 /governance、/trending 点「设置」跳回 `/?settings=open`，
+  // 挂载时消费一次 → 打开设置抽屉 → 清理 query（异步调度，避免 effect 内同步 setState）。
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('settings') !== 'open') {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => openSettings(), 0);
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete('settings');
+    window.history.replaceState({}, '', url.toString());
+    return () => window.clearTimeout(timer);
   }, [openSettings]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
@@ -792,7 +809,11 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
                 /* 内容页视图：平板/移动在内容区渲染同一内容页面板（左栏经抽屉保留） */
                 <div
                   data-testid="reader-mobile-content-pane"
-                  className="min-h-0 flex-1 overflow-hidden px-3 pb-3 pt-3 sm:px-4 sm:pb-4"
+                  className={cn(
+                    'min-h-0 flex-1 overflow-hidden px-3 pb-3 pt-3 sm:px-4 sm:pb-4',
+                    // 手机端为底部 tab bar 留出空间
+                    isMobile && 'pb-[calc(3.5rem+env(safe-area-inset-bottom)+0.75rem)]',
+                  )}
                 >
                   <div
                     className={cn(
@@ -840,6 +861,8 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
                   <div
                     className={cn(
                       'h-full min-h-0 bg-background/96 dark:bg-background/97',
+                      // 底部 tab bar 占位：避免列表末行/正文被固定导航遮挡
+                      'pb-[calc(3.5rem+env(safe-area-inset-bottom))]',
                       selectedArticleId
                         ? 'rounded-none'
                         : 'rounded-t-[1.35rem] border-t border-border/60 dark:border-white/[0.05]',
@@ -892,6 +915,9 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
           </SheetContent>
         </Sheet>
       ) : null}
+
+      {/* 移动端底部 tab bar（<768px；平板/桌面端由 md:hidden 隐藏，不挂载避免轮询） */}
+      {isMobile ? <MobileTabBar onOpenSettings={() => openSettings()} /> : null}
 
       <GlobalSearchDialog
         open={searchOpen}

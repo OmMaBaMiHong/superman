@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { Inter, JetBrains_Mono } from 'next/font/google';
+import ServiceWorkerRegister from '@/components/pwa/ServiceWorkerRegister';
 import './globals.css';
 
 // 阅读正文：Inter；UI chrome / 标签 / 数字：JetBrains Mono（300-700）。
@@ -19,6 +20,11 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: 'Superman',
   description: 'Modern RSS reader',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'Superman',
+  },
   icons: {
     icon: [
       { url: '/feedfuse-icon-16.svg', sizes: '16x16', type: 'image/svg+xml' },
@@ -27,7 +33,7 @@ export const metadata: Metadata = {
       { url: '/feedfuse-icon-128.svg', sizes: '128x128', type: 'image/svg+xml' }
     ],
     shortcut: '/feedfuse-icon-32.svg',
-    apple: '/feedfuse-icon-128.svg'
+    apple: '/pwa-icon-192.png'
   }
 };
 
@@ -44,6 +50,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="zh-CN" className={`${inter.variable} ${jetbrainsMono.variable}`}>
       <body>
+        <ServiceWorkerRegister />
         <a
           href="#main-content"
           className="sr-only fixed left-3 top-3 z-[120] rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground focus:not-sr-only focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"

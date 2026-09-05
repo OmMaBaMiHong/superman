@@ -1,40 +1,12 @@
-import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Flame, Stamp, Star } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { getGovernanceStats } from '@/lib/api/apiClient';
+import { useGovernanceQueueSize } from '@/features/governance/hooks/useGovernanceQueueSize';
 import {
   READER_PANE_ACTIVE_ITEM_CLASS_NAME,
   READER_PANE_HOVER_BACKGROUND_CLASS_NAME,
 } from '@/lib/ui/designSystem';
 import { cn } from '@/lib/utils';
-
-const GOVERNANCE_BADGE_POLL_MS = 30_000;
-
-/** 审批台待批数徽章：轮询 /api/governance/stats，静默失败。 */
-function useGovernanceQueueSize(): number {
-  const [queueSize, setQueueSize] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const stats = await getGovernanceStats({ notifyOnError: false });
-        if (!cancelled) setQueueSize(stats.queueSize);
-      } catch {
-        // 未登录/网络异常时保持静默，徽章不显示
-      }
-    };
-    void load();
-    const timer = window.setInterval(() => void load(), GOVERNANCE_BADGE_POLL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, []);
-
-  return queueSize;
-}
 
 /**
  * 左栏内容项（非导航菜单）：

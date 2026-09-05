@@ -9,6 +9,7 @@ import {
   type TrendRadarItem,
   type TrendRadarToday,
 } from '@/lib/api/apiClient';
+import MobileTabBar from '@/features/mobile/components/MobileTabBar';
 import { cn } from '@/lib/utils';
 
 const POLL_MS = 60_000;
@@ -53,9 +54,9 @@ function TrendRadarRow({
   return (
     <li
       data-testid="trend-radar-item"
-      className="flex items-center gap-3 border-b border-border/60 px-3 py-2 last:border-b-0"
+      className="flex items-center gap-2 border-b border-border/60 px-3 py-2 last:border-b-0 sm:gap-3"
     >
-      <span className="w-7 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground">
+      <span className="w-5 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted-foreground sm:w-7 sm:text-xs">
         {item.rank ?? '—'}
       </span>
       <RankDelta item={item} />
@@ -87,7 +88,7 @@ function TrendRadarRow({
         disabled={promoted || promoting}
         onClick={() => onPromote(item)}
         className={cn(
-          'inline-flex h-7 shrink-0 items-center gap-1 rounded-md border px-2 font-mono text-[11px] transition-colors duration-150',
+          'inline-flex h-11 shrink-0 items-center gap-1 rounded-md border px-2.5 font-mono text-[11px] transition-colors duration-150 sm:h-7 sm:px-2',
           'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
           promoted
             ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300'
@@ -110,7 +111,7 @@ function TrendRadarRow({
   );
 }
 
-/** 热点雷达主控台：平台分组热榜 + 一键转选题。桌面端优先，移动端适配后续独立任务。 */
+/** 热点雷达主控台：平台分组热榜 + 一键转选题。移动优先：小屏单列 + 底部 tab bar。 */
 export default function TrendingConsole() {
   const [data, setData] = useState<TrendRadarToday | null>(null);
   const [loading, setLoading] = useState(true);
@@ -201,7 +202,7 @@ export default function TrendingConsole() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
+      <main className="mx-auto max-w-5xl px-4 pb-24 pt-6 sm:px-6 md:pb-6">
         {loading ? (
           <div className="grid gap-4 md:grid-cols-2">
             {Array.from({ length: 4 }, (_, index) => (
@@ -248,6 +249,8 @@ export default function TrendingConsole() {
           </div>
         )}
       </main>
+
+      <MobileTabBar />
     </div>
   );
 }

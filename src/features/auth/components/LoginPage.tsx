@@ -89,6 +89,7 @@ export default function LoginPage() {
                   onChange={(event) => setUsername(event.target.value)}
                   placeholder="输入用户名"
                   aria-invalid={errorMessage ? 'true' : 'false'}
+                  className="h-11"
                 />
               </div>
 
@@ -105,6 +106,7 @@ export default function LoginPage() {
                   onChange={(event) => setPassword(event.target.value)}
                   placeholder="输入密码"
                   aria-invalid={errorMessage ? 'true' : 'false'}
+                  className="h-11"
                 />
               </div>
 
@@ -114,7 +116,7 @@ export default function LoginPage() {
                 </p>
               ) : null}
 
-              <Button type="submit" className="h-10 w-full font-mono" disabled={isPending}>
+              <Button type="submit" className="h-11 w-full font-mono" disabled={isPending}>
                 {isPending ? '登录中…' : '进入 Superman'}
               </Button>
             </form>

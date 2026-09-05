@@ -74,7 +74,7 @@ export default function ReasonInput({
               }
             }}
             className={cn(
-              'h-8 flex-1 rounded-md border bg-background px-3 font-mono text-xs text-foreground',
+              'h-11 flex-1 rounded-md border bg-background px-3 font-mono text-xs text-foreground sm:h-8',
               'placeholder:text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-1',
               kind === 'reject'
                 ? 'border-error/40 focus-visible:ring-error'
@@ -88,7 +88,7 @@ export default function ReasonInput({
             disabled={!open || submitting}
             onClick={submit}
             className={cn(
-              'h-8 font-mono text-xs',
+              'h-11 font-mono text-xs sm:h-8',
               kind === 'reject'
                 ? 'text-error hover:bg-error/10 hover:text-error'
                 : 'text-warning hover:bg-warning/10 hover:text-warning',

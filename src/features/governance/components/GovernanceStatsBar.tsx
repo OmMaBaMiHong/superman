@@ -13,7 +13,7 @@ interface StatCellProps {
 
 function StatCell({ label, latinLabel, value, dotClassName, pulse = false }: StatCellProps) {
   return (
-    <div className="flex min-w-0 items-center gap-3 px-4 py-3 sm:px-5">
+    <div className="flex min-w-0 items-center gap-3 bg-card px-4 py-3 sm:px-5">
       <span
         aria-hidden="true"
         className={cn(
@@ -44,7 +44,7 @@ export default function GovernanceStatsBar({ stats }: GovernanceStatsBarProps) {
   return (
     <section
       aria-label="治理统计"
-      className="grid grid-cols-2 divide-x divide-border rounded-lg border border-border bg-card sm:grid-cols-3 lg:grid-cols-5"
+      className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3 lg:grid-cols-5"
     >
       <StatCell
         label="今日待批"
@@ -73,13 +73,16 @@ export default function GovernanceStatsBar({ stats }: GovernanceStatsBarProps) {
         dotClassName="bg-error"
         pulse={(stats?.todayFetchFailed ?? 0) > 0}
       />
-      <StatCell
-        label="队列深度"
-        latinLabel="Queue"
-        value={stats?.queueSize ?? null}
-        dotClassName="bg-primary"
-        pulse
-      />
+      {/* 2 列网格下共 5 格：末格在移动端独占一行，避免右半露出分隔底色 */}
+      <div className="col-span-2 sm:col-span-1">
+        <StatCell
+          label="队列深度"
+          latinLabel="Queue"
+          value={stats?.queueSize ?? null}
+          dotClassName="bg-primary"
+          pulse
+        />
+      </div>
     </section>
   );
 }
