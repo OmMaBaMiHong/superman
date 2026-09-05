@@ -14,7 +14,7 @@ vi.mock('@/server/domains/auth/services/session', () => ({
   createSessionCookieHeader: (...args: unknown[]) => createSessionCookieHeaderMock(...args),
 }));
 
-vi.mock('@/server/domains/auth/services/password', () => ({
+vi.mock('@/core/auth/password', () => ({
   verifyPassword: (...args: unknown[]) => verifyPasswordMock(...args),
   hashPassword: (...args: unknown[]) => hashPasswordMock(...args),
 }));
@@ -23,7 +23,7 @@ vi.mock('@/server/infra/db/pool', () => ({
   getPool: () => pool,
 }));
 
-vi.mock('@/server/domains/auth/repositories/usersRepo', () => ({
+vi.mock('@/core/auth/usersRepo', () => ({
   changeUserPassword: (...args: unknown[]) => changeUserPasswordMock(...args),
   getUserById: (...args: unknown[]) => getUserByIdMock(...args),
 }));

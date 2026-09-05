@@ -1,15 +1,2 @@
-import { timingSafeEqual } from 'node:crypto';
-
-export const AUTH_INITIAL_PASSWORD_SETUP_MESSAGE =
-  '请先在环境变量中配置 AUTH_INITIAL_PASSWORD';
-
-export function safeEqualText(left: string, right: string): boolean {
-  const leftBuffer = Buffer.from(left);
-  const rightBuffer = Buffer.from(right);
-
-  if (leftBuffer.length !== rightBuffer.length) {
-    return false;
-  }
-
-  return timingSafeEqual(leftBuffer, rightBuffer);
-}
+// K2 平移薄壳：实现已迁至 core/auth/shared.ts（单内核拓扑，见 docs/plans/2026-09-05-dsh-kernel-topology.md）。
+export * from '@/core/auth/shared';

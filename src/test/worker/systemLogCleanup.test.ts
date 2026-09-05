@@ -4,7 +4,7 @@ const listUsersMock = vi.fn();
 const getUiSettingsMock = vi.fn();
 const deleteExpiredSystemLogsMock = vi.fn();
 
-vi.mock('@/server/domains/auth/repositories/usersRepo', () => ({
+vi.mock('@/core/auth/usersRepo', () => ({
   listUsers: (...args: unknown[]) => listUsersMock(...args),
 }));
 

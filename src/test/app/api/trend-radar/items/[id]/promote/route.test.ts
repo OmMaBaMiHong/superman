@@ -12,7 +12,7 @@ vi.mock('@/server/domains/auth/services/session', () => ({
   requireApiSession: (...args: unknown[]) => requireApiSessionMock(...args),
 }));
 
-vi.mock('@/server/domains/trendradar/promote', () => ({
+vi.mock('@/core/trendradar/promote', () => ({
   promoteTrendRadarItem: (...args: unknown[]) => promoteMock(...args),
 }));
 

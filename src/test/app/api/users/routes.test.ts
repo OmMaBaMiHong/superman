@@ -24,12 +24,12 @@ vi.mock('@/server/domains/auth/services/session', () => ({
   createSessionCookieHeader: (...args: unknown[]) => createSessionCookieHeaderMock(...args),
 }));
 
-vi.mock('@/server/domains/auth/services/password', () => ({
+vi.mock('@/core/auth/password', () => ({
   hashPassword: (...args: unknown[]) => hashPasswordMock(...args),
   verifyPassword: (...args: unknown[]) => verifyPasswordMock(...args),
 }));
 
-vi.mock('@/server/domains/auth/repositories/usersRepo', () => ({
+vi.mock('@/core/auth/usersRepo', () => ({
   listUsers: (...args: unknown[]) => listUsersMock(...args),
   createUser: (...args: unknown[]) => createUserMock(...args),
   getUserById: (...args: unknown[]) => getUserByIdMock(...args),

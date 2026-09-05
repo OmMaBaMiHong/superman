@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Pool } from 'pg';
-import { evaluateGovernanceBatch } from '@/server/domains/governance/services/governanceIngestService';
-import type { GovernanceDraft } from '@/server/domains/governance/aiDraft';
+import { evaluateGovernanceBatch } from '@/core/governance/services/governanceIngestService';
+import type { GovernanceDraft } from '@/core/governance/aiDraft';
 
 const getGovernancePreferenceMock = vi.fn();
 const listExistingArticleLinksMock = vi.fn();
@@ -9,7 +9,7 @@ const listRecentRejectMemoryMock = vi.fn();
 const listRecentArticleTitlesMock = vi.fn();
 const countTodayGovernedByCategoryMock = vi.fn();
 
-vi.mock('@/server/domains/governance/repository', () => ({
+vi.mock('@/core/governance/repository', () => ({
   getGovernancePreference: (...args: unknown[]) => getGovernancePreferenceMock(...args),
   listExistingArticleLinks: (...args: unknown[]) => listExistingArticleLinksMock(...args),
   listRecentRejectMemory: (...args: unknown[]) => listRecentRejectMemoryMock(...args),

@@ -14,11 +14,11 @@ vi.mock('@/server/infra/db/pool', () => ({ getPool: () => pool }));
 vi.mock('@/server/domains/auth/services/session', () => ({
   requireApiSession: (...args: unknown[]) => requireApiSessionMock(...args),
 }));
-vi.mock('@/server/domains/governance/repository', () => ({
+vi.mock('@/core/governance/repository', () => ({
   listGovernanceQueue: (...args: unknown[]) => listGovernanceQueueMock(...args),
   getGovernanceStats: (...args: unknown[]) => getGovernanceStatsMock(...args),
 }));
-vi.mock('@/server/domains/governance/services/governanceActionsService', () => ({
+vi.mock('@/core/governance/services/governanceActionsService', () => ({
   approveGovernanceItem: (...args: unknown[]) => approveGovernanceItemMock(...args),
   rejectGovernanceItem: (...args: unknown[]) => rejectGovernanceItemMock(...args),
   redraftGovernanceItem: (...args: unknown[]) => redraftGovernanceItemMock(...args),

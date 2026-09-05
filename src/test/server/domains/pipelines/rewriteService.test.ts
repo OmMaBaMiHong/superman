@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Pool } from 'pg';
-import { executeRewriteJob } from '@/server/domains/pipelines/services/rewriteService';
+import { executeRewriteJob } from '@/core/pipelines/services/rewriteService';
 
 const getPipelineJobMock = vi.fn();
 const getPipelineArticleMock = vi.fn();
@@ -11,7 +11,7 @@ const markFailedMock = vi.fn();
 const getUiSettingsMock = vi.fn();
 const getAiApiKeyMock = vi.fn();
 
-vi.mock('@/server/domains/pipelines/repository', () => ({
+vi.mock('@/core/pipelines/repository', () => ({
   getPipelineJob: (...args: unknown[]) => getPipelineJobMock(...args),
   getPipelineArticle: (...args: unknown[]) => getPipelineArticleMock(...args),
   insertDraft: (...args: unknown[]) => insertDraftMock(...args),

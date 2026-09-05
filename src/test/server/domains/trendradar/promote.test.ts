@@ -5,7 +5,7 @@ const getTrendRadarItemMock = vi.fn();
 const markPromotedMock = vi.fn();
 const insertArticleMock = vi.fn();
 
-vi.mock('@/server/domains/trendradar/repository', () => ({
+vi.mock('@/core/trendradar/repository', () => ({
   getTrendRadarItem: (...args: unknown[]) => getTrendRadarItemMock(...args),
   markTrendRadarItemPromoted: (...args: unknown[]) => markPromotedMock(...args),
 }));
@@ -14,7 +14,7 @@ vi.mock('@/server/domains/articles/repositories/articlesRepo', () => ({
   insertArticleIgnoreDuplicate: (...args: unknown[]) => insertArticleMock(...args),
 }));
 
-import { promoteTrendRadarItem } from '@/server/domains/trendradar/promote';
+import { promoteTrendRadarItem } from '@/core/trendradar/promote';
 
 const pool = { query: vi.fn().mockResolvedValue({ rows: [{ id: '77' }] }) } as unknown as Pool;
 

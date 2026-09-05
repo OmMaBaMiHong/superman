@@ -14,11 +14,11 @@ vi.mock('@/server/infra/db/pool', () => ({ getPool: () => pool }));
 vi.mock('@/server/domains/auth/services/session', () => ({
   requireApiSession: (...args: unknown[]) => requireApiSessionMock(...args),
 }));
-vi.mock('@/server/domains/pipelines/services/pipelineService', () => ({
+vi.mock('@/core/pipelines/services/pipelineService', () => ({
   createRewriteJobs: (...args: unknown[]) => createRewriteJobsMock(...args),
   retryPipelineJob: (...args: unknown[]) => retryPipelineJobMock(...args),
 }));
-vi.mock('@/server/domains/pipelines/repository', () => ({
+vi.mock('@/core/pipelines/repository', () => ({
   listPipelineJobs: (...args: unknown[]) => listPipelineJobsMock(...args),
   listDrafts: (...args: unknown[]) => listDraftsMock(...args),
   getDraftDetail: (...args: unknown[]) => getDraftDetailMock(...args),

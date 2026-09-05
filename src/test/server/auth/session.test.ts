@@ -9,7 +9,7 @@ import {
   verifySessionToken,
   verifyUserPassword,
 } from '@/server/domains/auth/services/session';
-import { hashPassword, verifyPassword, verifyPlainPassword } from '@/server/domains/auth/services/password';
+import { hashPassword, verifyPassword, verifyPlainPassword } from '@/core/auth/password';
 
 const getPoolMock = vi.hoisted(() => vi.fn());
 const getAuthSettingsMock = vi.hoisted(() => vi.fn());
@@ -26,9 +26,9 @@ vi.mock('@/server/domains/settings/repositories/settingsRepo', () => ({
   getAuthSettings: (...args: unknown[]) => getAuthSettingsMock(...args),
 }));
 
-vi.mock('@/server/domains/auth/repositories/usersRepo', async () => {
-  const actual = await vi.importActual<typeof import('@/server/domains/auth/repositories/usersRepo')>(
-    '@/server/domains/auth/repositories/usersRepo',
+vi.mock('@/core/auth/usersRepo', async () => {
+  const actual = await vi.importActual<typeof import('@/core/auth/usersRepo')>(
+    '@/core/auth/usersRepo',
   );
   return {
     ...actual,
