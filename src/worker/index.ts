@@ -39,6 +39,10 @@ import {
   resolveTranslationConfig,
 } from '@/server/integrations/ai/translationConfig';
 import { startBoss } from '@/server/infra/queue/boss';
+import { evaluateGovernanceBatch } from '@/server/domains/governance/services/governanceIngestService';
+import type { GovernanceIngestDecision } from '@/server/domains/governance/services/governanceIngestService';
+import { resolveSharedAiConfig } from '@/server/integrations/ai/runtimeConfig';
+import { stripHtmlToText } from '@/lib/reader/articleSummary';
 import { bootstrapQueues } from '@/server/infra/queue/bootstrap';
 import { getQueueSendOptions, QUEUE_CONTRACTS } from '@/server/infra/queue/contracts';
 import {
@@ -156,6 +160,8 @@ type FeedIngestionDeps = {
   pruneFeedArticlesToLimit: typeof pruneFeedArticlesToLimit;
   recordFeedFetchResult: typeof recordFeedFetchResult;
   isFeedDue: typeof isFeedDue;
+  evaluateGovernanceBatch: typeof evaluateGovernanceBatch;
+  getAiApiKey: typeof getAiApiKey;
 };
 
 const defaultFeedIngestionDeps: FeedIngestionDeps = {
@@ -172,6 +178,8 @@ const defaultFeedIngestionDeps: FeedIngestionDeps = {
   pruneFeedArticlesToLimit,
   recordFeedFetchResult,
   isFeedDue,
+  evaluateGovernanceBatch,
+  getAiApiKey,
 };
 
 export async function enqueueRefreshAll(
@@ -324,25 +332,68 @@ export async function fetchAndIngestFeed(
 
     const parsed = await deps.parseFeed(res.xml, fetchedAt);
     const isPodcastSource = parsed.items.some((item) => item.mediaAttachments.length > 0);
-    for (const item of parsed.items) {
+
+    // 治理管线：新文章落库前过 去重→排除关键词→AI 拟折→配额→定状态。
+    // 播客源（音视频内容）不进治理流，保持原有直通行为；管线自身异常时
+    // 降级为 null（按存量资产 archived 入库），绝不阻塞采集。
+    let governanceDecisions: GovernanceIngestDecision[] | null = null;
+    if (!isPodcastSource) {
+      try {
+        const aiApiKey = (await deps.getAiApiKey(pool, feed.userId)).trim();
+        const aiConfig = resolveSharedAiConfig({
+          settings: { ai: uiSettings.ai },
+          aiApiKey,
+        });
+        governanceDecisions = await deps.evaluateGovernanceBatch(pool, {
+          userId: feed.userId,
+          categoryId: feed.categoryId ?? null,
+          feedTitle: feed.title,
+          items: parsed.items.map((item) => ({
+            dedupeKey: buildDedupeKey(item),
+            title: item.title || '(untitled)',
+            link: item.link ?? null,
+            summary: item.summary ?? null,
+            contentText: stripHtmlToText(item.contentHtml ?? ''),
+          })),
+          aiConfig,
+        });
+      } catch (governanceErr) {
+        console.error('[governance] 治理管线失败，降级为直接入库:', governanceErr);
+        governanceDecisions = null;
+      }
+    }
+
+    for (const [itemIndex, item] of parsed.items.entries()) {
+      const decision = governanceDecisions?.[itemIndex] ?? null;
+      if (decision?.action === 'skip') continue;
+      const draft = decision?.action === 'insert' ? (decision.draft ?? null) : null;
       const baseUrl = item.link ?? parsed.link ?? feed.url;
       const created = await deps.insertArticleIgnoreDuplicate(pool, {
         userId: feed.userId,
         feedId,
         dedupeKey: buildDedupeKey(item),
-        title: item.title || '(untitled)',
+        title: draft?.title || item.title || '(untitled)',
+        titleOriginal: item.title || '(untitled)',
         link: item.link,
         author: item.author,
         publishedAt: item.publishedAt.toISOString(),
         contentHtml: deps.sanitizeContent(item.contentHtml, { baseUrl }),
         previewImageUrl: item.previewImage,
-        summary: item.summary,
+        summary: draft?.summary ?? item.summary,
         sourceLanguage: parsed.language,
         filterStatus: isPodcastSource ? 'passed' : 'pending',
         isFiltered: false,
         filteredBy: [],
         filterEvaluatedAt: isPodcastSource ? new Date().toISOString() : null,
         filterErrorMessage: null,
+        governance:
+          decision?.action === 'insert' && decision.status
+            ? {
+                status: decision.status,
+                qualityScore: draft?.qualityScore ?? null,
+                aiReason: draft?.aiReason ?? null,
+              }
+            : null,
       });
       if (!created) continue;
       inserted += 1;

@@ -209,12 +209,21 @@ function buildExcerpt(input: {
   return `${prefix}${preferredText.slice(start, end).trim()}${suffix}`;
 }
 
+export interface ArticleGovernanceInput {
+  status: 'candidate' | 'archived';
+  title?: string;
+  summary?: string | null;
+  qualityScore: number | null;
+  aiReason: string | null;
+}
+
 export async function insertArticleIgnoreDuplicate(
   pool: DbClient,
   input: {
     feedId: string;
     dedupeKey: string;
     title: string;
+    titleOriginal?: string | null;
     link?: string | null;
     author?: string | null;
     publishedAt?: string | null;
@@ -227,6 +236,11 @@ export async function insertArticleIgnoreDuplicate(
     filteredBy?: string[];
     filterEvaluatedAt?: string | null;
     filterErrorMessage?: string | null;
+    /**
+     * 治理管线结果。缺省（null）表示非治理链路（Fever/GitHub/AI 摘要等存量资产流），
+     * 落库为 'archived' 且不打治理时间戳，不进待批队列。
+     */
+    governance?: ArticleGovernanceInput | null;
     userId?: string;
   },
 ): Promise<ArticleRow | null> {
@@ -240,6 +254,8 @@ export async function insertArticleIgnoreDuplicate(
       : filterStatus === 'pending'
         ? null
         : new Date().toISOString();
+  const governanceStatus = input.governance?.status ?? 'archived';
+  const governanceUpdatedAt = input.governance ? new Date().toISOString() : null;
 
   const { rows } = await pool.query<ArticleRow>(
     `
@@ -260,9 +276,13 @@ export async function insertArticleIgnoreDuplicate(
         is_filtered,
         filtered_by,
         filter_evaluated_at,
-        filter_error_message
+        filter_error_message,
+        governance_status,
+        quality_score,
+        ai_reason,
+        governance_updated_at
       )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
       on conflict (feed_id, dedupe_key) do nothing
       returning ${articleRowColumnsSql}
     `,
@@ -271,7 +291,7 @@ export async function insertArticleIgnoreDuplicate(
       input.feedId,
       input.dedupeKey,
       input.title,
-      input.title,
+      input.titleOriginal ?? input.title,
       input.link ?? null,
       input.author ?? null,
       input.publishedAt ?? null,
@@ -284,6 +304,10 @@ export async function insertArticleIgnoreDuplicate(
       filteredBy,
       filterEvaluatedAt,
       input.filterErrorMessage ?? null,
+      governanceStatus,
+      input.governance?.qualityScore ?? null,
+      input.governance?.aiReason ?? null,
+      governanceUpdatedAt,
     ],
   );
   const article = rows[0] ?? null;

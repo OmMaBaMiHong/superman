@@ -576,8 +576,10 @@ export async function getFeedBodyTranslateEnabled(
 export interface FeedFetchRow {
   id: string;
   userId: string;
+  title: string;
   url: string;
   enabled: boolean;
+  categoryId: string | null;
   fullTextOnFetchEnabled: boolean;
   titleTranslateEnabled: boolean;
   aiSummaryOnFetchEnabled: boolean;
@@ -595,8 +597,10 @@ export async function listEnabledFeedsForFetch(db: DbClient, userId?: string): P
     select
       id,
       user_id as "userId",
+      title,
       url,
       enabled,
+      category_id as "categoryId",
       full_text_on_fetch_enabled as "fullTextOnFetchEnabled",
       title_translate_enabled as "titleTranslateEnabled",
       ai_summary_on_fetch_enabled as "aiSummaryOnFetchEnabled",
@@ -625,8 +629,10 @@ export async function getFeedForFetch(
       select
         id,
         user_id as "userId",
+        title,
         url,
         enabled,
+        category_id as "categoryId",
         full_text_on_fetch_enabled as "fullTextOnFetchEnabled",
         title_translate_enabled as "titleTranslateEnabled",
         ai_summary_on_fetch_enabled as "aiSummaryOnFetchEnabled",
