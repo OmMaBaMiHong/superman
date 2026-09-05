@@ -44,7 +44,7 @@ export default function GovernanceStatsBar({ stats }: GovernanceStatsBarProps) {
   return (
     <section
       aria-label="治理统计"
-      className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3 lg:grid-cols-5"
+      className="grid grid-cols-2 gap-px overflow-hidden rounded-[1.25rem] border border-border bg-border sm:grid-cols-3 lg:grid-cols-5"
     >
       <StatCell
         label="今日待批"

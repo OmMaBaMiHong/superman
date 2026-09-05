@@ -2175,6 +2175,15 @@ export interface GovernanceQueueItem {
   sourceUrl: string | null;
   governanceStatus: GovernanceStatus;
   redraftCount: number;
+  contentType: ContentType;
+}
+
+/** 治理条目详情：全文/图/来源，供详情 sheet 渲染。 */
+export interface GovernanceItemDetail extends GovernanceQueueItem {
+  titleOriginal: string | null;
+  author: string | null;
+  content: string | null;
+  previewImage: string | null;
 }
 
 export interface GovernanceQueueResult {
@@ -2271,7 +2280,16 @@ export async function restoreGovernanceItem(
   );
 }
 
+export async function getGovernanceItemDetail(
+  id: string,
+  options?: RequestApiOptions,
+): Promise<GovernanceItemDetail> {
+  return requestApi(`/api/governance/items/${encodeURIComponent(id)}`, undefined, options);
+}
+
 /* ── 热点雷达（TrendRadar）── */
+
+export type ContentType = 'video' | 'image' | 'text';
 
 export interface TrendRadarItem {
   id: string;
@@ -2287,6 +2305,12 @@ export interface TrendRadarItem {
   sourceDate: string;
   promotedAt: string | null;
   promotedArticleId: string | null;
+  contentType: ContentType;
+}
+
+/** 热榜详情：行字段 + payload_json 全量（有啥返回啥）。 */
+export interface TrendRadarItemDetail extends TrendRadarItem {
+  payload: Record<string, unknown>;
 }
 
 export interface TrendRadarPlatformGroup {
@@ -2318,4 +2342,11 @@ export async function promoteTrendRadarItem(
     { method: 'POST' },
     options,
   );
+}
+
+export async function getTrendRadarItemDetail(
+  id: string,
+  options?: RequestApiOptions,
+): Promise<TrendRadarItemDetail> {
+  return requestApi(`/api/trend-radar/items/${encodeURIComponent(id)}`, undefined, options);
 }

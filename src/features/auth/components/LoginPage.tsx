@@ -42,18 +42,18 @@ export default function LoginPage() {
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-background text-foreground">
-      {/* 极轻微的 cyan 纵深光斑 + 网格纹理，营造指挥台氛围（透明度 ≤0.03） */}
+      {/* 柔和 cyan 光斑：浅色下是玻璃台面上的反光，深色下是微弱氛围光 */}
       <div
         aria-hidden="true"
-        className="absolute inset-0 bg-[radial-gradient(circle_at_50%_-10%,rgb(34_211_238/0.03),transparent_45%)]"
+        className="absolute inset-0 bg-[radial-gradient(circle_at_50%_-10%,color-mix(in_oklab,var(--color-primary)_8%,transparent),transparent_45%)]"
       />
       <div
         aria-hidden="true"
-        className="absolute inset-0 bg-[linear-gradient(to_right,rgb(26_37_64/0.35)_1px,transparent_1px),linear-gradient(to_bottom,rgb(26_37_64/0.35)_1px,transparent_1px)] bg-[size:48px_48px] [mask-image:radial-gradient(ellipse_at_center,black_20%,transparent_75%)]"
+        className="absolute left-1/2 top-[16%] h-64 w-64 -translate-x-1/2 rounded-full bg-[radial-gradient(circle,color-mix(in_oklab,var(--color-primary)_10%,transparent),transparent)] blur-3xl"
       />
 
       <div className="relative mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 py-12">
-        <section className="rounded-lg border border-border bg-card p-6 shadow-[var(--shadow-glass)] sm:p-8">
+        <section className="glass-surface-strong p-6 sm:p-8">
           <div className="space-y-6">
             <div className="space-y-4 text-center">
               <div className="flex items-center justify-center gap-2">
@@ -61,13 +61,11 @@ export default function LoginPage() {
                   aria-hidden="true"
                   className="gov-pulse-dot h-1.5 w-1.5 rounded-full bg-primary"
                 />
-                <span className="font-mono text-[11px] font-medium uppercase tracking-[0.22em] text-primary">
-                  Superman
-                </span>
+                <span className="text-[13px] font-semibold text-primary">Superman</span>
               </div>
               <div className="space-y-2">
                 <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-[1.75rem]">
-                  情报指挥中心
+                  欢迎回来
                 </h1>
                 <p className="text-sm text-muted-foreground">
                   登录后继续你的 RSS 阅读与管理。
@@ -121,9 +119,9 @@ export default function LoginPage() {
               </Button>
             </form>
 
-            <div className="flex items-center justify-center gap-2 border-t border-border/60 pt-4 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <div className="flex items-center justify-center gap-2 border-t border-border/60 pt-4 text-[11px] text-muted-foreground">
               <span className="h-1 w-1 rounded-full bg-primary/70" />
-              <span>Mission Control · Private Workspace</span>
+              <span>个人创作指挥中心 · 私密空间</span>
             </div>
           </div>
         </section>

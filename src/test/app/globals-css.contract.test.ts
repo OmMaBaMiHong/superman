@@ -2,10 +2,12 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 describe('globals.css contract', () => {
-  it('uses tailwind v4 import and class-based dark variant', () => {
+  it('uses tailwind v4 import and system-following dark variant', () => {
     const css = readFileSync('src/app/globals.css', 'utf-8');
     expect(css).toContain('@import "tailwindcss";');
-    expect(css).toContain('@custom-variant dark (&:where(.dark, .dark *));');
+    // 液态玻璃双主题：dark: 跟随 prefers-color-scheme，不依赖 .dark 类手动开关
+    expect(css).toContain('@custom-variant dark (@media (prefers-color-scheme: dark));');
+    expect(css).not.toContain('@custom-variant dark (&:where(.dark');
     expect(css).toContain('@plugin "tailwindcss-animate";');
     expect(css).toContain('--color-background');
     expect(css).toContain('--color-foreground');
@@ -36,65 +38,64 @@ describe('globals.css contract', () => {
     expect(css).toContain('--layout-reader-feed-drawer-max-width');
     expect(css).toContain('--layout-reader-tablet-list-max-width');
     expect(css).toContain('--layout-reader-tablet-list-min-width');
-    // 「情报指挥中心」深色单主题：基底 / 面板 / cyan 主色。
-    expect(css).toContain('--color-background: #050810');
-    expect(css).toContain('--color-card: #0c1220');
-    expect(css).toContain('--color-popover: #111a2b');
+    // 浅色优先：苹果灰白底 + 加深 cyan 主色
+    expect(css).toContain('--color-background: #f5f5f7');
+    expect(css).toContain('--color-foreground: #1d1d1f');
+    expect(css).toContain('--color-primary: #0891b2');
+    expect(css).toContain('--color-ring: #0891b2');
+    expect(css).toContain('--color-muted-foreground: #86868b');
+    // 深色：纯黑底 + 提亮 cyan
+    expect(css).toContain('@media (prefers-color-scheme: dark)');
+    expect(css).toContain('--color-background: #000000');
+    expect(css).toContain('--color-foreground: #f5f5f7');
     expect(css).toContain('--color-primary: #22d3ee');
-    expect(css).toContain('--color-ring: #22d3ee');
-    expect(css).toContain('--color-accent: #16213a');
-    expect(css).toContain('--color-border: #1a2540');
-    expect(css).toContain('--color-muted-foreground: #8b94a7');
+    expect(css).toContain('--color-muted-foreground: #98989d');
     expect(css).toContain('--reader-pane-hover: color-mix(');
-    expect(css).toContain('var(--color-primary) 9%');
-    expect(css).toContain('var(--color-card)');
+    expect(css).toContain('var(--color-primary)');
     expect(css).toContain('background-attachment: fixed;');
-    // 深色单主题：html 直接声明 color-scheme: dark。
+    expect(css).toContain('color-scheme: light;');
     expect(css).toContain('color-scheme: dark;');
-    expect(css).not.toContain('--color-background: hsl(0 0% 100%)');
+    // 旧主题色板不得回归（指挥台深色 / 旧浅色系 / 旧靛蓝 / 旧 emerald）
+    expect(css).not.toContain('--color-background: #050810');
     expect(css).not.toContain('--color-background: hsl(210 20% 98%)');
     expect(css).not.toContain('--color-background: hsl(240 15% 3%)');
     expect(css).not.toContain('--color-primary: hsl(221.2 83.2% 53.3%)');
-    expect(css).not.toContain('--color-background: hsl(222.2 84% 4.9%)');
-    expect(css).not.toContain('--color-primary: hsl(217.2 91.2% 59.8%)');
-    expect(css).not.toContain('--color-background: hsl(42 35% 96%)');
-    expect(css).not.toContain('--color-primary: hsl(224 54% 42%)');
-    expect(css).not.toContain('--color-accent: hsl(221 37% 92%)');
-    // 旧靛蓝主色与旧 emerald 主色都必须彻底移除（指挥台铁律：主色 cyan）。
-    expect(css).not.toContain('--color-primary: hsl(221 100% 50%)');
-    expect(css).not.toContain('--color-ring: hsl(221 100% 50%)');
-    expect(css).not.toContain('--color-primary: hsl(234 56% 60%)');
-    expect(css).not.toContain('--color-ring: hsl(234 56% 60%)');
     expect(css).not.toContain('--color-primary: hsl(152 60% 50%)');
     expect(css).not.toContain('--color-ring: hsl(152 60% 50%)');
+    expect(css).not.toContain('--color-primary: hsl(221 100% 50%)');
     expect(css).not.toContain('fonts.googleapis.com');
     expect(css).not.toContain('.font-brand');
   });
 
-  it('defines the glass token system on the dark mission-control theme', () => {
+  it('defines the liquid glass token system for both light and dark themes', () => {
     const css = readFileSync('src/app/globals.css', 'utf-8');
 
-    // 面板 token（ui-style-guide §1.2 / arch-ui-integration §1.3.2）。
+    // 液态玻璃 token：blur(20px) saturate(180%) + 半透明底 + 半透明边框 + 顶部高光
     expect(css).toContain('--glass-bg:');
     expect(css).toContain('--glass-bg-strong:');
     expect(css).toContain('--glass-bg-light:');
     expect(css).toContain('--glass-border:');
-    expect(css).toContain('--glass-blur: 16px');
-    expect(css).toContain('--glass-blur-strong: 24px');
-    expect(css).toContain('--glass-saturate: 140%');
+    expect(css).toContain('--glass-blur: 20px');
+    expect(css).toContain('--glass-blur-strong: 28px');
+    expect(css).toContain('--glass-saturate: 180%');
     expect(css).toContain('--glass-highlight:');
     expect(css).toContain('--glass-topline:');
     expect(css).toContain('--shadow-glass:');
     expect(css).toContain('--shadow-glow:');
 
-    // 深色单主题：面板 token 统一定义在 :root；.dark 仅保留 color-scheme 兼容声明。
+    // 浅色玻璃：半透明白 + 黑色发丝边框 + 白色顶部高光
     const rootBlock = css.match(/:root\s*\{([\s\S]*?)\}/)?.[1] ?? '';
-    expect(rootBlock).toContain('--glass-bg: rgba(12, 18, 32, 0.55)');
-    expect(rootBlock).toContain('--shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.4)');
-    expect(rootBlock).toContain('--shadow-glow:');
-    expect(rootBlock).toContain('rgba(34, 211, 238, 0.28)');
-    const darkBlock = css.match(/\.dark\s*\{([\s\S]*?)\}/)?.[1] ?? '';
-    expect(darkBlock).toContain('color-scheme: dark;');
+    expect(rootBlock).toContain('--glass-bg: rgba(255, 255, 255, 0.7)');
+    expect(rootBlock).toContain('--glass-border: rgba(0, 0, 0, 0.08)');
+    expect(rootBlock).toContain('--glass-highlight: rgba(255, 255, 255, 0.6)');
+
+    // 深色玻璃：rgba(28,28,30) + 白色发丝边框 + 弱高光
+    const darkBlock =
+      css.match(/@media \(prefers-color-scheme: dark\)\s*\{\s*:root\s*\{([\s\S]*?)\}\s*\}/)?.[1] ??
+      '';
+    expect(darkBlock).toContain('--glass-bg: rgba(28, 28, 30, 0.65)');
+    expect(darkBlock).toContain('--glass-border: rgba(255, 255, 255, 0.14)');
+    expect(darkBlock).toContain('--glass-highlight: rgba(255, 255, 255, 0.1)');
   });
 
   it('defines .glass-surface semantic classes with full glass recipe', () => {
@@ -109,12 +110,13 @@ describe('globals.css contract', () => {
     expect(css).toContain('.glass-surface-light {');
   });
 
-  it('uses subtle cyan ambient glow (≤0.03) on the dark body', () => {
+  it('uses subtle cyan ambient glow on the body for both themes', () => {
     const css = readFileSync('src/app/globals.css', 'utf-8');
 
-    // 指挥台 body：极轻微 cyan 径向纵深，透明度 ≤0.03；旧 emerald 光斑不得回归。
-    expect(css).toContain('rgb(34 211 238 / 0.03)');
-    expect(css).toContain('rgb(34 211 238 / 0.02)');
+    // 浅色/深色 body 均为极淡 cyan 顶部光晕（让玻璃有可模糊的底）
+    expect(css).toContain('rgb(8 145 178 / 0.05)');
+    expect(css).toContain('rgb(34 211 238 / 0.05)');
+    // 旧 emerald 光斑与指挥台深底光斑不得回归
     expect(css).not.toContain('rgb(16 185 129 / 0.14)');
     expect(css).not.toContain('rgb(16 185 129 / 0.08)');
   });
@@ -127,12 +129,10 @@ describe('globals.css contract', () => {
     expect(headingRuleMatch?.[1]).not.toContain('text-wrap: balance;');
   });
 
-  it('keeps muted foreground restrained on the dark palette', () => {
+  it('keeps reduced-motion downgrade for all animations', () => {
     const css = readFileSync('src/app/globals.css', 'utf-8');
-
-    // 次要文字统一 #8b94a7（指挥台色系派生），浅色 muted 值不得回归。
-    expect(css).toContain('--color-muted-foreground: #8b94a7');
-    expect(css).not.toContain('--color-muted-foreground: hsl(215 16% 47%)');
-    expect(css).not.toContain('--color-muted-foreground: hsl(226 8% 58%)');
+    expect(css).toContain('@media (prefers-reduced-motion: reduce)');
+    expect(css).toContain('animation-duration: 0.01ms !important');
+    expect(css).toContain('transition-duration: 0.01ms !important');
   });
 });

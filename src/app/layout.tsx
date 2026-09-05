@@ -40,9 +40,9 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   themeColor: [
     // 浏览器 UI 主题色：Next.js metadata 要求字面量，无法引用 CSS 变量（token 铁律的合理豁免）。
-    // 取值必须与 globals.css 的 --color-background 同步：指挥台深色基底 #050810。
-    { media: '(prefers-color-scheme: light)', color: '#050810' },
-    { media: '(prefers-color-scheme: dark)', color: '#050810' },
+    // 取值必须与 globals.css 的 --color-background 同步：浅色 #f5f5f7，深色 #000000。
+    { media: '(prefers-color-scheme: light)', color: '#f5f5f7' },
+    { media: '(prefers-color-scheme: dark)', color: '#000000' },
   ],
 };
 

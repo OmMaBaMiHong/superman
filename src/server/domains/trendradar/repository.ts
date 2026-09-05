@@ -11,6 +11,10 @@
 import crypto from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { normalizeUserId } from '@/server/domains/users/userScope';
+import {
+  inferTrendContentType,
+  type ContentType,
+} from '@/server/lib/contentType';
 
 type DbClient = Pool | PoolClient;
 
@@ -42,6 +46,7 @@ export interface TrendRadarItemRow {
   sourceDate: string;
   promotedAt: string | null;
   promotedArticleId: string | null;
+  contentType: ContentType;
   payload: Record<string, unknown>;
 }
 
@@ -168,6 +173,7 @@ function mapRow(row: RawTrendRadarRow): TrendRadarItemRow {
   return {
     ...row,
     previousRank,
+    contentType: inferTrendContentType({ platform: row.platform, url: row.url, payload }),
     payload,
   };
 }

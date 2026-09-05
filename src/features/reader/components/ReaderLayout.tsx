@@ -812,7 +812,7 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
                   className={cn(
                     'min-h-0 flex-1 overflow-hidden px-3 pb-3 pt-3 sm:px-4 sm:pb-4',
                     // 手机端为底部 tab bar 留出空间
-                    isMobile && 'pb-[calc(3.5rem+env(safe-area-inset-bottom)+0.75rem)]',
+                    isMobile && 'pb-[calc(4.5rem+env(safe-area-inset-bottom)+0.75rem)]',
                   )}
                 >
                   <div
@@ -862,7 +862,7 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
                     className={cn(
                       'h-full min-h-0 bg-background/96 dark:bg-background/97',
                       // 底部 tab bar 占位：避免列表末行/正文被固定导航遮挡
-                      'pb-[calc(3.5rem+env(safe-area-inset-bottom))]',
+                      'pb-[calc(4.5rem+env(safe-area-inset-bottom))]',
                       selectedArticleId
                         ? 'rounded-none'
                         : 'rounded-t-[1.35rem] border-t border-border/60 dark:border-white/[0.05]',

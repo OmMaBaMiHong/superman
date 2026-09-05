@@ -6,8 +6,45 @@ import {
   type GovernanceStatus,
 } from '@/server/domains/governance/stateMachine';
 import { REJECT_MEMORY_DAYS } from '@/server/domains/governance/dedup';
+import {
+  inferArticleContentType,
+  type ContentType,
+} from '@/server/lib/contentType';
 
 type DbClient = Pool | PoolClient;
+
+/** 治理条目的内容形态信号位（SQL 侧计算，JS 侧 inferArticleContentType 推断）。 */
+const contentTypeSignalSelectSql = `
+  f.view as "feedView",
+  (a.preview_image_url is not null) as "hasPreviewImage",
+  (
+    coalesce(a.content_html, '') ~* '<img'
+    or coalesce(a.content_full_html, '') ~* '<img'
+  ) as "hasInlineImage"
+`;
+
+interface ContentTypeSignals {
+  feedView: string | null;
+  hasPreviewImage: boolean;
+  hasInlineImage: boolean;
+}
+
+function withContentType<T extends ContentTypeSignals & { sourceUrl: string | null }>(
+  row: T,
+): Omit<T, keyof ContentTypeSignals> & { contentType: ContentType } {
+  const contentType = inferArticleContentType({
+    feedView: row.feedView,
+    link: row.sourceUrl,
+    hasPreviewImage: row.hasPreviewImage,
+    hasInlineImage: row.hasInlineImage,
+  });
+  // 信号位不外泄：只输出业务字段 + contentType
+  const rest: Partial<T> = { ...row };
+  delete rest.feedView;
+  delete rest.hasPreviewImage;
+  delete rest.hasInlineImage;
+  return { ...(rest as Omit<T, keyof ContentTypeSignals>), contentType };
+}
 
 // ============================================================
 // 治理偏好（user_id + category_id 维度）
@@ -385,6 +422,7 @@ export interface GovernanceQueueItemRow {
   sourceUrl: string | null;
   governanceStatus: GovernanceStatus;
   redraftCount: number;
+  contentType: ContentType;
 }
 
 export async function listGovernanceQueue(
@@ -440,7 +478,8 @@ export async function listGovernanceQueue(
         a.published_at as "publishedAt",
         a.link as "sourceUrl",
         a.governance_status as "governanceStatus",
-        a.redraft_count as "redraftCount"
+        a.redraft_count as "redraftCount",
+        ${contentTypeSignalSelectSql}
       from articles a
       join feeds f on f.id = a.feed_id and f.user_id = a.user_id
       left join categories c
@@ -453,15 +492,63 @@ export async function listGovernanceQueue(
   );
 
   return {
-    items: rows as GovernanceQueueItemRow[],
+    items: (rows as Array<GovernanceQueueItemRow & ContentTypeSignals>).map(withContentType),
     total: countRows[0]?.count ?? 0,
   };
 }
 
+/** 治理条目详情：全文 + 图 + 来源，供前端详情 sheet/modal 渲染。 */
+export interface GovernanceItemDetailRow extends GovernanceQueueItemRow {
+  titleOriginal: string | null;
+  author: string | null;
+  /** 正文 HTML：优先全文抓取结果，其次采集正文（入库时已消毒）。 */
+  content: string | null;
+  previewImage: string | null;
+}
+
+export async function getGovernanceItemDetail(
+  db: DbClient,
+  input: { id: string; userId?: string },
+): Promise<GovernanceItemDetailRow | null> {
+  const { rows } = await db.query(
+    `
+      select
+        a.id,
+        a.title,
+        a.title_original as "titleOriginal",
+        a.author,
+        coalesce(a.content_full_html, a.content_html) as "content",
+        a.preview_image_url as "previewImage",
+        a.summary,
+        a.ai_reason as "aiReason",
+        a.quality_score as "qualityScore",
+        a.feed_id as "feedId",
+        f.title as "feedTitle",
+        f.category_id as "categoryId",
+        c.name as "categoryTitle",
+        a.published_at as "publishedAt",
+        a.link as "sourceUrl",
+        a.governance_status as "governanceStatus",
+        a.redraft_count as "redraftCount",
+        ${contentTypeSignalSelectSql}
+      from articles a
+      join feeds f on f.id = a.feed_id and f.user_id = a.user_id
+      left join categories c
+        on c.id = f.category_id and c.user_id = a.user_id
+      where a.id = $1
+        and a.user_id = $2
+      limit 1
+    `,
+    [input.id, normalizeUserId(input.userId)],
+  );
+
+  if (!rows[0]) return null;
+  return withContentType(rows[0] as GovernanceItemDetailRow & ContentTypeSignals);
+}
+
 export interface GovernanceStatsRow {
   /** 今日新入待批（candidate/pending 且今日抓取）。 */
-  todayPending: number;
-  /** 今日归档（archived 且今日治理更新）。 */
+  todayPending: number;  /** 今日归档（archived 且今日治理更新）。 */
   todayArchived: number;
   /** 今日采集成功 feed 数。 */
   todayFetchSucceeded: number;

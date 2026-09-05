@@ -101,33 +101,36 @@ describe('QA probe: 导航一致性', () => {
 });
 
 describe('QA probe: 玻璃 token 契约（独立复核 globals.css）', () => {
-  it('主色为 cyan #22d3ee，ring 同步（深色单主题，定义于 @theme default）', () => {
+  it('主色 cyan 双主题：浅色 #0891b2 / 深色 #22d3ee，ring 同步', () => {
     const css = readFileSync('src/app/globals.css', 'utf-8');
-    // 指挥台深色单主题：主色/ring 只在 @theme default 定义一次，.dark 不再覆盖。
+    // 液态玻璃双主题：@theme default 浅色值 + prefers-color-scheme dark 覆盖。
+    expect(css.match(/--color-primary: #0891b2/g)).toHaveLength(1);
+    expect(css.match(/--color-ring: #0891b2/g)).toHaveLength(1);
     expect(css.match(/--color-primary: #22d3ee/g)).toHaveLength(1);
     expect(css.match(/--color-ring: #22d3ee/g)).toHaveLength(1);
     expect(css).not.toContain('--color-primary: hsl(152 60% 50%)');
     expect(css).not.toContain('--color-ring: hsl(152 60% 50%)');
   });
 
-  it('.glass-surface 含 backdrop-filter + -webkit- 前缀 + ::before 高光线，--glass-blur 16px', () => {
+  it('.glass-surface 含 backdrop-filter + -webkit- 前缀 + ::before 高光线，液态玻璃 blur 20px / saturate 180%', () => {
     const css = readFileSync('src/app/globals.css', 'utf-8');
     expect(css).toContain('-webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));');
     expect(css).toContain('backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));');
     expect(css).toContain('.glass-surface::before');
-    expect(css).toContain('--glass-blur: 16px');
-    expect(css).toContain('--glass-blur-strong: 24px');
-    expect(css).toContain('--glass-saturate: 140%');
+    expect(css).toContain('--glass-blur: 20px');
+    expect(css).toContain('--glass-blur-strong: 28px');
+    expect(css).toContain('--glass-saturate: 180%');
   });
 
-  it('body 光斑背景：cyan 系纵深，透明度 ≤0.03', () => {
+  it('body 光斑背景：双主题 cyan 系微光（≤0.05）', () => {
     const css = readFileSync('src/app/globals.css', 'utf-8');
-    expect(css).toContain('rgb(34 211 238 / 0.03)');
-    expect(css).toContain('rgb(34 211 238 / 0.02)');
+    expect(css).toContain('rgb(8 145 178 / 0.05)');
+    expect(css).toContain('rgb(34 211 238 / 0.05)');
     expect(css).toContain('background-attachment: fixed;');
-    // 旧 emerald 光斑不得回归。
+    // 旧 emerald 光斑与指挥台深底不得回归。
     expect(css).not.toContain('rgb(16 185 129 / 0.14)');
     expect(css).not.toContain('rgb(13 148 136 / 0.1)');
+    expect(css).not.toContain('--color-background: #050810');
   });
 
   it('GlassCard 交互态用 --shadow-glass-hover token 而非硬编码色', () => {

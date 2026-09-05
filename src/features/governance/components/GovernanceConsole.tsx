@@ -5,28 +5,32 @@ import Link from 'next/link';
 import { ArrowLeft, RefreshCw } from 'lucide-react';
 import {
   approveGovernanceItem,
+  getGovernanceItemDetail,
   getGovernanceQueue,
   getGovernanceStats,
   listCategories,
   redraftGovernanceItem,
   rejectGovernanceItem,
   type CategoryDto,
+  type GovernanceItemDetail,
   type GovernanceQueueItem,
   type GovernanceStats,
   type GovernanceStatus,
 } from '@/lib/api/apiClient';
+import GlassDetailSheet from '@/components/ui/glass-detail-sheet';
 import { cn } from '@/lib/utils';
 import MobileTabBar from '@/features/mobile/components/MobileTabBar';
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
+import GovernanceItemDetailView from './GovernanceItemDetailView';
 import GovernanceQueueCard, { type CardExitKind } from './GovernanceQueueCard';
 import GovernanceStatsBar from './GovernanceStatsBar';
 
 type QueueTab = 'all' | 'candidate' | 'pending';
 
-const TABS: Array<{ id: QueueTab; name: string; latin: string }> = [
-  { id: 'all', name: '全部', latin: 'All' },
-  { id: 'candidate', name: '待批候选', latin: 'Candidate' },
-  { id: 'pending', name: '重拟中', latin: 'Pending' },
+const TABS: Array<{ id: QueueTab; name: string }> = [
+  { id: 'all', name: '全部' },
+  { id: 'candidate', name: '待批候选' },
+  { id: 'pending', name: '重拟中' },
 ];
 
 const TAB_STATUSES: Record<QueueTab, GovernanceStatus[]> = {
@@ -66,6 +70,10 @@ export default function GovernanceConsole() {
   const [exiting, setExiting] = useState<Record<string, CardExitKind>>({});
   const [pendingActions, setPendingActions] = useState<Record<string, 'approve' | 'reject' | 'redraft'>>({});
   const [reasonOpen, setReasonOpen] = useState<Record<string, 'reject' | 'redraft'>>({});
+  // 详情 sheet：detailItem 供操作（队列条目），detail 为懒加载的全文数据
+  const [detailItem, setDetailItem] = useState<GovernanceQueueItem | null>(null);
+  const [detail, setDetail] = useState<GovernanceItemDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -206,6 +214,21 @@ export default function GovernanceConsole() {
     [pendingActions, reducedMotion, removeItem, loadStats, setPendingAction],
   );
 
+  const openDetail = useCallback((item: GovernanceQueueItem) => {
+    setDetailItem(item);
+    setDetail(null);
+    setDetailLoading(true);
+    void getGovernanceItemDetail(item.id, { notifyOnError: false })
+      .then(setDetail)
+      .catch(() => setDetail(null))
+      .finally(() => setDetailLoading(false));
+  }, []);
+
+  const closeDetail = useCallback(() => {
+    setDetailItem(null);
+    setDetail(null);
+  }, []);
+
   const openReason = useCallback((id: string, kind: 'reject' | 'redraft') => {
     setReasonOpen((current) => {
       const next: Record<string, 'reject' | 'redraft'> = {};
@@ -275,12 +298,12 @@ export default function GovernanceConsole() {
   return (
     <div className="min-h-screen">
       {/* 顶部指挥条 */}
-      <header className="sticky top-0 z-10 border-b border-border bg-background/90 backdrop-blur-md">
+      <header className="glass-surface-strong sticky top-0 z-10 rounded-none border-x-0 border-t-0">
         <div className="mx-auto flex h-14 max-w-4xl items-center justify-between gap-4 px-4 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <Link
               href="/"
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors duration-150 hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:h-9 sm:w-9"
               aria-label="返回阅读器"
             >
               <ArrowLeft aria-hidden="true" className="h-4 w-4" />
@@ -291,7 +314,7 @@ export default function GovernanceConsole() {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-3">
-            <span className="hidden items-center gap-1.5 font-mono text-[11px] text-muted-foreground sm:inline-flex">
+            <span className="hidden items-center gap-1.5 text-[11px] text-muted-foreground sm:inline-flex">
               <span aria-hidden="true" className="gov-pulse-dot h-1.5 w-1.5 rounded-full bg-primary" />
               LIVE
             </span>
@@ -302,7 +325,7 @@ export default function GovernanceConsole() {
                 void loadStats();
               }}
               aria-label="刷新队列"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors duration-150 hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:h-9 sm:w-9"
             >
               <RefreshCw aria-hidden="true" className="h-3.5 w-3.5" />
             </button>
@@ -315,7 +338,7 @@ export default function GovernanceConsole() {
 
         {/* 工具行：状态 tab + 分类筛选 */}
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div role="tablist" aria-label="队列状态" className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
+          <div role="tablist" aria-label="队列状态" className="glass-surface-light flex items-center gap-1 rounded-full p-1">
             {TABS.map((entry) => (
               <button
                 key={entry.id}
@@ -324,7 +347,7 @@ export default function GovernanceConsole() {
                 aria-selected={tab === entry.id}
                 onClick={() => setTab(entry.id)}
                 className={cn(
-                  'flex h-7 items-center gap-1.5 rounded-md px-3 font-mono text-xs transition-colors duration-150',
+                  'flex h-9 items-center gap-1.5 rounded-full px-3.5 text-xs font-medium transition-colors duration-150',
                   'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
                   tab === entry.id
                     ? 'bg-primary/10 text-primary'
@@ -332,7 +355,6 @@ export default function GovernanceConsole() {
                 )}
               >
                 {entry.name}
-                <span className="text-[9px] uppercase tracking-[0.08em] opacity-60">{entry.latin}</span>
               </button>
             ))}
           </div>
@@ -341,7 +363,7 @@ export default function GovernanceConsole() {
             aria-label="按分类筛选"
             value={categoryId}
             onChange={(event) => setCategoryId(event.target.value)}
-            className="h-8 rounded-md border border-border bg-card px-2 font-mono text-xs text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="h-9 rounded-full border border-border bg-card px-3 text-xs text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           >
             <option value="">全部分类</option>
             {categories.map((category) => (
@@ -353,7 +375,7 @@ export default function GovernanceConsole() {
         </div>
 
         {/* 队列 */}
-        <div ref={listRef} className="space-y-3" aria-live="polite">
+        <div ref={listRef} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-live="polite">
           {loading ? (
             Array.from({ length: 3 }, (_, index) => (
               <div
@@ -363,10 +385,9 @@ export default function GovernanceConsole() {
               />
             ))
           ) : items.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-border px-6 py-16 text-center">
+            <div className="rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center">
               <p className="text-sm font-medium text-foreground">{emptyCopy.title}</p>
               <p className="mt-2 text-xs text-muted-foreground">{emptyCopy.hint}</p>
-              <p className="gov-label mt-6">Queue Empty</p>
             </div>
           ) : (
             items.map((item, index) => (
@@ -378,6 +399,7 @@ export default function GovernanceConsole() {
                 pendingAction={pendingActions[item.id] ?? null}
                 reasonOpen={reasonOpen[item.id] ?? null}
                 onSelect={() => setSelectedIndex(index)}
+                onOpenDetail={() => openDetail(item)}
                 onApprove={() => void handleApprove(item)}
                 onOpenReason={(kind) => openReason(item.id, kind)}
                 onCancelReason={() => closeReason(item.id)}
@@ -398,7 +420,7 @@ export default function GovernanceConsole() {
                   .catch(() => {})
                   .finally(() => setLoadingMore(false));
               }}
-              className="h-9 rounded-md border border-border px-5 font-mono text-xs text-muted-foreground transition-colors duration-150 hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
+              className="h-11 rounded-full border border-border px-6 text-xs text-muted-foreground transition-colors duration-150 hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
             >
               {loadingMore ? '加载中…' : `加载更多（${items.length}/${total}）`}
             </button>
@@ -423,6 +445,39 @@ export default function GovernanceConsole() {
           <span>点按卡片选中</span>
         </footer>
       </main>
+
+      {/* 详情：移动端底部 sheet / 桌面端居中玻璃 modal */}
+      <GlassDetailSheet
+        open={detailItem !== null}
+        onClose={closeDetail}
+        ariaLabel={detailItem ? `奏折详情：${detailItem.title}` : '奏折详情'}
+      >
+        {detailItem ? (
+          detailLoading || !detail ? (
+            <div className="space-y-3 px-5 pb-10 pt-2 sm:px-7" aria-busy="true">
+              <div className="h-5 w-24 animate-pulse rounded-full bg-muted" />
+              <div className="h-7 w-4/5 animate-pulse rounded-lg bg-muted" />
+              <div className="h-40 animate-pulse rounded-2xl bg-muted" />
+            </div>
+          ) : (
+            <GovernanceItemDetailView
+              detail={detail}
+              pendingAction={pendingActions[detailItem.id] ?? null}
+              reasonOpen={reasonOpen[detailItem.id] ?? null}
+              onApprove={() => {
+                void handleApprove(detailItem);
+                closeDetail();
+              }}
+              onOpenReason={(kind) => openReason(detailItem.id, kind)}
+              onCancelReason={() => closeReason(detailItem.id)}
+              onSubmitReason={(kind, reason) => {
+                void handleSubmitReason(detailItem, kind, reason);
+                if (kind === 'reject') closeDetail();
+              }}
+            />
+          )
+        ) : null}
+      </GlassDetailSheet>
 
       <MobileTabBar />
     </div>

@@ -9,9 +9,9 @@ describe('PWA 落地契约', () => {
     expect(result.name).toContain('Superman');
     expect(result.display).toBe('standalone');
     expect(result.start_url).toBe('/');
-    // theme-color 硬要求：与 globals.css --color-background 同步
-    expect(result.theme_color).toBe('#050810');
-    expect(result.background_color).toBe('#050810');
+    // theme-color 硬要求：浅色优先，与 globals.css --color-background 同步
+    expect(result.theme_color).toBe('#f5f5f7');
+    expect(result.background_color).toBe('#f5f5f7');
 
     const icons = result.icons ?? [];
     expect(icons.length).toBeGreaterThanOrEqual(3);

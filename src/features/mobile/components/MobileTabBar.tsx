@@ -62,10 +62,10 @@ export default function MobileTabBar({ onOpenSettings }: MobileTabBarProps) {
     <nav
       data-testid="mobile-tab-bar"
       aria-label="主导航"
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 backdrop-blur-md md:hidden"
-      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      className="fixed inset-x-3 bottom-3 z-40 md:hidden"
+      style={{ bottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
     >
-      <div className="flex h-14 items-stretch">
+      <div className="glass-surface-strong flex h-14 items-stretch overflow-hidden rounded-[24px]">
         <Link href="/" aria-label="阅读" aria-current={pathname === '/' ? 'page' : undefined} className={tabClass(pathname === '/')}>
           {indicator(pathname === '/')}
           <BookOpen aria-hidden="true" className="h-5 w-5" />

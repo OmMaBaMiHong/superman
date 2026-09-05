@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GovernanceQueueItem, GovernanceStats } from '@/lib/api/apiClient';
 import {
   approveGovernanceItem,
+  getGovernanceItemDetail,
   getGovernanceQueue,
   getGovernanceStats,
   listCategories,
@@ -15,6 +16,7 @@ vi.mock('@/lib/api/apiClient', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/lib/api/apiClient')>();
   return {
     ...original,
+    getGovernanceItemDetail: vi.fn(),
     getGovernanceQueue: vi.fn(),
     getGovernanceStats: vi.fn(),
     listCategories: vi.fn(),
@@ -25,6 +27,7 @@ vi.mock('@/lib/api/apiClient', async (importOriginal) => {
 });
 
 const mockedGetQueue = vi.mocked(getGovernanceQueue);
+const mockedGetDetail = vi.mocked(getGovernanceItemDetail);
 const mockedGetStats = vi.mocked(getGovernanceStats);
 const mockedListCategories = vi.mocked(listCategories);
 const mockedApprove = vi.mocked(approveGovernanceItem);
@@ -54,6 +57,7 @@ function makeItem(overrides: Partial<GovernanceQueueItem>): GovernanceQueueItem 
     sourceUrl: 'https://example.com/a1',
     governanceStatus: 'candidate',
     redraftCount: 0,
+    contentType: 'text',
     ...overrides,
   };
 }
@@ -70,6 +74,13 @@ beforeEach(() => {
   mockedApprove.mockResolvedValue({});
   mockedReject.mockResolvedValue({});
   mockedRedraft.mockResolvedValue({});
+  mockedGetDetail.mockImplementation(async (id) => ({
+    ...ITEMS.find((entry) => entry.id === id) ?? ITEMS[0],
+    titleOriginal: null,
+    author: '作者甲',
+    content: '<p>这是全文正文第一段。</p><p>第二段。</p>',
+    previewImage: null,
+  }));
 });
 
 describe('GovernanceConsole', () => {
@@ -78,7 +89,8 @@ describe('GovernanceConsole', () => {
 
     expect(await screen.findByText('第一道奏折')).toBeInTheDocument();
     expect(screen.getByText('第二道奏折')).toBeInTheDocument();
-    expect(screen.getByText('收录理由：与订阅主题高度相关')).toBeInTheDocument();
+    // 形态徽章渲染（文案）
+    expect(screen.getAllByTestId('content-type-badge')).toHaveLength(2);
 
     // 统计条数字（今日待批 3 / 队列深度 2）
     expect(screen.getByText('今日待批')).toBeInTheDocument();
@@ -176,8 +188,54 @@ describe('GovernanceConsole', () => {
     await waitFor(() => {
       expect(mockedRedraft).toHaveBeenCalledWith('1', { reason: '标题太平' });
     });
-    expect(await screen.findByText('重拟 ×1')).toBeInTheDocument();
+    expect(await screen.findByText('×1')).toBeInTheDocument();
+    expect(screen.getAllByText('重拟中').length).toBeGreaterThan(0);
     // 卡片仍在列表中（状态变为 pending）
+    expect(screen.getByText('第一道奏折')).toBeInTheDocument();
+  });
+
+  it('点开卡片显示详情 sheet：全文、收录理由，详情内可直接准奏', async () => {
+    render(<GovernanceConsole />);
+    const title = await screen.findByText('第一道奏折');
+
+    // 点击卡片标题区域打开详情
+    fireEvent.click(title);
+    const sheet = await screen.findByTestId('glass-detail-sheet');
+    expect(sheet).toBeInTheDocument();
+
+    // 详情懒加载全文
+    expect(await screen.findByText('这是全文正文第一段。')).toBeInTheDocument();
+    expect(screen.getByText('收录理由：与订阅主题高度相关')).toBeInTheDocument();
+    expect(mockedGetDetail).toHaveBeenCalledWith('1', expect.anything());
+
+    // 详情内准奏 → 卡片移除 + sheet 关闭
+    const approveButtons = await screen.findAllByRole('button', { name: '准奏' });
+    fireEvent.click(approveButtons[approveButtons.length - 1]);
+    await waitFor(() => {
+      expect(mockedApprove).toHaveBeenCalledWith('1');
+    });
+    await waitFor(
+      () => {
+        expect(screen.queryByText('第一道奏折')).not.toBeInTheDocument();
+      },
+      { timeout: 2000 },
+    );
+  });
+
+  it('详情 sheet Esc 关闭', async () => {
+    render(<GovernanceConsole />);
+    const title = await screen.findByText('第一道奏折');
+    fireEvent.click(title);
+    await screen.findByTestId('glass-detail-sheet');
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(
+      () => {
+        expect(screen.queryByTestId('glass-detail-sheet')).not.toBeInTheDocument();
+      },
+      { timeout: 1000 },
+    );
+    // 卡片仍在队列中
     expect(screen.getByText('第一道奏折')).toBeInTheDocument();
   });
 
