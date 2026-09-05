@@ -1,0 +1,388 @@
+/**
+ * Superman DSH 插件 · 业务 API 路由（K2 批次 2）。
+ *
+ * 从 src/app/api/ 的 Next.js 路由逐条翻译为裸 node:http handler：
+ * 前缀 /s/api，全部过 auth.ts session 校验，userId 从 session 取。
+ * 响应信封与 Next.js 版一致：{ ok: true, data } / { ok: false, error: { code, message, fields? } }。
+ * 路由匹配用「模式 → 正则」前缀表，不引框架。
+ */
+import type { IncomingMessage, ServerResponse } from 'node:http'
+import { AppError, ConflictError, NotFoundError, UnauthorizedError, ValidationError } from '@/server/infra/http/errors'
+import { isGovernanceStatus, type GovernanceStatus } from '@/core/governance/stateMachine'
+import {
+  getGovernanceItemDetail,
+  getGovernanceStats,
+  listGovernanceQueue,
+} from '@/core/governance/repository'
+import {
+  approveGovernanceItem,
+  redraftGovernanceItem,
+  rejectGovernanceItem,
+  restoreGovernanceItem,
+} from '@/core/governance/services/governanceActionsService'
+import { listTrendRadarItemsByDate, type TrendRadarItemRow } from '@/core/trendradar/repository'
+import { promoteTrendRadarItem } from '@/core/trendradar/promote'
+import { isRewritePlatform, type RewritePlatform } from '@/core/pipelines/rewriteProfiles'
+import { createRewriteJobs, retryPipelineJob } from '@/core/pipelines/services/pipelineService'
+import {
+  acceptDraft,
+  getDraftDetail,
+  listDrafts,
+  listPipelineJobs,
+} from '@/core/pipelines/repository'
+import type { Auth, Session } from './auth.js'
+import type { Queryable } from './db.js'
+import { json, readJsonBody } from './routes.js'
+
+export interface ApiDeps {
+  auth: Auth
+  db: Queryable | null
+}
+
+interface RouteContext {
+  req: IncomingMessage
+  res: ServerResponse
+  params: Record<string, string>
+  query: URLSearchParams
+  session: Session
+  db: Queryable
+}
+
+type RouteHandler = (ctx: RouteContext) => Promise<void>
+
+interface RouteDef {
+  method: 'GET' | 'POST'
+  pattern: string
+  re: RegExp
+  keys: string[]
+  handler: RouteHandler
+}
+
+/** '/governance/items/:id/approve' → 正则 + 参数名表。 */
+function compile(pattern: string): { re: RegExp; keys: string[] } {
+  const keys: string[] = []
+  const source = pattern
+    .split('/')
+    .map((seg) => {
+      if (seg.startsWith(':')) {
+        keys.push(seg.slice(1))
+        return '([^/]+)'
+      }
+      return seg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    })
+    .join('/')
+  return { re: new RegExp(`^${source}/?$`), keys }
+}
+
+function route(method: RouteDef['method'], pattern: string, handler: RouteHandler): RouteDef {
+  return { method, pattern, handler, ...compile(pattern) }
+}
+
+function parsePositiveInt(value: string | null): number | null {
+  if (value === null) return null
+  const n = Number(value)
+  return Number.isInteger(n) && n > 0 ? n : null
+}
+
+function requireId(raw: string | undefined, label = 'ID'): string {
+  if (!raw || !/^\d+$/.test(raw)) {
+    throw new ValidationError(`${label}非法`, { id: '必须为正整数' })
+  }
+  return raw
+}
+
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
+const JOB_KINDS = new Set(['rewrite', 'voiceover', 'video'])
+const JOB_STATUSES = new Set(['queued', 'running', 'succeeded', 'failed'])
+
+function escapeFrontmatter(value: string): string {
+  return value.replace(/"/g, '\\"')
+}
+
+/** 路由表：与 src/app/api/ 对应路由的行为保持一致（校验规则/错误语义/返回形状）。 */
+const ROUTES: RouteDef[] = [
+  // —— 治理 ——
+  route('GET', '/governance/queue', async ({ res, query, session, db }) => {
+    const statusParam = query.get('status')
+    let statuses: GovernanceStatus[] | undefined
+    if (statusParam) {
+      const parts = statusParam.split(',').map((p) => p.trim()).filter(Boolean)
+      if (!parts.every(isGovernanceStatus)) {
+        throw new ValidationError('status 取值非法', { status: '仅支持 candidate/pending/archived/rejected/used' })
+      }
+      statuses = parts
+    }
+    const categoryId = query.get('categoryId')
+    if (categoryId !== null && parsePositiveInt(categoryId) === null) {
+      throw new ValidationError('categoryId 取值非法', { categoryId: '必须为正整数' })
+    }
+    const keyword = query.get('keyword')?.trim() || undefined
+    if (keyword && keyword.length > 120) {
+      throw new ValidationError('keyword 取值非法', { keyword: '最长 120 字符' })
+    }
+    const result = await listGovernanceQueue(db as never, {
+      userId: session.userId,
+      statuses,
+      categoryId: categoryId ?? undefined,
+      keyword,
+      page: parsePositiveInt(query.get('page')) ?? 1,
+      pageSize: parsePositiveInt(query.get('pageSize')) ?? 20,
+    })
+    json(res, 200, { ok: true, data: result })
+  }),
+  route('GET', '/governance/stats', async ({ res, session, db }) => {
+    const stats = await getGovernanceStats(db as never, session.userId)
+    json(res, 200, { ok: true, data: stats })
+  }),
+  route('GET', '/governance/items/:id', async ({ res, params, session, db }) => {
+    const detail = await getGovernanceItemDetail(db as never, {
+      id: requireId(params.id, '条目 ID'),
+      userId: session.userId,
+    })
+    if (!detail) throw new NotFoundError('条目不存在或不属于当前用户')
+    json(res, 200, { ok: true, data: detail })
+  }),
+  route('POST', '/governance/items/:id/approve', async ({ res, params, session, db }) => {
+    const item = await approveGovernanceItem(db as never, { id: requireId(params.id, '条目 ID'), userId: session.userId })
+    json(res, 200, { ok: true, data: { item } })
+  }),
+  route('POST', '/governance/items/:id/reject', async ({ req, res, params, session, db }) => {
+    const body = await readJsonBody(req)
+    const reason = typeof body.reason === 'string' ? body.reason.trim() : ''
+    if (reason.length > 1000) {
+      throw new ValidationError('驳回理由非法', { reason: 'reason 必须为不超过 1000 字的字符串' })
+    }
+    const item = await rejectGovernanceItem(db as never, {
+      id: requireId(params.id, '条目 ID'),
+      reason,
+      userId: session.userId,
+    })
+    json(res, 200, { ok: true, data: { item } })
+  }),
+  route('POST', '/governance/items/:id/redraft', async ({ req, res, params, session, db }) => {
+    const body = await readJsonBody(req)
+    const reason = typeof body.reason === 'string' ? body.reason.trim() : ''
+    if (reason.length > 1000) {
+      throw new ValidationError('重拟理由非法', { reason: 'reason 必须为不超过 1000 字的字符串' })
+    }
+    const result = await redraftGovernanceItem(db as never, {
+      id: requireId(params.id, '条目 ID'),
+      reason,
+      userId: session.userId,
+    })
+    json(res, 200, { ok: true, data: result })
+  }),
+  route('POST', '/governance/items/:id/restore', async ({ res, params, session, db }) => {
+    const item = await restoreGovernanceItem(db as never, { id: requireId(params.id, '条目 ID'), userId: session.userId })
+    json(res, 200, { ok: true, data: { item } })
+  }),
+
+  // —— 热点 ——
+  route('GET', '/trend-radar/today', async ({ res, query, session, db }) => {
+    const dateParam = query.get('date')?.trim()
+    if (dateParam && !DATE_PATTERN.test(dateParam)) {
+      throw new ValidationError('date 取值非法', { date: '需要 YYYY-MM-DD' })
+    }
+    const items = await listTrendRadarItemsByDate(db as never, {
+      userId: session.userId,
+      date: dateParam || undefined,
+    })
+    const groups: { platform: string; platformName: string; items: TrendRadarItemRow[] }[] = []
+    const byPlatform = new Map<string, (typeof groups)[number]>()
+    for (const item of items) {
+      let group = byPlatform.get(item.platform)
+      if (!group) {
+        group = { platform: item.platform, platformName: item.platformName || item.platform, items: [] }
+        byPlatform.set(item.platform, group)
+        groups.push(group)
+      }
+      group.items.push(item)
+    }
+    json(res, 200, {
+      ok: true,
+      data: {
+        date: dateParam || items[0]?.sourceDate || new Date().toISOString().slice(0, 10),
+        total: items.length,
+        platforms: groups,
+      },
+    })
+  }),
+  route('POST', '/trend-radar/items/:id/promote', async ({ res, params, session, db }) => {
+    const id = requireId(params.id, 'id')
+    const result = await promoteTrendRadarItem(db as never, { id, userId: session.userId })
+    if (!result.ok) throw new NotFoundError('热榜条目不存在或不属于当前用户')
+    json(res, 200, {
+      ok: true,
+      data: { itemId: id, articleId: result.articleId, alreadyPromoted: result.alreadyPromoted },
+    })
+  }),
+
+  // —— 洗稿流水线 ——
+  route('POST', '/pipelines/rewrite', async ({ req, res, session, db }) => {
+    const body = await readJsonBody(req)
+    const articleId = typeof body.articleId === 'string' || typeof body.articleId === 'number'
+      ? String(body.articleId)
+      : ''
+    if (!/^\d+$/.test(articleId)) {
+      throw new ValidationError('请求参数非法', { articleId: '必须为正整数' })
+    }
+    const platforms = Array.isArray(body.platforms) ? body.platforms.map(String) : []
+    if (platforms.length === 0) {
+      throw new ValidationError('请求参数非法', { platforms: 'platforms 至少一个' })
+    }
+    if (!platforms.every(isRewritePlatform)) {
+      throw new ValidationError('请求参数非法', { platforms: 'platforms 仅支持 wechat/xhs/novel' })
+    }
+    const results = await createRewriteJobs(db as never, {
+      articleId,
+      platforms: platforms as RewritePlatform[],
+      userId: session.userId,
+    })
+    json(res, 200, {
+      ok: true,
+      data: {
+        jobs: results.map(({ job, reused, enqueued, queueJobId }) => ({
+          id: job.id,
+          articleId: job.articleId,
+          kind: job.kind,
+          platform: job.platform,
+          status: job.status,
+          reused,
+          enqueued,
+          queueJobId,
+          createdAt: job.createdAt,
+        })),
+      },
+    })
+  }),
+  route('GET', '/pipelines/jobs', async ({ res, query, session, db }) => {
+    const kind = query.get('kind')
+    if (kind !== null && !JOB_KINDS.has(kind)) {
+      throw new ValidationError('kind 取值非法', { kind: '仅支持 rewrite/voiceover/video' })
+    }
+    const status = query.get('status')
+    if (status !== null && !JOB_STATUSES.has(status)) {
+      throw new ValidationError('status 取值非法', { status: '仅支持 queued/running/succeeded/failed' })
+    }
+    const result = await listPipelineJobs(db as never, {
+      userId: session.userId,
+      kind: (kind as 'rewrite' | 'voiceover' | 'video' | null) ?? undefined,
+      status: (status as 'queued' | 'running' | 'succeeded' | 'failed' | null) ?? undefined,
+      page: parsePositiveInt(query.get('page')) ?? 1,
+      pageSize: parsePositiveInt(query.get('pageSize')) ?? 20,
+    })
+    json(res, 200, { ok: true, data: result })
+  }),
+  route('POST', '/pipelines/jobs/:id/retry', async ({ res, params, session, db }) => {
+    const result = await retryPipelineJob(db as never, { id: requireId(params.id, '任务 ID'), userId: session.userId })
+    json(res, 200, { ok: true, data: { job: result.job, queueJobId: result.queueJobId } })
+  }),
+
+  // —— 草稿 ——
+  route('GET', '/drafts', async ({ res, query, session, db }) => {
+    const articleId = query.get('articleId')
+    if (articleId !== null && parsePositiveInt(articleId) === null) {
+      throw new ValidationError('articleId 取值非法', { articleId: '必须为正整数' })
+    }
+    const result = await listDrafts(db as never, {
+      userId: session.userId,
+      articleId: articleId ?? undefined,
+      platform: query.get('platform')?.trim() || undefined,
+      page: parsePositiveInt(query.get('page')) ?? 1,
+      pageSize: parsePositiveInt(query.get('pageSize')) ?? 20,
+    })
+    json(res, 200, { ok: true, data: result })
+  }),
+  route('GET', '/drafts/:id', async ({ res, params, session, db }) => {
+    const draft = await getDraftDetail(db as never, requireId(params.id, '草稿 ID'), session.userId)
+    if (!draft) throw new NotFoundError('草稿不存在')
+    json(res, 200, { ok: true, data: { draft } })
+  }),
+  route('POST', '/drafts/:id/accept', async ({ res, params, session, db }) => {
+    const id = requireId(params.id, '草稿 ID')
+    const draft = await acceptDraft(db as never, id, session.userId)
+    if (!draft) {
+      // 区分「不存在」与「状态不允许」，先读一次详情（同 Next.js 版语义）。
+      const existing = await getDraftDetail(db as never, id, session.userId)
+      if (!existing) throw new NotFoundError('草稿不存在')
+      throw new ConflictError(`当前状态（${existing.status}）不允许确认`)
+    }
+    json(res, 200, { ok: true, data: { draft } })
+  }),
+  route('GET', '/drafts/:id/export', async ({ res, params, session, db }) => {
+    const draft = await getDraftDetail(db as never, requireId(params.id, '草稿 ID'), session.userId)
+    if (!draft) throw new NotFoundError('草稿不存在')
+    const frontmatter = [
+      '---',
+      `title: "${escapeFrontmatter(draft.title)}"`,
+      `platform: "${escapeFrontmatter(draft.platform)}"`,
+      `original_title: "${escapeFrontmatter(draft.articleTitle)}"`,
+      draft.articleLink ? `original_url: "${escapeFrontmatter(draft.articleLink)}"` : null,
+      draft.similarityScore !== null ? `similarity_score: ${draft.similarityScore}` : null,
+      `originality_flag: "${draft.originalityFlag}"`,
+      `exported_at: "${new Date().toISOString()}"`,
+      '---',
+    ]
+      .filter((line): line is string => line !== null)
+      .join('\n')
+    const markdown = `${frontmatter}\n\n# ${draft.title}\n\n${draft.body}\n`
+    const data = Buffer.from(markdown, 'utf8')
+    res.writeHead(200, {
+      'content-type': 'text/markdown; charset=utf-8',
+      'content-disposition': `attachment; filename="draft-${draft.id}.md"`,
+      'content-length': String(data.length),
+    })
+    res.end(data)
+  }),
+]
+
+/** 错误 → 响应（镜像 Next.js 版 fail() 的信封与状态码）。 */
+export function sendError(res: ServerResponse, err: unknown): void {
+  if (err instanceof AppError) {
+    const error: { code: string; message: string; fields?: Record<string, string> } = {
+      code: err.code,
+      message: err.message,
+    }
+    if (err.fields) error.fields = err.fields
+    json(res, err.status, { ok: false, error })
+    return
+  }
+  json(res, 500, { ok: false, error: { code: 'internal_error', message: '服务暂时不可用，请稍后重试' } })
+}
+
+/**
+ * /s/api 业务路由总入口。返回 true 表示已处理；未命中返回 false（交给调用方 404）。
+ * 所有业务路由要求 session + 数据库；鉴权失败 401、库未连接 503。
+ */
+export async function handleBusinessApi(req: IncomingMessage, res: ServerResponse, deps: ApiDeps): Promise<boolean> {
+  const url = new URL(req.url ?? '/', 'http://localhost')
+  const sub = url.pathname.replace(/^\/s\/api/, '') || '/'
+  const method = req.method === 'POST' ? 'POST' : req.method === 'GET' ? 'GET' : null
+
+  for (const def of ROUTES) {
+    if (method !== def.method) continue
+    const m = def.re.exec(sub)
+    if (!m) continue
+
+    try {
+      const session = await deps.auth.authenticate(req)
+      if (!session) throw new UnauthorizedError('请先登录后再继续')
+      if (!deps.db) {
+        json(res, 503, { ok: false, error: { code: 'service_unavailable', message: '数据库未连接' } })
+        return true
+      }
+      const params: Record<string, string> = {}
+      def.keys.forEach((key, i) => {
+        params[key] = decodeURIComponent(m[i + 1] ?? '')
+      })
+      await def.handler({ req, res, params, query: url.searchParams, session, db: deps.db })
+    } catch (err) {
+      sendError(res, err)
+    }
+    return true
+  }
+  return false
+}
+
+/** 自检用：已翻译的 API 清单（/s/api/health 与 H5 自检页展示）。 */
+export const BUSINESS_API_LIST = ROUTES.map((r) => `${r.method} /s/api${r.pattern}`)

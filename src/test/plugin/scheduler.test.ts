@@ -77,3 +77,41 @@ describe('plugin/host/scheduler', () => {
     }
   });
 });
+
+describe('plugin/host/scheduler · 心跳幂等（K1 遗留修复）', () => {
+  it('窗口内已有心跳则跳过写入（双 apply 不双写）', async () => {
+    const recent = new Date(Date.now() - 1000).toISOString();
+    const calls: { text: string; params?: readonly unknown[] }[] = [];
+    const db = {
+      async query(text: string, params?: readonly unknown[]) {
+        calls.push({ text, params });
+        if (text.includes('SELECT created_at FROM plugin_heartbeats')) {
+          return { rows: [{ created_at: recent }] };
+        }
+        return { rows: [] };
+      },
+    };
+    const { writeHeartbeatIfDue } = await import('@/plugin/host/scheduler');
+    const wrote = await writeHeartbeatIfDue(db, 'superman', 60_000);
+    expect(wrote).toBe(false);
+    expect(calls.some((c) => c.text.includes('INSERT INTO plugin_heartbeats'))).toBe(false);
+  });
+
+  it('超过窗口才重新写入', async () => {
+    const old = new Date(Date.now() - 120_000).toISOString();
+    const calls: { text: string }[] = [];
+    const db = {
+      async query(text: string) {
+        calls.push({ text });
+        if (text.includes('SELECT created_at FROM plugin_heartbeats')) {
+          return { rows: [{ created_at: old }] };
+        }
+        return { rows: [] };
+      },
+    };
+    const { writeHeartbeatIfDue } = await import('@/plugin/host/scheduler');
+    const wrote = await writeHeartbeatIfDue(db, 'superman', 60_000);
+    expect(wrote).toBe(true);
+    expect(calls.some((c) => c.text.includes('INSERT INTO plugin_heartbeats'))).toBe(true);
+  });
+});

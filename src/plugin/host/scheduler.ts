@@ -49,6 +49,30 @@ export async function writeHeartbeat(db: Queryable, pluginName: string, detail: 
   ])
 }
 
+/**
+ * 幂等心跳：同一 intervalMs 窗口内已有一条就不重复写。
+ * 背景：DSH 的 patchReload live 在 boot 后会再 apply 一次插件，beatOnStart
+ * 导致 1 秒内两条心跳（K1 遗留问题）。写入前查最后一条的时间来兜底。
+ */
+export async function writeHeartbeatIfDue(
+  db: Queryable,
+  pluginName: string,
+  intervalMs: number,
+  detail: Record<string, unknown> = {},
+): Promise<boolean> {
+  const { rows } = await db.query(
+    "SELECT created_at FROM plugin_heartbeats WHERE plugin = $1 ORDER BY id DESC LIMIT 1",
+    [pluginName],
+  )
+  const last = rows[0]?.created_at
+  if (last instanceof Date || typeof last === 'string') {
+    const elapsed = Date.now() - new Date(last).getTime()
+    if (Number.isFinite(elapsed) && elapsed < intervalMs * 0.9) return false
+  }
+  await writeHeartbeat(db, pluginName, detail)
+  return true
+}
+
 export interface HeartbeatHandle {
   /** 停止定时器（dispose 时调用）。 */
   stop(): void
@@ -67,7 +91,7 @@ export interface HeartbeatOptions {
 export function startHeartbeat(db: Queryable, pluginName: string, options: HeartbeatOptions = {}): HeartbeatHandle {
   const intervalMs = options.intervalMs ?? 60_000
   const onError = options.onError ?? ((error: unknown) => console.error('[superman] heartbeat 写入失败:', error))
-  const beat = () => writeHeartbeat(db, pluginName, { pid: process.pid }).catch(onError)
+  const beat = () => writeHeartbeatIfDue(db, pluginName, intervalMs, { pid: process.pid }).then(() => undefined).catch(onError)
   const timer = setInterval(beat, intervalMs)
   if (typeof timer.unref === 'function') timer.unref()
   if (options.beatOnStart !== false) void beat()

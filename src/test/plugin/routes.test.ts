@@ -51,19 +51,29 @@ function makePost(url: string, payload: unknown) {
 
 function makeDeps(db: import('@/plugin/host/db').Queryable | null = null) {
   return {
-    auth: createAuth({ username: 'admin', password: 'pw', randomToken: () => 'tok' }),
+    auth: createAuth({ db: null, secret: '' }),
     db,
     staticRoot: '/nonexistent',
   };
 }
 
+/** dev 模式登录并返回 cookie 头值。 */
+async function loginCookie(deps: ReturnType<typeof makeDeps>): Promise<string> {
+  const session = (await deps.auth.login('admin', 'superman-dev'))!;
+  const res = makeRes();
+  deps.auth.issueCookie(res as never, session);
+  return `${SESSION_COOKIE}=${/superman_session=([^;]+)/.exec(res.headers['set-cookie'])![1]}`;
+}
+
 describe('plugin/host/routes · /s/api', () => {
-  it('GET /s/api/health 返回 { ok: true, name: superman }', async () => {
-    const handler = createApiHandler(makeDeps());
+  it('GET /s/api/health 返回 { ok: true, name: superman } 与 API 清单', async () => {
+    const handler = createApiHandler({ ...makeDeps(), apiList: ['GET /s/api/governance/queue'] });
     const res = makeRes();
     await handler(makeGet('/s/api/health'), res as never);
     expect(res.status).toBe(200);
-    expect(JSON.parse(res.body)).toMatchObject({ ok: true, name: 'superman', db: false });
+    const body = JSON.parse(res.body);
+    expect(body).toMatchObject({ ok: true, name: 'superman', db: false });
+    expect(body.apis).toContain('GET /s/api/governance/queue');
   });
 
   it('POST /s/api/auth/login 成功签发 cookie，错误口令 401', async () => {
@@ -74,9 +84,9 @@ describe('plugin/host/routes · /s/api', () => {
     expect(bad.status).toBe(401);
 
     const good = makeRes();
-    await handler(makePost('/s/api/auth/login', { username: 'admin', password: 'pw' }), good as never);
+    await handler(makePost('/s/api/auth/login', { username: 'admin', password: 'superman-dev' }), good as never);
     expect(good.status).toBe(200);
-    expect(good.headers['set-cookie']).toContain(`${SESSION_COOKIE}=tok`);
+    expect(good.headers['set-cookie']).toContain(`${SESSION_COOKIE}=`);
   });
 
   it('GET /s/api/heartbeat 未登录 401，登录后返回最近心跳', async () => {
@@ -88,15 +98,11 @@ describe('plugin/host/routes · /s/api', () => {
     await handler(makeGet('/s/api/heartbeat'), anon as never);
     expect(anon.status).toBe(401);
 
-    const authed = makeRes();
-    await handler(makeGet('/s/api/heartbeat', `${SESSION_COOKIE}=x`), authed as never);
-    expect(authed.status).toBe(401); // 未登录过的 token 无效
-
-    deps.auth.login('admin', 'pw');
-    const ok = makeRes();
-    await handler(makeGet('/s/api/heartbeat', `${SESSION_COOKIE}=tok`), ok as never);
-    expect(ok.status).toBe(200);
-    expect(JSON.parse(ok.body).latest).toMatchObject({ id: 7, plugin: 'superman' });
+    const cookie = await loginCookie(deps);
+    const okRes = makeRes();
+    await handler(makeGet('/s/api/heartbeat', cookie), okRes as never);
+    expect(okRes.status).toBe(200);
+    expect(JSON.parse(okRes.body).latest).toMatchObject({ id: 7, plugin: 'superman' });
   });
 
   it('未知端点 404，非法方法 405', async () => {

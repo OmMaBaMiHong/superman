@@ -1,10 +1,14 @@
-# superman bundle patch：挂载 host 半（/s/api 应用 API · /s/app H5 · 心跳调度 · agent 工具）。
+# superman bundle patch：挂载 host 半（/s/api 应用 API · /s/app H5 · 心跳/调度 · agent 工具）。
 # client 半由 package.json 的 dsh.client 声明，被 client-modules 扫描进 window.__DSH_BOOT__。
 #
 # 可覆盖配置：
 #   databaseUrl: Postgres 连接串（缺省读 SUPERMAN_DATABASE_URL / DATABASE_URL 环境变量，
 #                再缺省 postgresql://feedfuse:feedfuse@127.0.0.1:55432/feedfuse）
 #   heartbeatIntervalMs: 心跳间隔毫秒（缺省 60000，0 = 关闭）
+#   schedulerEnabled: 调度器总开关，默认 false！与 Next.js worker 互斥——
+#                迁移期只开一边：Next.js worker 在跑就保持 false；切到插件调度
+#                时先停 worker（pnpm worker:dev 那个进程）再置 true。
+#                也可用环境变量 SUPERMAN_SCHEDULER_ENABLED=true。
 - insert:
     - id: superman
       name: 'superman'

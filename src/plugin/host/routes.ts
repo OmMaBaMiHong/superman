@@ -16,6 +16,7 @@ import { extname, join, normalize, resolve, sep } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Auth } from './auth.js'
 import type { Queryable } from './db.js'
+import { handleBusinessApi } from './api.js'
 
 export const PLUGIN_NAME = 'superman'
 
@@ -31,6 +32,8 @@ export interface RoutesDeps {
   /** H5 静态产物根目录（绝对路径）。 */
   staticRoot: string
   pluginName?: string
+  /** 自检清单：已翻译的业务 API（health 端点与 H5 页展示）。 */
+  apiList?: readonly string[]
 }
 
 export function json(res: ServerResponse, status: number, body: unknown): void {
@@ -83,28 +86,30 @@ export function createApiHandler(deps: RoutesDeps) {
 
       if (req.method === 'POST' && op === 'auth/login') {
         const body = await readJsonBody(req)
-        const session = deps.auth.login(String(body.username ?? ''), String(body.password ?? ''))
+        const session = await deps.auth.login(String(body.username ?? ''), String(body.password ?? ''))
         if (!session) return json(res, 401, { ok: false, error: '用户名或密码错误' })
         deps.auth.issueCookie(res, session)
-        return json(res, 200, { ok: true, username: session.username })
+        return json(res, 200, { ok: true, username: session.username ?? session.userId })
       }
       if (req.method === 'POST' && op === 'auth/logout') {
-        const session = deps.auth.authenticate(req)
-        if (session) deps.auth.revoke(session.token)
+        const session = await deps.auth.authenticate(req)
+        if (session?.token) deps.auth.revoke(session.token)
         deps.auth.clearCookie(res)
         return json(res, 200, { ok: true })
       }
+      // 业务 API（治理/热点/洗稿/草稿，K2 批次 2）：全部要求 session，先于此处的方法门。
+      if (await handleBusinessApi(req, res, deps)) return
       if (req.method !== 'GET') return json(res, 405, { ok: false, error: '仅支持 GET/POST' })
 
       if (op === 'health') {
-        return json(res, 200, { ok: true, name: pluginName, db: deps.db !== null })
+        return json(res, 200, { ok: true, name: pluginName, db: deps.db !== null, apis: deps.apiList ?? [] })
       }
       if (op === 'auth/session') {
-        const session = deps.auth.authenticate(req)
+        const session = await deps.auth.authenticate(req)
         return json(res, 200, { ok: true, authenticated: session !== null, username: session?.username ?? null })
       }
       if (op === 'heartbeat') {
-        const session = deps.auth.authenticate(req)
+        const session = await deps.auth.authenticate(req)
         if (!session) return json(res, 401, { ok: false, error: '未登录' })
         if (!deps.db) return json(res, 503, { ok: false, error: '数据库未连接' })
         const r = await deps.db.query(
@@ -112,6 +117,8 @@ export function createApiHandler(deps: RoutesDeps) {
         )
         return json(res, 200, { ok: true, latest: r.rows[0] ?? null })
       }
+      // 业务 API（治理/热点/洗稿/草稿，K2 批次 2）：全部要求 session。
+      if (await handleBusinessApi(req, res, deps)) return
       return json(res, 404, { ok: false, error: `未知端点 ${op}` })
     } catch (error) {
       return json(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) })

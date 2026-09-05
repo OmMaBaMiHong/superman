@@ -1,47 +1,55 @@
 /**
- * Superman DSH 插件 · 自有 session 鉴权骨架。
+ * Superman DSH 插件 · session 鉴权（K2 版：接 core 用户表）。
  *
- * DSH 的 webserver 不管应用鉴权（浏览器 token 围栏只护 /api 桥与前端 dist），
- * /s/* 公开面由本模块自己守。K1 只做硬编码 dev 登录：
- *   用户名 admin，密码取环境变量 SUPERMAN_DEV_PASSWORD，缺省 'superman-dev'。
- * TODO(K2): 接 src/core 用户表（现 Next.js 侧 users 域）做真正的口令校验，
- *           session 持久化到 Postgres，并加限流。
+ * 与 Next.js 版共用同一套令牌格式（core/auth/sessionToken）与签名密钥
+ * （app_settings.auth_session_secret），但插件用自己的 cookie 名
+ * `superman_session`（Path=/s），两套会话互不顶替。
+ *
+ * 登录校验链：users 表口令（scrypt，core/auth/password）→ 初始管理员
+ * 环境变量兜底（SUPERMAN_DEV_PASSWORD，仅 id=1 且 password_hash 为空时，
+ * 验证通过即持久化 hash，语义同 Next.js 的 AUTH_INITIAL_PASSWORD）。
+ * 数据库未连接时退化为 K1 的硬编码 dev 登录（admin / SUPERMAN_DEV_PASSWORD /
+ * 'superman-dev'），保证骨架可用。
  */
 import { randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { findUserByUsername, getUserById, persistInitialAdminPassword } from '@/core/auth/usersRepo'
+import { hashPassword, verifyPassword, verifyPlainPassword } from '@/core/auth/password'
+import {
+  createSessionToken,
+  verifySessionToken,
+  type ApiSession,
+} from '@/core/auth/sessionToken'
+import type { Queryable } from './db.js'
 
 export const SESSION_COOKIE = 'superman_session'
-const DEFAULT_TTL_MS = 7 * 24 * 3600_000
+const DEFAULT_TTL_SECONDS = 30 * 24 * 3600
 
-export interface Session {
-  token: string
-  username: string
-  createdAt: number
+export interface Session extends ApiSession {
+  /** 兼容 K1 形状：username 仅供展示。 */
+  username?: string
+  /** 仅 dev（无数据库）模式持有的服务端 token。 */
+  token?: string
 }
 
 export interface Auth {
-  /** 校验用户名口令，成功则签发 session 并返回 token；失败返回 null。 */
-  login(username: string, password: string): Session | null
-  /** 从请求 cookie 解析 session；无效或过期返回 null。 */
-  authenticate(req: Pick<IncomingMessage, 'headers'>): Session | null
-  /** 把 session 写进响应 cookie。 */
+  /** 校验用户名口令，成功签发 session；失败返回 null。 */
+  login(username: string, password: string): Promise<Session | null>
+  /** 从请求 cookie 解析并校验 session（含 users 表状态复核）；无效返回 null。 */
+  authenticate(req: Pick<IncomingMessage, 'headers'>): Promise<Session | null>
   issueCookie(res: ServerResponse, session: Session): void
-  /** 清除 session cookie（登出）。 */
   clearCookie(res: ServerResponse): void
-  /** 主动失效一个 token。 */
+  /** 无状态令牌无需服务端注销；保留接口形状。 */
   revoke(token: string): void
 }
 
 export interface AuthOptions {
-  /** dev 登录用户名，缺省 admin。 */
-  username?: string
-  /** dev 登录密码，缺省读 SUPERMAN_DEV_PASSWORD，再缺省 'superman-dev'。 */
-  password?: string
-  sessionTtlMs?: number
-  /** 注入时钟便于测试。 */
+  /** 数据库句柄；null 时退化 dev 模式。 */
+  db: Queryable | null
+  /** HMAC 密钥（app_settings.auth_session_secret）。 */
+  secret: string
+  sessionTtlSeconds?: number
   now?: () => number
-  /** 注入随机源便于测试。 */
-  randomToken?: () => string
 }
 
 export function parseCookies(header: string | undefined): Record<string, string> {
@@ -55,43 +63,94 @@ export function parseCookies(header: string | undefined): Record<string, string>
   return out
 }
 
-export function createAuth(options: AuthOptions = {}): Auth {
-  const username = options.username || 'admin'
-  const password = options.password || process.env.SUPERMAN_DEV_PASSWORD || 'superman-dev'
-  const ttl = options.sessionTtlMs ?? DEFAULT_TTL_MS
+export function createAuth(options: AuthOptions): Auth {
+  const ttlSeconds = options.sessionTtlSeconds ?? DEFAULT_TTL_SECONDS
   const now = options.now ?? (() => Date.now())
-  const randomToken = options.randomToken ?? (() => randomBytes(24).toString('base64url'))
-  const sessions = new Map<string, Session>()
+  // 内存 dev 会话只在无数据库模式使用（token → session）。
+  const devSessions = new Map<string, Session>()
+
+  async function loginWithDb(username: string, password: string): Promise<Session | null> {
+    const db = options.db
+    if (!db) return null
+    const user = await findUserByUsername(db as never, username)
+    if (!user || user.status !== 'active') return null
+
+    if (user.passwordHash.trim()) {
+      if (!verifyPassword(password, user.passwordHash)) return null
+    } else {
+      // 初始管理员兜底：仅 id=1 且尚未设口令时走环境变量，验证通过即落 hash。
+      if (user.id !== '1') return null
+      const envPassword = process.env.SUPERMAN_DEV_PASSWORD?.trim()
+      if (!envPassword || !verifyPlainPassword(password, envPassword)) return null
+      await persistInitialAdminPassword(db as never, {
+        userId: user.id,
+        passwordHash: hashPassword(password),
+      })
+    }
+    return { userId: user.id, role: user.role, sessionVersion: user.sessionVersion, username: user.username }
+  }
+
+  function loginDevFallback(username: string, password: string): Session | null {
+    const devPassword = process.env.SUPERMAN_DEV_PASSWORD || 'superman-dev'
+    if (username !== 'admin' || password !== devPassword) return null
+    const token = `dev-${randomBytes(18).toString('base64url')}`
+    const session: Session = { userId: '1', role: 'admin', sessionVersion: 1, username: 'admin', token }
+    devSessions.set(token, session)
+    return session
+  }
 
   return {
-    login(user, pass) {
-      if (user !== username || pass !== password) return null
-      const session: Session = { token: randomToken(), username: user, createdAt: now() }
-      sessions.set(session.token, session)
-      return session
-    },
-    authenticate(req) {
-      const token = parseCookies(req.headers.cookie)[SESSION_COOKIE]
-      if (!token) return null
-      const session = sessions.get(token)
-      if (!session) return null
-      if (now() - session.createdAt > ttl) {
-        sessions.delete(token)
-        return null
+    async login(username, password) {
+      if (options.db) {
+        return loginWithDb(username, password)
       }
-      return session
+      const dev = loginDevFallback(username, password)
+      return dev
+    },
+    async authenticate(req) {
+      const raw = parseCookies(req.headers.cookie)[SESSION_COOKIE]
+      if (!raw) return null
+      const token = decodeURIComponent(raw)
+
+      if (options.db) {
+        if (!options.secret.trim()) return null
+        const payload = verifySessionToken({ token, secret: options.secret, nowMs: now() })
+        if (!payload) return null
+        const user = await getUserById(options.db as never, payload.userId)
+        if (
+          !user
+          || user.status !== 'active'
+          || user.role !== payload.role
+          || user.sessionVersion !== payload.sessionVersion
+        ) {
+          return null
+        }
+        return { userId: user.id, role: user.role, sessionVersion: user.sessionVersion, username: user.username }
+      }
+
+      return devSessions.get(token) ?? null
     },
     issueCookie(res, session) {
+      const token = options.db
+        ? createSessionToken({
+            secret: options.secret,
+            userId: session.userId,
+            role: session.role,
+            sessionVersion: session.sessionVersion,
+            nowMs: now(),
+            maxAgeSeconds: ttlSeconds,
+          })
+        : session.token ?? ''
       res.setHeader(
         'set-cookie',
-        `${SESSION_COOKIE}=${session.token}; Path=/s; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(ttl / 1000)}`,
+        `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/s; HttpOnly; SameSite=Lax; Max-Age=${ttlSeconds}`,
       )
     },
     clearCookie(res) {
-      res.setHeader('set-cookie', `${SESSION_COOKIE}=; Path=/s; HttpOnly; Max-Age=0`)
+      res.setHeader('set-cookie', `${SESSION_COOKIE}=; Path=/s; HttpOnly; SameSite=Lax; Max-Age=0`)
     },
     revoke(token) {
-      sessions.delete(token)
+      devSessions.delete(token)
     },
   }
 }

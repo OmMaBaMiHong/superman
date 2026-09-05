@@ -37,6 +37,7 @@
   <div class="row"><span class="dim">/s/api/health</span><span id="health">…</span></div>
   <div class="row"><span class="dim">会话</span><span id="session">…</span></div>
   <div class="row"><span class="dim">最近心跳</span><span id="heartbeat" class="dim">需登录</span></div>
+  <div id="apis" class="dim" style="font-size:11px;margin-top:14px;line-height:1.8"></div>
   <div id="login">
     <input id="u" placeholder="用户名" autocomplete="username" />
     <input id="p" type="password" placeholder="密码" autocomplete="current-password" />
@@ -50,6 +51,10 @@
     fetch('/s/api/health').then(function (r) { return r.json() }).then(function (j) {
       $('health').textContent = j.ok ? 'ok · ' + j.name + (j.db ? ' · db✓' : ' · db✗') : 'error'
       $('health').className = j.ok ? 'ok' : 'bad'
+      if (j.ok && j.apis && j.apis.length) {
+        $('apis').innerHTML = '<b>K2 已通 API（' + j.apis.length + ' 条）：</b><br>' +
+          j.apis.map(function (a) { return '&nbsp;&nbsp;' + a }).join('<br>')
+      }
     }).catch(function () { $('health').textContent = 'unreachable'; $('health').className = 'bad' })
   }
   function tickSession() {
