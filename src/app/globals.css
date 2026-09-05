@@ -1,4 +1,9 @@
 @import "tailwindcss";
+/* H5（vite）构建的 content 扫描基准是 CSS 文件所在目录，显式登记共享组件源码目录。
+   对 Next 版为增量声明（既有扫描不受影响）。 */
+@source "../features";
+@source "../components";
+@source "../h5";
 @plugin "tailwindcss-animate";
 @plugin "@tailwindcss/typography";
 /* 双主题跟随系统：dark: 工具类与 CSS 变量都由 prefers-color-scheme 驱动，不依赖手动开关。 */

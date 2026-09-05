@@ -67,6 +67,17 @@ const api = ky.create({
   throwHttpErrors: false,
 });
 
+/* ── 宿主路径配置（K3：同一 apiClient 同时伺服 Next 版与 DSH 插件 H5 版）──
+   Next 版：/api/*；插件 H5 版：/s/api/*、登录页 '#/login'。默认 Next 行为不变。 */
+let apiPathPrefix = '';
+let loginRedirectPath = '/login';
+
+/** H5 宿主启动时调用一次；不传/缺省保持 Next 版行为。 */
+export function configureApiClientPaths(input: { apiPrefix?: string; loginPath?: string }): void {
+  if (typeof input.apiPrefix === 'string') apiPathPrefix = input.apiPrefix.replace(/\/$/, '');
+  if (typeof input.loginPath === 'string') loginRedirectPath = input.loginPath;
+}
+
 function getBaseUrl(): string {
   if (typeof window !== 'undefined' && window.location?.origin) {
     return window.location.origin;
@@ -75,7 +86,7 @@ function getBaseUrl(): string {
 }
 
 function toAbsoluteUrl(path: string): string {
-  return new URL(path, getBaseUrl()).toString();
+  return new URL(apiPathPrefix + path, getBaseUrl()).toString();
 }
 
 function throwTransportApiError(
@@ -111,12 +122,13 @@ function redirectToLoginIfNeeded(options?: RequestApiOptions) {
   if (
     options?.redirectOnUnauthorized === false ||
     typeof window === 'undefined' ||
-    window.location.pathname === '/login'
+    window.location.pathname === loginRedirectPath ||
+    window.location.href.endsWith(loginRedirectPath)
   ) {
     return;
   }
 
-  window.location.assign('/login');
+  window.location.assign(loginRedirectPath);
 }
 
 function parseContentDispositionFileName(value: string | null): string | null {
