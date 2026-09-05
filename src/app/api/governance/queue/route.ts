@@ -42,10 +42,16 @@ export async function GET(request: Request) {
       throw new ValidationError('keyword 取值非法', { keyword: '最长 120 字符' });
     }
 
+    const direction = url.searchParams.get('direction')?.trim() || undefined;
+    if (direction && direction.length > 32) {
+      throw new ValidationError('direction 取值非法', { direction: '最长 32 字符' });
+    }
+
     const result = await listGovernanceQueue(getPool(), {
       userId: session.userId,
       statuses,
       categoryId: categoryId ?? undefined,
+      direction,
       keyword,
       page: parsePositiveInt(url.searchParams.get('page')) ?? 1,
       pageSize: parsePositiveInt(url.searchParams.get('pageSize')) ?? 20,

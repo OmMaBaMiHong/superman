@@ -10,6 +10,13 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { AppError, ConflictError, NotFoundError, UnauthorizedError, ValidationError } from '@/server/infra/http/errors'
 import { isGovernanceStatus, type GovernanceStatus } from '@/core/governance/stateMachine'
 import {
+  createDirectionStrategy,
+  deleteDirectionStrategy,
+  listDirectionStrategies,
+  updateDirectionStrategy,
+  DIRECTION_KEY_PATTERN,
+} from '@/core/governance/directions'
+import {
   getGovernanceItemDetail,
   getGovernanceStats,
   listGovernanceQueue,
@@ -66,7 +73,7 @@ interface RouteContext {
 type RouteHandler = (ctx: RouteContext) => Promise<void>
 
 interface RouteDef {
-  method: 'GET' | 'POST'
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE'
   pattern: string
   re: RegExp
   keys: string[]
@@ -135,15 +142,93 @@ const ROUTES: RouteDef[] = [
     if (keyword && keyword.length > 120) {
       throw new ValidationError('keyword 取值非法', { keyword: '最长 120 字符' })
     }
+    const direction = query.get('direction')?.trim() || undefined
+    if (direction && direction.length > 32) {
+      throw new ValidationError('direction 取值非法', { direction: '最长 32 字符' })
+    }
     const result = await listGovernanceQueue(db as never, {
       userId: session.userId,
       statuses,
       categoryId: categoryId ?? undefined,
+      direction,
       keyword,
       page: parsePositiveInt(query.get('page')) ?? 1,
       pageSize: parsePositiveInt(query.get('pageSize')) ?? 20,
     })
     json(res, 200, { ok: true, data: result })
+  }),
+
+  // —— 方向策略模板（治理 v2 / P2b）——
+  route('GET', '/directions', async ({ res, session, db }) => {
+    const items = await listDirectionStrategies(db as never, { userId: session.userId, enabledOnly: true })
+    json(res, 200, { ok: true, data: { items } })
+  }),
+  route('GET', '/directions/all', async ({ res, session, db }) => {
+    const items = await listDirectionStrategies(db as never, { userId: session.userId })
+    json(res, 200, { ok: true, data: { items } })
+  }),
+  route('POST', '/directions', async ({ req, res, session, db }) => {
+    const body = await readJsonBody(req)
+    const key = typeof body.key === 'string' ? body.key.trim() : ''
+    if (!DIRECTION_KEY_PATTERN.test(key)) {
+      throw new ValidationError('请求参数非法', { key: '小写字母开头，仅含小写字母/数字/下划线，最长 32' })
+    }
+    const name = typeof body.name === 'string' ? body.name.trim() : ''
+    if (!name) throw new ValidationError('请求参数非法', { name: '名称不能为空' })
+    const quotaWeight = typeof body.quotaWeight === 'number' ? body.quotaWeight : 0
+    if (!Number.isInteger(quotaWeight) || quotaWeight < 0 || quotaWeight > 100) {
+      throw new ValidationError('请求参数非法', { quotaWeight: '0-100 的整数' })
+    }
+    try {
+      const item = await createDirectionStrategy(db as never, {
+        key,
+        name,
+        color: typeof body.color === 'string' ? body.color.trim() : undefined,
+        icon: typeof body.icon === 'string' ? body.icon.trim() : undefined,
+        keywordsDsl: typeof body.keywordsDsl === 'string' ? body.keywordsDsl : undefined,
+        aiHint: typeof body.aiHint === 'string' ? body.aiHint : undefined,
+        quotaWeight,
+        sort: typeof body.sort === 'number' && Number.isInteger(body.sort) ? body.sort : undefined,
+        userId: session.userId,
+      })
+      json(res, 200, { ok: true, data: { item } })
+    } catch (err) {
+      if (typeof err === 'object' && err !== null && (err as { code?: unknown }).code === '23505') {
+        throw new ConflictError('该 key 已存在', { key: '方向标识重复' })
+      }
+      throw err
+    }
+  }),
+  route('PUT', '/directions/:key', async ({ req, res, params, session, db }) => {
+    const key = params.key ?? ''
+    if (!DIRECTION_KEY_PATTERN.test(key)) {
+      throw new ValidationError('方向标识非法', { key: '小写字母开头，仅含小写字母/数字/下划线' })
+    }
+    const body = await readJsonBody(req)
+    const patch: Parameters<typeof updateDirectionStrategy>[2] = { userId: session.userId }
+    if (typeof body.name === 'string' && body.name.trim()) patch.name = body.name.trim()
+    if (typeof body.color === 'string') patch.color = body.color.trim()
+    if (typeof body.icon === 'string') patch.icon = body.icon.trim()
+    if (typeof body.keywordsDsl === 'string') patch.keywordsDsl = body.keywordsDsl
+    if (typeof body.aiHint === 'string') patch.aiHint = body.aiHint
+    if (typeof body.quotaWeight === 'number') {
+      if (!Number.isInteger(body.quotaWeight) || body.quotaWeight < 0 || body.quotaWeight > 100) {
+        throw new ValidationError('请求参数非法', { quotaWeight: '0-100 的整数' })
+      }
+      patch.quotaWeight = body.quotaWeight
+    }
+    if (typeof body.enabled === 'boolean') patch.enabled = body.enabled
+    if (typeof body.sort === 'number' && Number.isInteger(body.sort)) patch.sort = body.sort
+    const item = await updateDirectionStrategy(db as never, key, patch)
+    if (!item) throw new NotFoundError('方向模板不存在或没有可更新字段')
+    json(res, 200, { ok: true, data: { item } })
+  }),
+  route('DELETE', '/directions/:key', async ({ res, params, session, db }) => {
+    const key = params.key ?? ''
+    const result = await deleteDirectionStrategy(db as never, key, session.userId)
+    if (result === 'not_found') throw new NotFoundError('方向模板不存在')
+    if (result === 'builtin') throw new ConflictError('内置方向模板可改不可删', { key: 'builtin 模板' })
+    json(res, 200, { ok: true, data: { deleted: true, key } })
   }),
   route('GET', '/governance/stats', async ({ res, session, db }) => {
     const stats = await getGovernanceStats(db as never, session.userId)
@@ -568,7 +653,9 @@ export function sendError(res: ServerResponse, err: unknown): void {
 export async function handleBusinessApi(req: IncomingMessage, res: ServerResponse, deps: ApiDeps): Promise<boolean> {
   const url = new URL(req.url ?? '/', 'http://localhost')
   const sub = url.pathname.replace(/^\/s\/api/, '') || '/'
-  const method = req.method === 'POST' ? 'POST' : req.method === 'GET' ? 'GET' : null
+  const method = ['GET', 'POST', 'PUT', 'DELETE'].includes(req.method ?? '')
+    ? (req.method as RouteDef['method'])
+    : null
 
   for (const def of ROUTES) {
     if (method !== def.method) continue
