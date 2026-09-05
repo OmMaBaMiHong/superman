@@ -1,5 +1,20 @@
 import type { Metadata, Viewport } from 'next';
+import { Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
+
+// 阅读正文：Inter；UI chrome / 标签 / 数字：JetBrains Mono（300-700）。
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-inter',
+  display: 'swap',
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ['latin'],
+  weight: ['300', '400', '500', '600', '700'],
+  variable: '--font-jetbrains-mono',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: 'Superman',
@@ -19,16 +34,15 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   themeColor: [
     // 浏览器 UI 主题色：Next.js metadata 要求字面量，无法引用 CSS 变量（token 铁律的合理豁免）。
-    // 取值必须与 globals.css 的 --color-background 同步：
-    // 浅色 hsl(210 20% 98%) ≈ #f9fafb；深色 hsl(240 15% 3%) ≈ #070709（旧靛蓝 #111a30 已废弃）。
-    { media: '(prefers-color-scheme: light)', color: '#f9fafb' },
-    { media: '(prefers-color-scheme: dark)', color: '#070709' },
+    // 取值必须与 globals.css 的 --color-background 同步：指挥台深色基底 #050810。
+    { media: '(prefers-color-scheme: light)', color: '#050810' },
+    { media: '(prefers-color-scheme: dark)', color: '#050810' },
   ],
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="zh-CN">
+    <html lang="zh-CN" className={`${inter.variable} ${jetbrainsMono.variable}`}>
       <body>
         <a
           href="#main-content"

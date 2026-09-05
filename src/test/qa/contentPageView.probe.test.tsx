@@ -101,15 +101,13 @@ describe('QA probe: 导航一致性', () => {
 });
 
 describe('QA probe: 玻璃 token 契约（独立复核 globals.css）', () => {
-  it('主色浅/深均为 hsl(152 60% 50%)，ring 同步', () => {
+  it('主色为 cyan #22d3ee，ring 同步（深色单主题，定义于 @theme default）', () => {
     const css = readFileSync('src/app/globals.css', 'utf-8');
-    // 浅色主色在 Tailwind 4 @theme default 块；深色主色在 .dark 块。
-    // 两处都必须为 hsl(152 60% 50%)。
-    expect(css.match(/--color-primary: hsl\(152 60% 50%\)/g)).toHaveLength(2);
-    expect(css.match(/--color-ring: hsl\(152 60% 50%\)/g)).toHaveLength(2);
-    const darkMatches = css.match(/\.dark\s*\{([\s\S]*?)\}/)?.[1] ?? '';
-    expect(darkMatches).toContain('--color-primary: hsl(152 60% 50%)');
-    expect(darkMatches).toContain('--color-ring: hsl(152 60% 50%)');
+    // 指挥台深色单主题：主色/ring 只在 @theme default 定义一次，.dark 不再覆盖。
+    expect(css.match(/--color-primary: #22d3ee/g)).toHaveLength(1);
+    expect(css.match(/--color-ring: #22d3ee/g)).toHaveLength(1);
+    expect(css).not.toContain('--color-primary: hsl(152 60% 50%)');
+    expect(css).not.toContain('--color-ring: hsl(152 60% 50%)');
   });
 
   it('.glass-surface 含 backdrop-filter + -webkit- 前缀 + ::before 高光线，--glass-blur 16px', () => {
@@ -122,13 +120,14 @@ describe('QA probe: 玻璃 token 契约（独立复核 globals.css）', () => {
     expect(css).toContain('--glass-saturate: 140%');
   });
 
-  it('body 光斑背景：浅色 + 深色均用 emerald 系', () => {
+  it('body 光斑背景：cyan 系纵深，透明度 ≤0.03', () => {
     const css = readFileSync('src/app/globals.css', 'utf-8');
-    expect(css).toContain('rgb(16 185 129 / 0.14)');
-    expect(css).toContain('rgb(16 185 129 / 0.08)');
-    expect(css).toContain('rgb(13 148 136 / 0.1)');
-    expect(css).toContain('rgb(5 150 105 / 0.08)');
+    expect(css).toContain('rgb(34 211 238 / 0.03)');
+    expect(css).toContain('rgb(34 211 238 / 0.02)');
     expect(css).toContain('background-attachment: fixed;');
+    // 旧 emerald 光斑不得回归。
+    expect(css).not.toContain('rgb(16 185 129 / 0.14)');
+    expect(css).not.toContain('rgb(13 148 136 / 0.1)');
   });
 
   it('GlassCard 交互态用 --shadow-glass-hover token 而非硬编码色', () => {

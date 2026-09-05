@@ -18,14 +18,14 @@ describe('layout metadata contract', () => {
   it('aligns viewport themeColor with the semantic page background', () => {
     const source = readFileSync('src/app/layout.tsx', 'utf-8');
 
-    // themeColor 必须与 globals.css 的 --color-background 同步：
-    // 浅色 hsl(210 20% 98%) ≈ #f9fafb，深色 hsl(240 15% 3%) ≈ #070709。
-    expect(source).toContain("color: '#f9fafb'");
-    expect(source).toContain("color: '#070709'");
+    // themeColor 必须与 globals.css 的 --color-background 同步：指挥台深色基底 #050810。
+    expect(source.match(/color: '#050810'/g)).toHaveLength(2);
     expect(source).not.toContain("color: '#ffffff'");
     expect(source).not.toContain("color: '#f8f6f1'");
     expect(source).not.toContain("color: '#020817'");
-    // 旧靛蓝配色不得回归（用户铁律：主色青绿，背景不带蓝调）。
+    expect(source).not.toContain("color: '#f9fafb'");
+    expect(source).not.toContain("color: '#070709'");
+    // 旧靛蓝配色不得回归（指挥台铁律：主色 cyan，深色基底）。
     expect(source).not.toContain("color: '#111a30'");
     expect(source).not.toContain("color: '#f6f7f8'");
   });

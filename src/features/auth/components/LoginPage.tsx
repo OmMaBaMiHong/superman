@@ -41,19 +41,33 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top,color-mix(in_oklab,var(--color-primary)_18%,transparent),transparent_42%),linear-gradient(180deg,var(--color-background)_0%,var(--color-muted)_100%)] text-foreground">
-      <div className="absolute inset-0 bg-[linear-gradient(135deg,var(--glass-bg-light),transparent_32%,color-mix(in_oklab,var(--color-foreground)_6%,transparent))]" />
-      <div className="absolute left-1/2 top-[18%] h-40 w-40 -translate-x-1/2 rounded-full bg-[radial-gradient(circle,color-mix(in_oklab,var(--color-primary)_22%,transparent),transparent)] blur-3xl" />
+    <div className="relative min-h-screen overflow-hidden bg-background text-foreground">
+      {/* 极轻微的 cyan 纵深光斑 + 网格纹理，营造指挥台氛围（透明度 ≤0.03） */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 bg-[radial-gradient(circle_at_50%_-10%,rgb(34_211_238/0.03),transparent_45%)]"
+      />
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 bg-[linear-gradient(to_right,rgb(26_37_64/0.35)_1px,transparent_1px),linear-gradient(to_bottom,rgb(26_37_64/0.35)_1px,transparent_1px)] bg-[size:48px_48px] [mask-image:radial-gradient(ellipse_at_center,black_20%,transparent_75%)]"
+      />
+
       <div className="relative mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 py-12">
-        <section className="rounded-[30px] border border-[var(--glass-highlight)] bg-card/85 p-6 shadow-[var(--shadow-glass)] backdrop-blur-xl sm:p-8">
-          <div className="space-y-5">
-            <div className="space-y-3 text-center">
-              <span className="inline-flex rounded-full border border-primary/15 bg-card/70 px-3 py-1 text-[11px] font-semibold tracking-[0.24em] text-primary">
-                FEEDFUSE
-              </span>
+        <section className="rounded-lg border border-border bg-card p-6 shadow-[var(--shadow-glass)] sm:p-8">
+          <div className="space-y-6">
+            <div className="space-y-4 text-center">
+              <div className="flex items-center justify-center gap-2">
+                <span
+                  aria-hidden="true"
+                  className="gov-pulse-dot h-1.5 w-1.5 rounded-full bg-primary"
+                />
+                <span className="font-mono text-[11px] font-medium uppercase tracking-[0.22em] text-primary">
+                  Superman
+                </span>
+              </div>
               <div className="space-y-2">
-                <h1 className="text-3xl font-semibold tracking-[-0.05em] text-foreground sm:text-[2.1rem]">
-                  欢迎回来
+                <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-[1.75rem]">
+                  情报指挥中心
                 </h1>
                 <p className="text-sm text-muted-foreground">
                   登录后继续你的 RSS 阅读与管理。
@@ -63,7 +77,9 @@ export default function LoginPage() {
 
             <form className="space-y-5" onSubmit={handleSubmit}>
               <div className="space-y-2">
-                <Label id={usernameLabelId}>用户名</Label>
+                <Label id={usernameLabelId} className="font-mono text-xs text-muted-foreground">
+                  用户名
+                </Label>
                 <Input
                   id="login-username"
                   type="text"
@@ -77,7 +93,9 @@ export default function LoginPage() {
               </div>
 
               <div className="space-y-2">
-                <Label id={passwordLabelId}>密码</Label>
+                <Label id={passwordLabelId} className="font-mono text-xs text-muted-foreground">
+                  密码
+                </Label>
                 <Input
                   id="login-password"
                   type="password"
@@ -91,19 +109,19 @@ export default function LoginPage() {
               </div>
 
               {errorMessage ? (
-                <p className="rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-sm text-error">
+                <p className="rounded-md border border-error/30 bg-error/10 px-3 py-2 font-mono text-xs text-error">
                   {errorMessage}
                 </p>
               ) : null}
 
-              <Button type="submit" className="h-10 w-full" disabled={isPending}>
+              <Button type="submit" className="h-10 w-full font-mono" disabled={isPending}>
                 {isPending ? '登录中…' : '进入 Superman'}
               </Button>
             </form>
 
-            <div className="flex items-center justify-center gap-2 pt-1 text-xs text-muted-foreground">
-              <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-              <span>Private workspace</span>
+            <div className="flex items-center justify-center gap-2 border-t border-border/60 pt-4 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              <span className="h-1 w-1 rounded-full bg-primary/70" />
+              <span>Mission Control · Private Workspace</span>
             </div>
           </div>
         </section>

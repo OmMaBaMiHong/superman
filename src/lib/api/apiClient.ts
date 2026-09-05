@@ -2156,3 +2156,117 @@ export async function removeArticleFromBoard(
     options,
   );
 }
+
+/* ── 审批台（治理层）── */
+
+export type GovernanceStatus = 'candidate' | 'pending' | 'archived' | 'rejected' | 'used';
+
+export interface GovernanceQueueItem {
+  id: string;
+  title: string;
+  summary: string | null;
+  aiReason: string | null;
+  qualityScore: number | null;
+  feedId: string;
+  feedTitle: string;
+  categoryId: string | null;
+  categoryTitle: string | null;
+  publishedAt: string | null;
+  sourceUrl: string | null;
+  governanceStatus: GovernanceStatus;
+  redraftCount: number;
+}
+
+export interface GovernanceQueueResult {
+  items: GovernanceQueueItem[];
+  total: number;
+}
+
+export interface GovernanceStats {
+  todayPending: number;
+  todayArchived: number;
+  todayFetchSucceeded: number;
+  todayFetchFailed: number;
+  queueSize: number;
+}
+
+export async function getGovernanceQueue(
+  input?: {
+    statuses?: GovernanceStatus[];
+    categoryId?: string;
+    page?: number;
+    pageSize?: number;
+  },
+  options?: RequestApiOptions,
+): Promise<GovernanceQueueResult> {
+  const params = new URLSearchParams();
+  if (input?.statuses && input.statuses.length > 0) {
+    params.set('status', input.statuses.join(','));
+  }
+  if (input?.categoryId) params.set('categoryId', input.categoryId);
+  if (typeof input?.page === 'number') params.set('page', String(input.page));
+  if (typeof input?.pageSize === 'number') params.set('pageSize', String(input.pageSize));
+
+  const suffix = params.size > 0 ? `?${params.toString()}` : '';
+  return requestApi<GovernanceQueueResult>(`/api/governance/queue${suffix}`, undefined, options);
+}
+
+export async function getGovernanceStats(
+  options?: RequestApiOptions,
+): Promise<GovernanceStats> {
+  return requestApi('/api/governance/stats', undefined, options);
+}
+
+export async function approveGovernanceItem(
+  id: string,
+  options?: RequestApiOptions,
+): Promise<unknown> {
+  return requestApi(
+    `/api/governance/items/${encodeURIComponent(id)}/approve`,
+    { method: 'POST' },
+    options,
+  );
+}
+
+export async function rejectGovernanceItem(
+  id: string,
+  input: { reason: string },
+  options?: RequestApiOptions,
+): Promise<unknown> {
+  return requestApi(
+    `/api/governance/items/${encodeURIComponent(id)}/reject`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    },
+    options,
+  );
+}
+
+export async function redraftGovernanceItem(
+  id: string,
+  input: { reason: string },
+  options?: RequestApiOptions,
+): Promise<unknown> {
+  return requestApi(
+    `/api/governance/items/${encodeURIComponent(id)}/redraft`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    },
+    options,
+  );
+}
+
+export async function restoreGovernanceItem(
+  id: string,
+  options?: RequestApiOptions,
+): Promise<unknown> {
+  return requestApi(
+    `/api/governance/items/${encodeURIComponent(id)}/restore`,
+    { method: 'POST' },
+    options,
+  );
+}

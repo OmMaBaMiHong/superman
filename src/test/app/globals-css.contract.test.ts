@@ -36,40 +36,45 @@ describe('globals.css contract', () => {
     expect(css).toContain('--layout-reader-feed-drawer-max-width');
     expect(css).toContain('--layout-reader-tablet-list-max-width');
     expect(css).toContain('--layout-reader-tablet-list-min-width');
-    expect(css).toContain('--color-background: hsl(210 20% 98%)');
-    expect(css).toContain('--color-card: hsl(0 0% 100%)');
-    // 用户铁律：青绿主色，浅色/深色同值 hsl(152 60% 50%)。
-    expect(css).toContain('--color-primary: hsl(152 60% 50%)');
-    expect(css).toContain('--color-accent: hsl(214 100% 96%)');
-    expect(css).toContain('--color-ring: hsl(152 60% 50%)');
+    // 「情报指挥中心」深色单主题：基底 / 面板 / cyan 主色。
+    expect(css).toContain('--color-background: #050810');
+    expect(css).toContain('--color-card: #0c1220');
+    expect(css).toContain('--color-popover: #111a2b');
+    expect(css).toContain('--color-primary: #22d3ee');
+    expect(css).toContain('--color-ring: #22d3ee');
+    expect(css).toContain('--color-accent: #16213a');
+    expect(css).toContain('--color-border: #1a2540');
+    expect(css).toContain('--color-muted-foreground: #8b94a7');
     expect(css).toContain('--reader-pane-hover: color-mix(');
     expect(css).toContain('var(--color-primary) 9%');
     expect(css).toContain('var(--color-card)');
-    expect(css).toContain('--color-background: hsl(240 15% 3%)');
-    expect(css).toContain('--color-primary: hsl(152 60% 50%)');
-    expect(css).toContain('--reader-pane-hover: color-mix(');
-    expect(css).toContain('.dark body {');
     expect(css).toContain('background-attachment: fixed;');
+    // 深色单主题：html 直接声明 color-scheme: dark。
+    expect(css).toContain('color-scheme: dark;');
     expect(css).not.toContain('--color-background: hsl(0 0% 100%)');
+    expect(css).not.toContain('--color-background: hsl(210 20% 98%)');
+    expect(css).not.toContain('--color-background: hsl(240 15% 3%)');
     expect(css).not.toContain('--color-primary: hsl(221.2 83.2% 53.3%)');
     expect(css).not.toContain('--color-background: hsl(222.2 84% 4.9%)');
     expect(css).not.toContain('--color-primary: hsl(217.2 91.2% 59.8%)');
     expect(css).not.toContain('--color-background: hsl(42 35% 96%)');
     expect(css).not.toContain('--color-primary: hsl(224 54% 42%)');
     expect(css).not.toContain('--color-accent: hsl(221 37% 92%)');
-    // 旧靛蓝主色必须彻底移除（用户铁律：改青绿）。
+    // 旧靛蓝主色与旧 emerald 主色都必须彻底移除（指挥台铁律：主色 cyan）。
     expect(css).not.toContain('--color-primary: hsl(221 100% 50%)');
     expect(css).not.toContain('--color-ring: hsl(221 100% 50%)');
     expect(css).not.toContain('--color-primary: hsl(234 56% 60%)');
     expect(css).not.toContain('--color-ring: hsl(234 56% 60%)');
+    expect(css).not.toContain('--color-primary: hsl(152 60% 50%)');
+    expect(css).not.toContain('--color-ring: hsl(152 60% 50%)');
     expect(css).not.toContain('fonts.googleapis.com');
     expect(css).not.toContain('.font-brand');
   });
 
-  it('defines the glass token system for both light and dark themes', () => {
+  it('defines the glass token system on the dark mission-control theme', () => {
     const css = readFileSync('src/app/globals.css', 'utf-8');
 
-    // 玻璃 token（ui-style-guide §1.2 / arch-ui-integration §1.3.2）。
+    // 面板 token（ui-style-guide §1.2 / arch-ui-integration §1.3.2）。
     expect(css).toContain('--glass-bg:');
     expect(css).toContain('--glass-bg-strong:');
     expect(css).toContain('--glass-bg-light:');
@@ -81,17 +86,15 @@ describe('globals.css contract', () => {
     expect(css).toContain('--glass-topline:');
     expect(css).toContain('--shadow-glass:');
     expect(css).toContain('--shadow-glow:');
-    expect(css).toContain('--font-mono:');
-    expect(css).toContain('ui-monospace');
 
-    // 浅色/深色两套都定义（默认①：浅色同样玻璃化）。
+    // 深色单主题：面板 token 统一定义在 :root；.dark 仅保留 color-scheme 兼容声明。
     const rootBlock = css.match(/:root\s*\{([\s\S]*?)\}/)?.[1] ?? '';
+    expect(rootBlock).toContain('--glass-bg: rgba(12, 18, 32, 0.55)');
+    expect(rootBlock).toContain('--shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.4)');
+    expect(rootBlock).toContain('--shadow-glow:');
+    expect(rootBlock).toContain('rgba(34, 211, 238, 0.28)');
     const darkBlock = css.match(/\.dark\s*\{([\s\S]*?)\}/)?.[1] ?? '';
-    expect(rootBlock).toContain('--glass-bg:');
-    expect(rootBlock).toContain('--shadow-glass:');
-    expect(darkBlock).toContain('--glass-bg: rgba(255, 255, 255, 0.04)');
-    expect(darkBlock).toContain('--shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.35)');
-    expect(darkBlock).toContain('--shadow-glow:');
+    expect(darkBlock).toContain('color-scheme: dark;');
   });
 
   it('defines .glass-surface semantic classes with full glass recipe', () => {
@@ -106,15 +109,14 @@ describe('globals.css contract', () => {
     expect(css).toContain('.glass-surface-light {');
   });
 
-  it('uses emerald ambient glow on dark body and light body', () => {
+  it('uses subtle cyan ambient glow (≤0.03) on the dark body', () => {
     const css = readFileSync('src/app/globals.css', 'utf-8');
 
-    // 深色 body：emerald 微光替换旧 indigo（ui-style-guide §1.2）。
-    expect(css).toContain('rgb(16 185 129 / 0.14)');
-    expect(css).toContain('rgb(13 148 136 / 0.1)');
-    expect(css).toContain('rgb(5 150 105 / 0.08)');
-    // 浅色 body：极淡 emerald 顶部光斑（默认①：浅色同样有可模糊的底）。
-    expect(css).toContain('rgb(16 185 129 / 0.08)');
+    // 指挥台 body：极轻微 cyan 径向纵深，透明度 ≤0.03；旧 emerald 光斑不得回归。
+    expect(css).toContain('rgb(34 211 238 / 0.03)');
+    expect(css).toContain('rgb(34 211 238 / 0.02)');
+    expect(css).not.toContain('rgb(16 185 129 / 0.14)');
+    expect(css).not.toContain('rgb(16 185 129 / 0.08)');
   });
 
   it('does not balance-wrap heading text', () => {
@@ -125,10 +127,12 @@ describe('globals.css contract', () => {
     expect(headingRuleMatch?.[1]).not.toContain('text-wrap: balance;');
   });
 
-  it('keeps muted foreground restrained while tightening contrast slightly', () => {
+  it('keeps muted foreground restrained on the dark palette', () => {
     const css = readFileSync('src/app/globals.css', 'utf-8');
 
-    expect(css).toContain('--color-muted-foreground: hsl(215 16% 47%)');
-    expect(css).toContain('--color-muted-foreground: hsl(226 8% 58%)');
+    // 次要文字统一 #8b94a7（指挥台色系派生），浅色 muted 值不得回归。
+    expect(css).toContain('--color-muted-foreground: #8b94a7');
+    expect(css).not.toContain('--color-muted-foreground: hsl(215 16% 47%)');
+    expect(css).not.toContain('--color-muted-foreground: hsl(226 8% 58%)');
   });
 });

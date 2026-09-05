@@ -3,48 +3,52 @@
 @plugin "@tailwindcss/typography";
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ── Superman「情报指挥中心」主题 ──
+   深色任务指挥台：基底 #050810，面板 #0c1220 / #111a2b，发丝边框 #1a2540。
+   主强调 cyan #22d3ee；语义色 mint #34d399 / amber #fbbf24 / red #f87171。
+   全产品深色单主题：:root 与 .dark 使用同一套 token，浅色模式已退役。 */
 @layer theme {
   @theme default {
-    --color-background: hsl(210 20% 98%);
-    --color-foreground: hsl(222 47% 11%);
+    --color-background: #050810;
+    --color-foreground: #e5e9f0;
 
-    --color-card: hsl(0 0% 100%);
-    --color-card-foreground: hsl(222 47% 11%);
+    --color-card: #0c1220;
+    --color-card-foreground: #e5e9f0;
 
-    --color-popover: hsl(0 0% 100%);
-    --color-popover-foreground: hsl(222 47% 11%);
+    --color-popover: #111a2b;
+    --color-popover-foreground: #e5e9f0;
 
-    --color-primary: hsl(152 60% 50%);
-    --color-primary-foreground: hsl(0 0% 100%);
+    --color-primary: #22d3ee;
+    --color-primary-foreground: #04222b;
 
-    --color-secondary: hsl(210 40% 96%);
-    --color-secondary-foreground: hsl(222 37% 18%);
+    --color-secondary: #111a2b;
+    --color-secondary-foreground: #c6cddc;
 
-    --color-muted: hsl(210 36% 96%);
-    --color-muted-foreground: hsl(215 16% 47%);
+    --color-muted: #0c1220;
+    --color-muted-foreground: #8b94a7;
 
-    --color-accent: hsl(214 100% 96%);
-    --color-accent-foreground: hsl(222 47% 16%);
+    --color-accent: #16213a;
+    --color-accent-foreground: #e5e9f0;
 
-    --color-success: hsl(142.1 70.6% 45.3%);
-    --color-success-foreground: hsl(142.1 72.3% 24.1%);
+    --color-success: #34d399;
+    --color-success-foreground: #052e22;
 
-    --color-warning: hsl(37.7 92.1% 50.2%);
-    --color-warning-foreground: hsl(30 84.2% 21.4%);
+    --color-warning: #fbbf24;
+    --color-warning-foreground: #3a2a04;
 
-    --color-info: hsl(221.2 83.2% 53.3%);
-    --color-info-foreground: hsl(222.2 47.4% 20.2%);
+    --color-info: #67e8f9;
+    --color-info-foreground: #083344;
 
-    --color-error: hsl(0 72.2% 50.6%);
-    --color-error-foreground: hsl(0 72.2% 28.4%);
+    --color-error: #f87171;
+    --color-error-foreground: #450a0a;
 
-    --color-destructive: hsl(0 84.2% 60.2%);
-    --color-destructive-foreground: hsl(210 40% 98%);
+    --color-destructive: #f87171;
+    --color-destructive-foreground: #050810;
 
-    --color-border: hsl(214 32% 90%);
-    --color-input: hsl(214 28% 88%);
-    --color-ring: hsl(152 60% 50%);
-    --color-overlay: hsl(222 47% 11% / 0.4);
+    --color-border: #1a2540;
+    --color-input: #1a2540;
+    --color-ring: #22d3ee;
+    --color-overlay: rgb(3 6 12 / 0.72);
     --shadow-button: none;
     --shadow-button-hover: none;
     --shadow-field: none;
@@ -54,6 +58,12 @@
     --shadow-header: none;
     --shadow-pane: none;
     --shadow-selection: none;
+
+    /* 字体：UI chrome / 标签 / 数字用 JetBrains Mono，阅读正文用 Inter。 */
+    --font-sans: var(--font-inter), "Inter", "PingFang SC", sans-serif;
+    --font-mono:
+      var(--font-jetbrains-mono), "JetBrains Mono", "PingFang SC", ui-monospace,
+      monospace;
 
     --breakpoint-sm: 40rem;
     --breakpoint-md: 48rem;
@@ -85,134 +95,40 @@
       var(--color-card)
     );
 
-    /* ── 玻璃体系 token（浅色主题同结构适配）──
-       颜色值只允许出现在 globals.css，组件仅消费 var(--glass-*) 或语义类。 */
-    --glass-bg: rgba(255, 255, 255, 0.55);
-    --glass-bg-strong: rgba(255, 255, 255, 0.72);
-    --glass-bg-light: rgba(255, 255, 255, 0.42);
-    --glass-border: rgba(15, 23, 42, 0.08);
+    /* ── 面板体系 token（深色指挥台；颜色值只允许出现在 globals.css）── */
+    --glass-bg: rgba(12, 18, 32, 0.55);
+    --glass-bg-strong: rgba(12, 18, 32, 0.78);
+    --glass-bg-light: rgba(17, 26, 43, 0.42);
+    --glass-border: rgba(26, 37, 64, 0.9);
     --glass-blur: 16px;
     --glass-blur-strong: 24px;
     --glass-saturate: 140%;
-    --glass-highlight: rgba(255, 255, 255, 0.85);
-    --glass-topline: rgba(255, 255, 255, 0.9);
-    --shadow-glass: 0 8px 32px rgba(15, 23, 42, 0.1);
-    --shadow-glass-hover: 0 12px 32px rgba(15, 23, 42, 0.14);
+    --glass-highlight: rgba(34, 211, 238, 0.07);
+    --glass-topline: rgba(34, 211, 238, 0.14);
+    --shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.4);
+    --shadow-glass-hover:
+      0 12px 40px rgba(0, 0, 0, 0.46),
+      0 0 24px rgba(34, 211, 238, 0.06);
     --shadow-glow:
-      0 0 0 1px rgba(16, 185, 129, 0.25),
-      0 8px 24px rgba(16, 185, 129, 0.12);
-    --font-mono:
-      ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
-      monospace;
+      0 0 0 1px rgba(34, 211, 238, 0.28),
+      0 8px 24px rgba(34, 211, 238, 0.12);
 
-    /* ── 总览粒子仪表盘分区色（浅色主题；canvas 在运行时读取后拼透明度）── */
-    --overview-accent-inbox: rgb(16 185 129);
-    --overview-accent-unread: rgb(2 132 199);
-    --overview-accent-read: rgb(124 58 237);
-    --overview-accent-stale: rgb(217 119 6);
-    --overview-scrim: rgba(255, 255, 255, 0.62);
-    --overview-glare: rgba(255, 255, 255, 0.55);
+    /* ── 总览粒子仪表盘分区色（深色主题；canvas 在运行时读取后拼透明度）── */
+    --overview-accent-inbox: rgb(52 211 153);
+    --overview-accent-unread: rgb(34 211 238);
+    --overview-accent-read: rgb(139 148 167);
+    --overview-accent-stale: rgb(251 191 36);
+    --overview-scrim: rgba(5, 8, 16, 0.5);
+    --overview-glare: rgba(255, 255, 255, 0.14);
   }
 
   html {
-    color-scheme: light;
+    color-scheme: dark;
   }
 
+  /* 兼容旧的主题开关：.dark 与 :root 同为指挥台配色。 */
   .dark {
     color-scheme: dark;
-    --color-background: hsl(240 15% 3%);
-    --color-foreground: hsl(240 14% 93%);
-
-    --color-card: hsl(240 12% 7%);
-    --color-card-foreground: hsl(240 14% 93%);
-
-    --color-popover: hsl(240 11% 8%);
-    --color-popover-foreground: hsl(240 14% 93%);
-
-    --color-primary: hsl(152 60% 50%);
-    --color-primary-foreground: hsl(240 20% 98%);
-
-    --color-secondary: hsl(240 8% 14%);
-    --color-secondary-foreground: hsl(240 14% 93%);
-
-    --color-muted: hsl(240 8% 12%);
-    --color-muted-foreground: hsl(226 8% 58%);
-
-    --color-accent: hsl(239 12% 16%);
-    --color-accent-foreground: hsl(240 14% 95%);
-
-    --color-success: hsl(142.1 69.2% 58%);
-    --color-success-foreground: hsl(141.7 84.4% 91.6%);
-
-    --color-warning: hsl(43.3 96.4% 56.3%);
-    --color-warning-foreground: hsl(48 96.5% 88.8%);
-
-    --color-info: hsl(217.2 91.2% 59.8%);
-    --color-info-foreground: hsl(213.8 100% 93.5%);
-
-    --color-error: hsl(0 84.2% 67.2%);
-    --color-error-foreground: hsl(0 100% 93.8%);
-
-    --color-destructive: hsl(0 62.8% 30.6%);
-    --color-destructive-foreground: hsl(210 40% 98%);
-
-    --color-border: hsl(240 7% 22%);
-    --color-input: hsl(240 7% 22%);
-    --color-ring: hsl(152 60% 50%);
-    --color-overlay: hsl(240 20% 2% / 0.76);
-    --shadow-button: none;
-    --shadow-button-hover: none;
-    --shadow-field: none;
-    --shadow-surface: none;
-    --shadow-surface-hover: none;
-    --shadow-popover: none;
-    --shadow-header: none;
-    --shadow-pane: none;
-    --shadow-selection: none;
-    --reader-pane-hover: color-mix(
-      in oklab,
-      var(--color-primary) 14%,
-      var(--color-card)
-    );
-    --reader-pane-active: color-mix(
-      in oklab,
-      var(--color-primary) 21%,
-      var(--color-card)
-    );
-    --reader-pane-active-strong: color-mix(
-      in oklab,
-      var(--color-primary) 24%,
-      var(--color-card)
-    );
-
-    /* ── 玻璃体系 token（深色主题，按用户铁律 + prototype .glass）── */
-    --glass-bg: rgba(255, 255, 255, 0.04);
-    --glass-bg-strong: rgba(255, 255, 255, 0.055);
-    --glass-bg-light: rgba(255, 255, 255, 0.03);
-    --glass-border: rgba(255, 255, 255, 0.08);
-    --glass-blur: 16px;
-    --glass-blur-strong: 24px;
-    --glass-saturate: 140%;
-    --glass-highlight: rgba(255, 255, 255, 0.06);
-    --glass-topline: rgba(255, 255, 255, 0.13);
-    --shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.35);
-    --shadow-glass-hover:
-      0 12px 40px rgba(0, 0, 0, 0.4),
-      0 0 24px rgba(16, 185, 129, 0.06);
-    --shadow-glow:
-      0 0 0 1px rgba(16, 185, 129, 0.25),
-      0 8px 24px rgba(16, 185, 129, 0.12);
-    --font-mono:
-      ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
-      monospace;
-
-    /* ── 总览粒子仪表盘分区色（深色主题；提亮以保证 canvas 粒子在暗底可见）── */
-    --overview-accent-inbox: rgb(52 211 153);
-    --overview-accent-unread: rgb(56 189 248);
-    --overview-accent-read: rgb(167 139 250);
-    --overview-accent-stale: rgb(251 191 36);
-    --overview-scrim: rgba(8, 12, 16, 0.5);
-    --overview-glare: rgba(255, 255, 255, 0.18);
   }
 
   * {
@@ -221,35 +137,18 @@
 
   body {
     @apply bg-background text-foreground antialiased font-sans;
-    /* 浅色主题同样保留一层极淡 emerald 顶部光斑，让玻璃面板有可模糊的底。 */
-    background-image: radial-gradient(
-      circle at top,
-      rgb(16 185 129 / 0.08),
-      transparent 34%
-    );
-    background-attachment: fixed;
-  }
-
-  /* Layered ambient lighting keeps dark mode from reading as a flat black fill. */
-  .dark body {
-    background-color: var(--color-background);
+    /* 极轻微的 cyan 纵深光斑（透明度 ≤0.03），不要玻璃泛光。 */
     background-image:
       radial-gradient(
-        circle at top,
-        rgb(16 185 129 / 0.14),
-        transparent 34%
+        circle at 50% -10%,
+        rgb(34 211 238 / 0.03),
+        transparent 40%
       ),
       radial-gradient(
-        circle at 18% 18%,
-        rgb(13 148 136 / 0.1),
-        transparent 24%
-      ),
-      radial-gradient(
-        circle at 82% 12%,
-        rgb(5 150 105 / 0.08),
-        transparent 22%
-      ),
-      linear-gradient(180deg, rgb(8 12 14 / 0.96), rgb(2 4 5 / 1));
+        circle at 85% 8%,
+        rgb(34 211 238 / 0.02),
+        transparent 26%
+      );
     background-attachment: fixed;
   }
 
@@ -259,11 +158,35 @@
 
   :where(a, button) {
     touch-action: manipulation;
-    -webkit-tap-highlight-color: rgb(15 23 42 / 0.14);
+    -webkit-tap-highlight-color: rgb(34 211 238 / 0.14);
+  }
+
+  /* ── 自定义细滚动条（6px，主题色）── */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #1a2540 transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #1a2540;
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(34 211 238 / 0.4);
   }
 }
 
-/* ── 玻璃语义类（纯 CSS，含 -webkit- 前缀）──
+/* ── 面板语义类（纯 CSS，含 -webkit- 前缀）──
    组件只消费这些语义类，不再手写 blur/border/shadow 组合。
    每个面板/容器最多 1 层 backdrop-filter；列表行禁止逐项 blur。 */
 @layer components {
@@ -310,6 +233,123 @@
     border: 1px solid var(--glass-border);
     box-shadow: var(--shadow-glass), inset 0 1px 0 var(--glass-highlight);
     border-radius: 0.75rem;
+  }
+
+  /* ── 审批台（治理层）语义类 ── */
+
+  /* 状态指示灯：1.4s ease-in-out 呼吸脉冲（live 数据用） */
+  .gov-pulse-dot {
+    animation: gov-pulse 1.4s ease-in-out infinite;
+  }
+
+  /* 队列卡片：左侧 3px 语义色 accent border，hover 0.15s ease */
+  .gov-card {
+    position: relative;
+    background: var(--color-card);
+    border: 1px solid var(--color-border);
+    border-left: 3px solid var(--gov-accent, var(--color-warning));
+    border-radius: 0.5rem;
+    transition:
+      border-color 0.15s ease,
+      background-color 0.15s ease,
+      box-shadow 0.15s ease;
+  }
+
+  .gov-card:hover {
+    background: var(--color-popover);
+  }
+
+  /* 快捷键选中：cyan 1px 发光描边 */
+  .gov-card-selected {
+    border-color: var(--color-primary);
+    box-shadow:
+      0 0 0 1px var(--color-primary),
+      0 0 18px rgb(34 211 238 / 0.22);
+  }
+
+  /* 准奏：向左滑出 + mint 淡出（0.3s） */
+  .gov-card-exit-approve {
+    animation: gov-exit-approve 0.3s ease forwards;
+  }
+
+  /* 驳回：向右滑出 + red 淡出（0.3s） */
+  .gov-card-exit-reject {
+    animation: gov-exit-reject 0.3s ease forwards;
+  }
+
+  /* 内联理由输入：折叠展开 0.42s cubic-bezier(0.4, 0, 0.2, 1) */
+  .gov-collapse {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transition:
+      grid-template-rows 0.42s cubic-bezier(0.4, 0, 0.2, 1),
+      opacity 0.42s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .gov-collapse-open {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+
+  .gov-collapse > div {
+    overflow: hidden;
+  }
+
+  /* redraft_count 徽章 +1 动画 */
+  .gov-badge-pop {
+    animation: gov-badge-pop 0.42s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* 拉丁标签：大写 + 字距；中文标签不要加字距（组件侧自行选择） */
+  .gov-label {
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 10px;
+    color: var(--color-muted-foreground);
+  }
+}
+
+@keyframes gov-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.72);
+  }
+}
+
+@keyframes gov-exit-approve {
+  to {
+    transform: translateX(-28px);
+    opacity: 0;
+    border-color: var(--color-success);
+    box-shadow: 0 0 18px rgb(52 211 153 / 0.28);
+  }
+}
+
+@keyframes gov-exit-reject {
+  to {
+    transform: translateX(28px);
+    opacity: 0;
+    border-color: var(--color-error);
+    box-shadow: 0 0 18px rgb(248 113 113 / 0.24);
+  }
+}
+
+@keyframes gov-badge-pop {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.35);
+  }
+  100% {
+    transform: scale(1);
   }
 }
 
