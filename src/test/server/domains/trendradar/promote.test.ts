@@ -14,6 +14,15 @@ vi.mock('@/server/domains/articles/repositories/articlesRepo', () => ({
   insertArticleIgnoreDuplicate: (...args: unknown[]) => insertArticleMock(...args),
 }));
 
+// P2b：promote 进治理时做方向关键词分类，这里固定为「无命中 → 兜底 general」。
+vi.mock('@/core/governance/directions', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/core/governance/directions')>();
+  return {
+    ...original,
+    listDirectionStrategies: vi.fn(async () => []),
+  };
+});
+
 import { promoteTrendRadarItem } from '@/core/trendradar/promote';
 
 const pool = { query: vi.fn().mockResolvedValue({ rows: [{ id: '77' }] }) } as unknown as Pool;

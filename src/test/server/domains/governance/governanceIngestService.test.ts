@@ -17,6 +17,15 @@ vi.mock('@/core/governance/repository', () => ({
   countTodayGovernedByCategory: (...args: unknown[]) => countTodayGovernedByCategoryMock(...args),
 }));
 
+const listDirectionStrategiesMock = vi.fn();
+vi.mock('@/core/governance/directions', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/core/governance/directions')>();
+  return {
+    ...original,
+    listDirectionStrategies: (...args: unknown[]) => listDirectionStrategiesMock(...args),
+  };
+});
+
 const pool = {} as Pool;
 
 function makeDraft(score: number): GovernanceDraft {
@@ -46,6 +55,7 @@ describe('governanceIngestService / evaluateGovernanceBatch', () => {
     listRecentRejectMemoryMock.mockReset().mockResolvedValue([]);
     listRecentArticleTitlesMock.mockReset().mockResolvedValue([]);
     countTodayGovernedByCategoryMock.mockReset().mockResolvedValue(0);
+    listDirectionStrategiesMock.mockReset().mockResolvedValue([]);
   });
 
   it('URL 精确去重：已有文章与 7 天驳回记忆都参与', async () => {
@@ -199,5 +209,54 @@ describe('governanceIngestService / evaluateGovernanceBatch', () => {
     );
     expect(getGovernancePreferenceMock).not.toHaveBeenCalled();
     expect(decisions[0].status).toBe('candidate');
+  });
+
+  it('v2 归一化：URL 剥 utm 后命中去重，全角标题归一后命中去重', async () => {
+    listExistingArticleLinksMock.mockResolvedValue(['https://example.com/post/42']);
+    listRecentArticleTitlesMock.mockResolvedValue(['ＯｐｅｎＡＩ发布新模型🔥']);
+    const draft = vi.fn(async () => makeDraft(80));
+    const decisions = await evaluateGovernanceBatch(
+      pool,
+      {
+        categoryId: '7',
+        feedTitle: '订阅源',
+        items: [
+          makeItem(0, { link: 'https://example.com/post/42?utm_source=rss&utm_medium=feed' }),
+          makeItem(1, { title: 'OpenAI 发布新模型' }),
+        ],
+        aiConfig: null,
+        userId: '42',
+      },
+      { draft },
+    );
+    expect(decisions[0].skipReason).toBe('duplicate_url');
+    expect(decisions[1].skipReason).toBe('duplicate_title');
+    expect(draft).not.toHaveBeenCalled();
+  });
+
+  it('方向分类：关键词命中落 directionKey，未命中兜底 general', async () => {
+    listDirectionStrategiesMock.mockResolvedValue([
+      { key: 'money', name: '搞钱', keywordsDsl: '变现 副业' },
+      { key: 'general', name: '其他', keywordsDsl: '' },
+    ]);
+    const draft = vi.fn(async () => makeDraft(80));
+    const decisions = await evaluateGovernanceBatch(
+      pool,
+      {
+        categoryId: '7',
+        feedTitle: '订阅源',
+        items: [
+          makeItem(0, { title: '一个可复制的副业变现案例拆解' }),
+          makeItem(1),
+        ],
+        aiConfig: null,
+        userId: '42',
+      },
+      { draft },
+    );
+    expect(decisions[0]).toMatchObject({ action: 'insert', directionKey: 'money' });
+    expect(decisions[0].directionReason).toContain('变现');
+    expect(decisions[1]).toMatchObject({ action: 'insert', directionKey: 'general' });
+    expect(decisions[1].directionReason).toContain('未命中');
   });
 });

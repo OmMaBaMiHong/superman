@@ -155,4 +155,15 @@ describe('governance repository / listGovernanceQueue', () => {
     await listGovernanceQueue(pool, { userId: '1' });
     expect(query.mock.calls[0][1][1]).toEqual(['candidate', 'pending']);
   });
+
+  it('direction 筛选走 direction_key 精确匹配，队列行带方向字段（P2b）', async () => {
+    const { pool, query } = mockPool([{ count: 0 }]);
+    await listGovernanceQueue(pool, { userId: '42', direction: 'money' });
+    const countSql = String(query.mock.calls[0][0]);
+    expect(countSql).toContain('a.direction_key = $3');
+    expect(query.mock.calls[0][1]).toEqual(['42', ['candidate', 'pending'], 'money']);
+    const listSql = String(query.mock.calls[1][0]);
+    expect(listSql).toContain('a.direction_key as "directionKey"');
+    expect(listSql).toContain('a.direction_reason as "directionReason"');
+  });
 });
