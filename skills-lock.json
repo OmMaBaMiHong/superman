@@ -6,6 +6,12 @@
       "sourceType": "github",
       "computedHash": "76bd52d934142cb8f3861cb37f2a39ad93bf3b03dcbc94a02beaa0544f6dd7c2"
     },
+    "liquid-glass-design": {
+      "source": "affaan-m/ecc",
+      "sourceType": "github",
+      "skillPath": "skills/liquid-glass-design/SKILL.md",
+      "computedHash": "bbfb0a30ce18048f07072183d844b005ca729f27784096455ea7f8add25b92d3"
+    },
     "nodejs-best-practices": {
       "source": "sickn33/antigravity-awesome-skills",
       "sourceType": "github",
@@ -49,7 +55,8 @@
     "web-design-guidelines": {
       "source": "vercel-labs/agent-skills",
       "sourceType": "github",
-      "computedHash": "a6a44d5498f7e8f68289902f3dedfc6f38ae0cee1e96527c80724cf27f727c2a"
+      "skillPath": "skills/web-design-guidelines/SKILL.md",
+      "computedHash": "f3bc47f890f42a44db1007ab390709ec368e4b8c089baee6b0007182236ac474"
     }
   }
 }

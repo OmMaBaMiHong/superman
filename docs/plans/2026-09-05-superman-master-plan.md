@@ -188,9 +188,37 @@ maigret（3221 站深挖）与 Aliens_eye（842 站快筛 + 变更监控 + MCP�
 
 **验收：** 一条选题产出完整分镜，至少一个 provider 端到端生成成功，素材入库可下载。
 
+### Phase 5 · 消息中心（1-2 天，手机端刚需）
+
+工作台不只是审批台——采集失败、待批积压、流水线完成、驳回重拟完成都要触达用户：
+
+- [ ] 新表 `notifications`（id, user_id, kind: fetch_failed/pending_backlog/pipeline_done/redraft_done/system, title, body, link, read_at, created_at）
+- [ ] 事件挂钩：worker 抓取失败、pipeline job 完成、定时配额跑完后写通知
+- [ ] 前端「消息」页（移动 tab bar 第五项 / 桌面侧边栏入口 + 未读徽章）：按天分组的列表，点消息跳对应页面（审批台/流水线/热点）
+- [ ] 已读/全部已读；30s 轮询未读数（复用 useGovernanceQueueSize 模式）
+- [ ] 预留推送通道：PWA Web Push（后续接 TrendRadar 的通知渠道做系统级推送）
+
+**验收：** 制造一次抓取失败 + 一次准奏，消息页出现两条通知且点击跳转正确；未读徽章同步。
+
+### Phase 6 · 分享与订阅（轻社媒层，2-3 天）
+
+定位：**新闻驱动的个人频道**，不做完整社交（无关注/评论/私信），先做"发布→被订阅"单向广播：
+
+- [ ] 公开分享页 `/share/[token]`：归档/已采用条目生成免登录公开链接（玻璃卡片 + 出处 + "由 Superman 工作台驱动"品牌尾注 + 订阅引导）
+- [ ] 分享海报图：服务端生成分享卡片图（标题/摘要/来源/二维码，Satori 或 canvas）
+- [ ] 个人频道页 `/channel/[username]`：我标记「公开」的已发布内容时间线（朋友圈式），RSS 输出 `/channel/[username]/rss`——别人用任何 RSS 阅读器就能订阅我
+- [ ] 条目加 `visibility: private|public`，默认 private
+- [ ] 预留：订阅者登记（邮箱/webhook 推送新发布）
+
+**验收：** 一条内容标记公开后，分享页免登录可看、频道页出现、RSS 可订阅；私密内容无任何公开入口。
+
+### Phase 7 · APP 化（后置）
+
+H5 已是 PWA；原生 APP 用 Capacitor 包壳（复用全部 H5 代码），消息中心对接原生推送通知。iOS 26 起原生界面参考 .agents/skills/liquid-glass-design（SwiftUI 玻璃规范）——若重写原生界面时遵循其 GlassEffectContainer/interactive/morphing 规范。
+
 ## 4. 前端视图变更
 
-> **设计方向（v2，用户拍板）**：苹果液态玻璃风（Liquid Glass），浅色优先 + 跟随系统深色（prefers-color-scheme 自动切换，无手动开关依赖）。玻璃材质 = `backdrop-filter: blur(20px) saturate(180%)` + 半透明底 + 1px 半透明边框 + 顶部 inset 高光线；浅色底 #f5f5f7 / 深色纯黑 #000；品牌 cyan 双主题各一档；Inter + PingFang SC 为主，JetBrains Mono 只管数字。
+> **设计方向（v3，用户拍板，取代 v2）**：苹果液态玻璃风（Liquid Glass），浅色优先 + 跟随系统深色（prefers-color-scheme 自动切换，无手动开关依赖）。玻璃材质 = `backdrop-filter: blur(20px) saturate(180%)` + 半透明底 + 1px 半透明边框 + 顶部 inset 高光线。浅色 = 苹果灰白 #f5f5f7 + cyan 强调，不变；**深色 = 经典绿黑终端风**——纯黑 #000 底 + 绿色主强调（#4ade80 系），**深色模式禁用蓝色系**（cyan 仅限浅色）。玻璃面板深色下带极轻绿 tint。字体：Inter + PingFang SC 为主，JetBrains Mono 只管数字。Logo：单线 S + 轨道星点徽章（assets 在仓库 public/brand/）。
 >
 > **交互形态（按业务形态排版）**：审批台 = 小红书式信息流卡片（桌面 2-3 列/移动 1 列，卡片带形态徽章：图文/视频/文案，预留直播）；热点页 = 多平台横向 snap 轨道（拖动换平台如换 tab，pill 栏双向联动），单平台内纵向下拉；**每条内容可点开详情**（移动底部 sheet/桌面玻璃 modal，详情里直接完成审批操作）；内容形态由后端 content_type 启发式推断（B站/抖音→视频，有图→图文，否则文案）。
 
@@ -240,3 +268,6 @@ maigret（3221 站深挖）与 Aliens_eye（842 站快筛 + 变更监控 + MCP�
 | M2 | 洗稿三平台草稿 | 2-3 天 |
 | M3 | 口播稿 + 提词器 | 2 天 |
 | M4 | 漫剧 adapter 端到端 | 3-5 天 |
+| M5 | 消息中心（通知列表 + 未读徽章） | 1-2 天 |
+| M6 | 分享页 + 个人频道订阅（轻社媒） | 2-3 天 |
+| M7 | APP 化（Capacitor 包壳 / 原生推送） | 后置 |
