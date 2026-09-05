@@ -25,7 +25,8 @@ export default defineConfig({
   },
   build: {
     outDir: fileURLToPath(new URL('../plugin/public/app', import.meta.url)),
-    emptyOutDir: false,
+    // brand/ 等资源来自 src/h5/public（publicDir 在清空后重新拷贝），放心清空旧 hash 产物
+    emptyOutDir: true,
     sourcemap: false,
   },
 });
