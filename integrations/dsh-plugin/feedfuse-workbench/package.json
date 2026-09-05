@@ -1,0 +1,60 @@
+{
+  "name": "feedfuse-workbench",
+  "version": "0.5.0",
+  "description": "自包含 DSH bundle 插件：RSS 订阅 + 视频下载 + 文案提取 + 策略分析 + 定时任务 + PostgreSQL 知识库（pgvector 语义搜索）。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "platform": "web"
+    }
+  },
+  "files": [
+    "lib/index.js",
+    "lib/rss-store.js",
+    "lib/video.js",
+    "lib/media-store.js",
+    "lib/douyin-browser.js",
+    "lib/sqlite-store.js",
+    "lib/knowledge-store.js",
+    "lib/strategies.js",
+    "lib/scheduler.js",
+    "lib/client.js",
+    "migrations/0001_init.sql",
+    "migrations/0002_strategies.sql",
+    "migrations/0003_scheduler.sql",
+    "migrations/0004_knowledge.sql",
+    "migrations/0005_seed.sql",
+    "cordis.patch.yml",
+    "package.json"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-host-webserver": "^0.1.0-rc.6",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  },
+  "license": "MIT"
+}

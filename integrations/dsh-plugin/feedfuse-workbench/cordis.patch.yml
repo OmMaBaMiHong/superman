@@ -1,0 +1,43 @@
+# feedfuse-workbench bundle patch：挂载 host 半（Node 自包含数据服务）。
+# client 半由 dsh.client 声明（见 package.json），被 client-modules 扫描进 window.__DSH_BOOT__。
+- insert:
+    - id: feedfuse-workbench
+      name: 'feedfuse-workbench'
+
+# 左栏由本插件接管：client 半注册进 ui-layout 的官方 'sidebar' 席位，自带
+# 工作区 / RSS订阅 / 自媒体 三个操作标签，并把 sidebar.workspaces（ui-workspace）、
+# sidebar.settings（ui-settings-general）、sidebar.footer.action（各插件叠加）与
+# sidebar.brand.*（ui-brand-official）原样声明回去交给内置注册方 —— 项目源码零改动。
+#
+# 席位声明是独占的（一个席位只有一个声明者），所以内置侧边栏外壳必须先让位：这一行
+# 停掉 ui-sidebar 条目，插件才能声明这些席位。要回到内置侧边栏，删掉本行（或改
+# disabled: false）并停用本插件即可。
+- id: ui-sidebar
+  disabled: true
+
+# 内置默认订阅源。这些是公开 RSS，可由插件直连抓取（rss-store.js 用 fetch 直接
+# 拉取）。rss.json 为空时首启注入；用户可在 profile 层以同名 id 覆盖整段 config。
+#
+# PostgreSQL 知识库（可选）：配置 databaseUrl 后启用策略分析、定时任务、pgvector 语义搜索。
+#   databaseUrl: 'postgresql://user:pass@host:5432/dbname'
+#   需要 PostgreSQL 16+ 并安装 pgvector 扩展。留空则使用 SQLite（原有功能不受影响）。
+- id: feedfuse-workbench
+  config:
+    dataDir: 'feedfuse-data'
+    # databaseUrl: 'postgresql://feedfuse:feedfuse@localhost:5432/feedfuse'
+    # 抖音等平台博主是「订阅源」：在侧栏「RSS订阅 → 新增订阅源」里粘贴
+    # rsshub://douyin/user/<secUid> 或抖音主页地址即可，作品随该源刷新进入队列。
+    # douyinUid 只用于「自己的账号」（/feedfuse/myworks），订阅博主不需要配置。
+    feeds:
+      - title: 'OpenAI News'
+        url: 'https://openai.com/news/rss.xml'
+        categoryId: 3
+      - title: 'AI HOT 日报'
+        url: 'https://aihot.virxact.com/feed/daily.xml'
+        categoryId: 3
+      - title: 'HelloGitHub 月刊'
+        url: 'https://hellogithub.com/rss'
+        categoryId: 3
+      - title: '让小产品的独立变现更简单 - ezindie.com'
+        url: 'https://www.ezindie.com/feed/rss.xml'
+        categoryId: 3
