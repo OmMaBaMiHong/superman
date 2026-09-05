@@ -23,14 +23,21 @@
 | 三省六部怎么办 | **只移植概念，不合并代码** | 其价值在流程（状态机/拟折/配额/重拟/探索），约 3 个核心机制可移植；两套库存活=同步地狱，不做 |
 | 数据源 | **唯一，Postgres** | articles/feeds 已是全量资产所在 |
 | 三省六部现有部署 | 保留作个人阅读复习工具（SM-2 复习 FeedFuse 没有），不进生产链路 | |
+| TrendRadar | **原版保留、独立运行**，作为「热点雷达」采集引擎；通过 SQLite 同步 + 通用 Webhook 双轨接入，不 fork 不改码，保持跟随上游 v6.x 升级 | 它是热搜聚合+通知工具，不是社媒分发工具（无公众号/小红书发布能力） |
+| maigret + Aliens_eye | 封装为独立 Python OSINT worker（FastAPI 包 HTTP），Aliens_eye 做发现层（842 站、变更监控）、maigret 做深挖层（3221 站、资料抽取） | 两者都是 Python 异步程序，不能直接 import 进 Node |
 | 前端 | 保留三栏阅读器，新增「审批台」「选题卡」「提词器」「流水线」四个视图 | 见 §4 |
 
 ## 1. 目标架构
 
 ```
-┌─ 采集层（现有，小补）────────────────────────────────┐
+┌─ 采集层（现有 + 两个新引擎）─────────────────────────┐
 │  feeds + embedded RSSHub + user_rsshub_cookies        │
 │  + 【移植】探索卷宗：搜索发现 → AI 评分 → 反哺固定源   │
+│  + 【TrendRadar】热榜雷达：11 平台热榜（头条/百度/微博/ │
+│    知乎/B站/抖音/贴吧/澎湃/财联社/凤凰/华尔街见闻）+ RSS │
+│    独立 Python 进程运行，SQLite 落库 + Webhook 双轨接入 │
+│  + 【OSINT 达人搜索】Aliens_eye(发现/监控) + maigret(深挖)│
+│    独立 FastAPI worker，供探索卷宗与博主调研调用        │
 ├─ 治理层（移植三省六部）──────────────────────────────┤
 │  状态机: candidate → pending → archived → used        │
 │           ↘ rejected（驳回记忆 7 天去重）              │
@@ -130,6 +137,29 @@ feed 抓取 worker 落库前：URL 精确去重 + 标题 bigram 相似度 ≥0.7
 
 **验收：** 新抓文章先进待批队列；批准进归档；驳回 7 天内同类不再出现；重拟后摘要变化且计数 +1；无 LLM 配置时全链路仍可用（回退模式）。
 
+### Phase 1b · 采集扩展：热点雷达接入（1-2 天）
+
+TrendRadar（sansan0/TrendRadar v6.10.0，原版克隆，位于 /Users/wade/work-space/pa-chong-cai-ji/TrendRadar）不 fork 不改码，独立运行：
+
+- [ ] TrendRadar 侧：编辑其 config/config.yaml——`storage` 保持本地 SQLite（默认即有），`notification.channels.generic_webhook` 指向 Superman 的 `/api/ingest/trendradar`（带鉴权 token），timeline.yaml 设定推送时段；需要稳定商用时自部署 newsnow 并把 platforms.api_url 指向自有实例
+- [ ] Superman 侧新增 `POST /api/ingest/trendradar`：鉴权（header token）→ 解析 payload → 写入 `trend_radar_items` 表（新迁移 0052：id, user_id, platform, title, url, rank, payload_json, received_at）
+- [ ] pg-boss 定时 job `trendradar-sync`：读取 TrendRadar 的 `output/news/YYYY-MM-DD.db`（SQLite，结构化全量：标题/URL/排名轨迹/平台）upsert 进 `trend_radar_items`——这是主链路，webhook 只做实时触达
+- [ ] 治理管线挂载点：热榜条目按关键词/AI 粗筛后可转 governance candidate（走审批台），或作为「今日热点」独立视图只读展示（默认只读，点「转为选题」才进治理）
+- [ ] 前端：审批台/工作台加「热点雷达」区，按平台分组展示当日热榜条目
+
+**验收：** TrendRadar 跑一轮后，Superman 里能看到 11 平台结构化热榜数据；webhook 实时推送可达；热榜条目可一键转为选题进入审批流。
+
+### Phase 1c · 采集扩展：OSINT 达人搜索（1-2 天）
+
+maigret（3221 站深挖）与 Aliens_eye（842 站快筛 + 变更监控 + MCP）均为 Python 异步程序，封装为独立 worker：
+
+- [ ] 新建 `services/osint-worker/`（FastAPI）：`POST /scan {username, mode: quick|deep}` → quick 走 Aliens_eye `UsernameScanner().scan_all_sites()`，deep 走 maigret `maigret.checking.maigret()`；结果写 Postgres `osint_scans` / `osint_hits` 表（迁移 0053）
+- [ ] Superman 侧 pg-boss job 调 osint-worker HTTP 接口；入口挂两个场景：① 探索卷宗发现新博主时自动快筛其跨平台账号（丰富源画像）；② 前端「达人搜索」页手动发起
+- [ ] 前端「达人搜索」页：输入用户名 → 任务进度 → 命中平台列表（链接/置信度/资料摘要）
+- [ ] 合规红线：结果仅本人可见，页面与 API 留审计日志（osint_scans 记录发起人与时间）
+
+**验收：** 输入一个博主用户名，快筛 5 分钟内返回跨平台命中列表；深挖模式能拿到资料字段；审计记录完整。
+
 ### Phase 2 · 洗稿流水线（2-3 天，ROI 最高）
 
 - [ ] 平台 profile：公众号深度文 / 小红书种草（emoji 密度、短段落）/ 小说，每 profile 一个 prompt 模板 + 风格样本
@@ -178,13 +208,18 @@ feed 抓取 worker 落库前：URL 精确去重 + 标题 bigram 相似度 ≥0.7
 2. **平台风控**：抖音/Twitter 路由需 Cookie（`user_rsshub_cookies` 已有加密存储机制）；公众号发布先用草稿箱，不自动群发。
 3. **密钥**：`FEEDFUSE_SECRET_KEY` 生产必须环境变量注入；superman 仓库当前为 **PUBLIC**，任何 cookie/token 永不入库（gitignore 已收口，vendor/ 整体排除，后续若要纳入抖音发布服务需重新净化 vendored 代码）。
 4. **LLM 成本**：拟折/评分设每日调用上限与回退模式，无 key 全链路降级可用。
+5. **热点数据上游依赖**：TrendRadar 的热榜数据完全依赖第三方公共 API（newsnow.busiyi.world），稳定性与合规不在自己手里；高频/商用必须自部署 newsnow。
+6. **OSINT 合规**：达人搜索涉及公开个人信息聚合，仅限本人调研使用；生产环境需住宅代理池防 WAF；结果不落公开页面、不留存超期数据。
+7. **TrendRadar 不分叉**：任何「需要 TrendRadar 改代码才能接入」的方案都视为设计失败——它必须保持原版可升级。
 
 ## 6. 里程碑总览
 
 | 里程碑 | 内容 | 量级 |
 |---|---|---|
-| M0 | 基建收口，仓库跑通 | 0.5 天 |
-| M1 | 治理层上线（审批台可用） | 3-4 天 |
+| M0 | 基建收口，仓库跑通 ✅ | 已完成 |
+| M1 | 治理层上线（审批台可用） ✅ | 已完成 |
+| M1b | 热点雷达接入（TrendRadar 双轨同步） | 1-2 天 |
+| M1c | OSINT 达人搜索（Aliens_eye + maigret worker） | 1-2 天 |
 | M2 | 洗稿三平台草稿 | 2-3 天 |
 | M3 | 口播稿 + 提词器 | 2 天 |
 | M4 | 漫剧 adapter 端到端 | 3-5 天 |
