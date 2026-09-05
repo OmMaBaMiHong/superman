@@ -27,12 +27,10 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: '/feedfuse-icon-16.svg', sizes: '16x16', type: 'image/svg+xml' },
-      { url: '/feedfuse-icon-32.svg', sizes: '32x32', type: 'image/svg+xml' },
-      { url: '/feedfuse-icon-64.svg', sizes: '64x64', type: 'image/svg+xml' },
-      { url: '/feedfuse-icon-128.svg', sizes: '128x128', type: 'image/svg+xml' }
+      { url: '/brand/favicon-64.png', sizes: '64x64', type: 'image/png' },
+      { url: '/feedfuse-icon-32.svg', sizes: '32x32', type: 'image/svg+xml' }
     ],
-    shortcut: '/feedfuse-icon-32.svg',
+    shortcut: '/brand/favicon-64.png',
     apple: '/pwa-icon-192.png'
   }
 };

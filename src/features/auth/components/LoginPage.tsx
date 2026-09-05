@@ -56,12 +56,15 @@ export default function LoginPage() {
         <section className="glass-surface-strong p-6 sm:p-8">
           <div className="space-y-6">
             <div className="space-y-4 text-center">
-              <div className="flex items-center justify-center gap-2">
-                <span
-                  aria-hidden="true"
-                  className="gov-pulse-dot h-1.5 w-1.5 rounded-full bg-primary"
+              <div className="flex flex-col items-center gap-2.5">
+                <img
+                  src="/brand/logo.png"
+                  alt="Superman"
+                  width={56}
+                  height={56}
+                  className="h-14 w-14"
                 />
-                <span className="text-[13px] font-semibold text-primary">Superman</span>
+                <span className="text-[13px] font-semibold tracking-wide text-primary">Superman</span>
               </div>
               <div className="space-y-2">
                 <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-[1.75rem]">

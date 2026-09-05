@@ -101,13 +101,17 @@ describe('QA probe: 导航一致性', () => {
 });
 
 describe('QA probe: 玻璃 token 契约（独立复核 globals.css）', () => {
-  it('主色 cyan 双主题：浅色 #0891b2 / 深色 #22d3ee，ring 同步', () => {
+  it('主色双主题：浅色 cyan #0891b2 / 深色品牌绿 #4ade80，ring 同步', () => {
     const css = readFileSync('src/app/globals.css', 'utf-8');
     // 液态玻璃双主题：@theme default 浅色值 + prefers-color-scheme dark 覆盖。
     expect(css.match(/--color-primary: #0891b2/g)).toHaveLength(1);
     expect(css.match(/--color-ring: #0891b2/g)).toHaveLength(1);
-    expect(css.match(/--color-primary: #22d3ee/g)).toHaveLength(1);
-    expect(css.match(/--color-ring: #22d3ee/g)).toHaveLength(1);
+    expect(css.match(/--color-primary: #4ade80/g)).toHaveLength(1);
+    expect(css.match(/--color-ring: #4ade80/g)).toHaveLength(1);
+    // 深色块禁用蓝色系：cyan 只允许出现在浅色定义
+    const darkBlock =
+      css.match(/@media \(prefers-color-scheme: dark\)\s*\{\s*:root\s*\{([\s\S]*?)\}\s*\}/)?.[1] ?? '';
+    expect(darkBlock).not.toContain('#22d3ee');
     expect(css).not.toContain('--color-primary: hsl(152 60% 50%)');
     expect(css).not.toContain('--color-ring: hsl(152 60% 50%)');
   });
@@ -122,10 +126,10 @@ describe('QA probe: 玻璃 token 契约（独立复核 globals.css）', () => {
     expect(css).toContain('--glass-saturate: 180%');
   });
 
-  it('body 光斑背景：双主题 cyan 系微光（≤0.05）', () => {
+  it('body 光斑背景：浅色 cyan / 深色绿微光（≤0.05）', () => {
     const css = readFileSync('src/app/globals.css', 'utf-8');
     expect(css).toContain('rgb(8 145 178 / 0.05)');
-    expect(css).toContain('rgb(34 211 238 / 0.05)');
+    expect(css).toContain('rgb(74 222 128 / 0.05)');
     expect(css).toContain('background-attachment: fixed;');
     // 旧 emerald 光斑与指挥台深底不得回归。
     expect(css).not.toContain('rgb(16 185 129 / 0.14)');

@@ -32,7 +32,7 @@ export default function FeedListHeader({
     >
       <h1 className="flex items-center gap-2">
         <img
-          src="/feedfuse-logo.svg"
+          src="/brand/logo.png"
           alt="Superman"
           width={28}
           height={28}

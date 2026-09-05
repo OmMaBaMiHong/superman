@@ -44,12 +44,15 @@ describe('globals.css contract', () => {
     expect(css).toContain('--color-primary: #0891b2');
     expect(css).toContain('--color-ring: #0891b2');
     expect(css).toContain('--color-muted-foreground: #86868b');
-    // 深色：纯黑底 + 提亮 cyan
+    // 深色：绿黑终端风（纯黑底 + 品牌绿，禁用蓝色系）
     expect(css).toContain('@media (prefers-color-scheme: dark)');
     expect(css).toContain('--color-background: #000000');
     expect(css).toContain('--color-foreground: #f5f5f7');
-    expect(css).toContain('--color-primary: #22d3ee');
+    expect(css).toContain('--color-primary: #4ade80');
+    expect(css).toContain('--color-ring: #4ade80');
+    expect(css).toContain('--color-success: #4ade80');
     expect(css).toContain('--color-muted-foreground: #98989d');
+    expect(css).toContain('--color-border: rgba(74, 222, 128, 0.14)');
     expect(css).toContain('--reader-pane-hover: color-mix(');
     expect(css).toContain('var(--color-primary)');
     expect(css).toContain('background-attachment: fixed;');
@@ -89,13 +92,18 @@ describe('globals.css contract', () => {
     expect(rootBlock).toContain('--glass-border: rgba(0, 0, 0, 0.08)');
     expect(rootBlock).toContain('--glass-highlight: rgba(255, 255, 255, 0.6)');
 
-    // 深色玻璃：rgba(28,28,30) + 白色发丝边框 + 弱高光
+    // 深色玻璃：绿 tint rgba(20,26,22) + 绿色发丝边框 + 绿色顶部高光
     const darkBlock =
       css.match(/@media \(prefers-color-scheme: dark\)\s*\{\s*:root\s*\{([\s\S]*?)\}\s*\}/)?.[1] ??
       '';
-    expect(darkBlock).toContain('--glass-bg: rgba(28, 28, 30, 0.65)');
-    expect(darkBlock).toContain('--glass-border: rgba(255, 255, 255, 0.14)');
-    expect(darkBlock).toContain('--glass-highlight: rgba(255, 255, 255, 0.1)');
+    expect(darkBlock).toContain('--glass-bg: rgba(20, 26, 22, 0.65)');
+    expect(darkBlock).toContain('--glass-border: rgba(74, 222, 128, 0.14)');
+    expect(darkBlock).toContain('--glass-highlight: rgba(74, 222, 128, 0.12)');
+    // 深色块内不得残留 cyan/蓝色系
+    expect(darkBlock).not.toContain('#22d3ee');
+    expect(darkBlock).not.toContain('#67e8f9');
+    expect(darkBlock).not.toContain('34, 211, 238');
+    expect(darkBlock).not.toContain('34 211 238');
   });
 
   it('defines .glass-surface semantic classes with full glass recipe', () => {
@@ -113,9 +121,9 @@ describe('globals.css contract', () => {
   it('uses subtle cyan ambient glow on the body for both themes', () => {
     const css = readFileSync('src/app/globals.css', 'utf-8');
 
-    // 浅色/深色 body 均为极淡 cyan 顶部光晕（让玻璃有可模糊的底）
+    // 浅色 body 淡 cyan 光晕；深色 body 淡绿光晕（终端风）
     expect(css).toContain('rgb(8 145 178 / 0.05)');
-    expect(css).toContain('rgb(34 211 238 / 0.05)');
+    expect(css).toContain('rgb(74 222 128 / 0.05)');
     // 旧 emerald 光斑与指挥台深底光斑不得回归
     expect(css).not.toContain('rgb(16 185 129 / 0.14)');
     expect(css).not.toContain('rgb(16 185 129 / 0.08)');

@@ -768,7 +768,7 @@ const CAMPAIGN_STATUS_META: Record<
   draft: { label: '草稿', cls: 'bg-muted text-muted-foreground', dot: 'bg-muted-foreground' },
   running: { label: '运行中', cls: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400', dot: 'bg-emerald-500' },
   paused: { label: '已暂停', cls: 'bg-amber-500/10 text-amber-600 dark:text-amber-400', dot: 'bg-amber-500' },
-  done: { label: '已完成', cls: 'bg-sky-500/10 text-sky-600 dark:text-sky-400', dot: 'bg-sky-500' },
+  done: { label: '已完成', cls: 'bg-sky-500/10 text-sky-600 dark:bg-emerald-500/10 dark:text-emerald-400', dot: 'bg-sky-500 dark:bg-emerald-400' },
 };
 
 function CampaignStatusBadge({ status, daemon }: { status: string; daemon: boolean }) {

@@ -6,7 +6,7 @@
 
 /* ── Superman「液态玻璃」主题（Liquid Glass）──
    浅色优先：苹果灰白底 #f5f5f7 + 半透明白玻璃；深色：纯黑底 + rgba(28,28,30) 玻璃。
-   强调色品牌 cyan（浅色加深 #0891b2 保对比度，深色 #22d3ee）。
+   强调色：浅色品牌 cyan #0891b2（保对比度）；深色绿黑终端风品牌绿 #4ade80（深色禁用蓝色系）。
    颜色值只允许出现在本文件，组件消费 var(--*) 或语义类。 */
 @layer theme {
   @theme default {
@@ -127,38 +127,42 @@
     --overview-glare: rgba(255, 255, 255, 0.55);
   }
 
+  /* ── 深色：经典绿黑终端风（禁用蓝色系）──
+     纯黑底 + 极轻绿 tint 玻璃；主强调品牌绿 #4ade80（hover 亮态 #86efac 由组件
+     hover 透明度派生，按下/深态 #22c55e 用于 foreground 反差）。 */
   @media (prefers-color-scheme: dark) {
     :root {
       color-scheme: dark;
       --color-background: #000000;
       --color-foreground: #f5f5f7;
 
-      --color-card: rgba(28, 28, 30, 0.65);
+      --color-card: rgba(20, 26, 22, 0.65);
       --color-card-foreground: #f5f5f7;
 
-      --color-popover: rgba(28, 28, 30, 0.78);
+      --color-popover: rgba(20, 26, 22, 0.78);
       --color-popover-foreground: #f5f5f7;
 
-      --color-primary: #22d3ee;
-      --color-primary-foreground: #062830;
+      --color-primary: #4ade80;
+      --color-primary-foreground: #052e16;
 
-      --color-secondary: rgba(255, 255, 255, 0.08);
-      --color-secondary-foreground: #e5e5ea;
+      --color-secondary: rgba(74, 222, 128, 0.08);
+      --color-secondary-foreground: #d7f0dd;
 
-      --color-muted: rgba(255, 255, 255, 0.06);
+      --color-muted: rgba(74, 222, 128, 0.05);
       --color-muted-foreground: #98989d;
 
-      --color-accent: rgba(255, 255, 255, 0.1);
+      --color-accent: rgba(74, 222, 128, 0.1);
       --color-accent-foreground: #f5f5f7;
 
-      --color-success: #34d399;
-      --color-success-foreground: #052e22;
+      /* 成功/准奏 = 品牌绿（终端风语义统一） */
+      --color-success: #4ade80;
+      --color-success-foreground: #052e16;
 
       --color-warning: #fbbf24;
       --color-warning-foreground: #3a2a04;
 
-      --color-info: #67e8f9;
-      --color-info-foreground: #083344;
+      --color-info: #86efac;
+      --color-info-foreground: #052e16;
 
       --color-error: #f87171;
       --color-error-foreground: #450a0a;
@@ -166,18 +170,18 @@
       --color-destructive: #f87171;
       --color-destructive-foreground: #000000;
 
-      --color-border: rgba(255, 255, 255, 0.14);
-      --color-input: rgba(255, 255, 255, 0.16);
-      --color-ring: #22d3ee;
+      --color-border: rgba(74, 222, 128, 0.14);
+      --color-input: rgba(74, 222, 128, 0.18);
+      --color-ring: #4ade80;
       --color-overlay: rgba(0, 0, 0, 0.55);
 
-      /* ── 液态玻璃材质 token（深色）── */
-      --glass-bg: rgba(28, 28, 30, 0.65);
-      --glass-bg-strong: rgba(28, 28, 30, 0.78);
-      --glass-bg-light: rgba(44, 44, 46, 0.5);
-      --glass-border: rgba(255, 255, 255, 0.14);
-      --glass-highlight: rgba(255, 255, 255, 0.1);
-      --glass-topline: rgba(255, 255, 255, 0.14);
+      /* ── 液态玻璃材质 token（深色：带极轻绿 tint）── */
+      --glass-bg: rgba(20, 26, 22, 0.65);
+      --glass-bg-strong: rgba(20, 26, 22, 0.78);
+      --glass-bg-light: rgba(26, 34, 29, 0.5);
+      --glass-border: rgba(74, 222, 128, 0.14);
+      --glass-highlight: rgba(74, 222, 128, 0.12);
+      --glass-topline: rgba(74, 222, 128, 0.16);
       --shadow-glass:
         0 1px 2px rgba(0, 0, 0, 0.4),
         0 8px 24px rgba(0, 0, 0, 0.4);
@@ -185,15 +189,15 @@
         0 2px 6px rgba(0, 0, 0, 0.45),
         0 12px 32px rgba(0, 0, 0, 0.45);
       --shadow-glow:
-        0 0 0 1px rgba(34, 211, 238, 0.28),
-        0 8px 24px rgba(34, 211, 238, 0.12);
+        0 0 0 1px rgba(74, 222, 128, 0.3),
+        0 8px 24px rgba(74, 222, 128, 0.12);
 
-      --overview-accent-inbox: rgb(52 211 153);
-      --overview-accent-unread: rgb(34 211 238);
+      --overview-accent-inbox: rgb(74 222 128);
+      --overview-accent-unread: rgb(74 222 128);
       --overview-accent-read: rgb(152 152 157);
       --overview-accent-stale: rgb(251 191 36);
       --overview-scrim: rgba(0, 0, 0, 0.5);
-      --overview-glare: rgba(255, 255, 255, 0.14);
+      --overview-glare: rgba(74, 222, 128, 0.12);
     }
   }
 
@@ -216,9 +220,13 @@
     body {
       background-image: radial-gradient(
         circle at 50% -10%,
-        rgb(34 211 238 / 0.05),
+        rgb(74 222 128 / 0.05),
         transparent 42%
       );
+    }
+
+    :where(a, button) {
+      -webkit-tap-highlight-color: rgb(74 222 128 / 0.16);
     }
   }
 
@@ -265,7 +273,7 @@
     }
 
     ::-webkit-scrollbar-thumb:hover {
-      background: rgb(34 211 238 / 0.4);
+      background: rgb(74 222 128 / 0.4);
     }
   }
 }

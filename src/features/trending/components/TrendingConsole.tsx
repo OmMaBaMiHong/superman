@@ -26,7 +26,7 @@ import { cn } from '@/lib/utils';
 
 const POLL_MS = 60_000;
 
-/** 排名变化徽章：升红降蓝（热榜语境排名变小=上升），无历史不显示。 */
+/** 排名变化徽章：升红降绿（热榜语境排名变小=上升；深色终端风禁用蓝色），无历史不显示。 */
 function RankDelta({ item }: { item: TrendRadarItem }) {
   if (item.previousRank === null || item.rank === null || item.previousRank === item.rank) {
     return null;
@@ -37,7 +37,7 @@ function RankDelta({ item }: { item: TrendRadarItem }) {
     <span
       className={cn(
         'inline-flex shrink-0 items-center gap-0.5 font-mono text-[10px] tabular-nums',
-        rising ? 'text-red-500' : 'text-sky-500',
+        rising ? 'text-red-500' : 'text-primary',
       )}
       title={`上次第 ${item.previousRank} 名`}
     >
