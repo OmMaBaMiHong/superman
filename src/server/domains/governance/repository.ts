@@ -431,6 +431,8 @@ export async function listGovernanceQueue(
     /** 状态过滤；缺省返回 candidate + pending（待批队列）。 */
     statuses?: GovernanceStatus[];
     categoryId?: string;
+    /** 选题搜索：标题/摘要模糊匹配（ILIKE）。 */
+    keyword?: string;
     page?: number;
     pageSize?: number;
     userId?: string;
@@ -450,6 +452,13 @@ export async function listGovernanceQueue(
   if (input.categoryId) {
     conditions.push(`f.category_id = $${paramIndex++}`);
     values.push(input.categoryId);
+  }
+  if (input.keyword) {
+    conditions.push(
+      `(a.title ilike '%' || $${paramIndex} || '%' or coalesce(a.summary, '') ilike '%' || $${paramIndex} || '%')`,
+    );
+    paramIndex += 1;
+    values.push(input.keyword);
   }
   const whereSql = conditions.join(' and ');
 

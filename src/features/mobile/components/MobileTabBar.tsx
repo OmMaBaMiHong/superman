@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BookOpen, Flame, Settings, Stamp } from 'lucide-react';
+import { BookOpen, Flame, PenLine, Settings, Stamp } from 'lucide-react';
 import { useGovernanceQueueSize } from '@/features/governance/hooks/useGovernanceQueueSize';
 import { cn } from '@/lib/utils';
 
@@ -97,6 +97,16 @@ export default function MobileTabBar({ onOpenSettings }: MobileTabBarProps) {
           {indicator(pathname === '/trending')}
           <Flame aria-hidden="true" className="h-5 w-5" />
           <span>热点</span>
+        </Link>
+        <Link
+          href="/studio"
+          aria-label="创作"
+          aria-current={pathname === '/studio' ? 'page' : undefined}
+          className={tabClass(pathname === '/studio')}
+        >
+          {indicator(pathname === '/studio')}
+          <PenLine aria-hidden="true" className="h-5 w-5" />
+          <span>创作</span>
         </Link>
         {settingsItem}
       </div>

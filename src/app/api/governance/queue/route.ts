@@ -37,10 +37,16 @@ export async function GET(request: Request) {
       throw new ValidationError('categoryId 取值非法', { categoryId: '必须为正整数' });
     }
 
+    const keyword = url.searchParams.get('keyword')?.trim() || undefined;
+    if (keyword && keyword.length > 120) {
+      throw new ValidationError('keyword 取值非法', { keyword: '最长 120 字符' });
+    }
+
     const result = await listGovernanceQueue(getPool(), {
       userId: session.userId,
       statuses,
       categoryId: categoryId ?? undefined,
+      keyword,
       page: parsePositiveInt(url.searchParams.get('page')) ?? 1,
       pageSize: parsePositiveInt(url.searchParams.get('pageSize')) ?? 20,
     });

@@ -2203,6 +2203,7 @@ export async function getGovernanceQueue(
   input?: {
     statuses?: GovernanceStatus[];
     categoryId?: string;
+    keyword?: string;
     page?: number;
     pageSize?: number;
   },
@@ -2213,6 +2214,7 @@ export async function getGovernanceQueue(
     params.set('status', input.statuses.join(','));
   }
   if (input?.categoryId) params.set('categoryId', input.categoryId);
+  if (input?.keyword) params.set('keyword', input.keyword);
   if (typeof input?.page === 'number') params.set('page', String(input.page));
   if (typeof input?.pageSize === 'number') params.set('pageSize', String(input.pageSize));
 
@@ -2349,4 +2351,160 @@ export async function getTrendRadarItemDetail(
   options?: RequestApiOptions,
 ): Promise<TrendRadarItemDetail> {
   return requestApi(`/api/trend-radar/items/${encodeURIComponent(id)}`, undefined, options);
+}
+
+/* ── 创作流水线（洗稿）── */
+
+export type RewritePlatform = 'wechat' | 'xhs' | 'novel';
+
+export interface RewriteJobCreated {
+  id: string;
+  articleId: string;
+  kind: 'rewrite';
+  platform: string;
+  status: PipelineJobStatus;
+  reused: boolean;
+  enqueued: boolean;
+  queueJobId: string | null;
+  createdAt: string;
+}
+
+export type PipelineJobStatus = 'queued' | 'running' | 'succeeded' | 'failed';
+
+export interface PipelineJobItem {
+  id: string;
+  articleId: string;
+  kind: string;
+  platform: string;
+  status: PipelineJobStatus;
+  error: string | null;
+  durationMs: number | null;
+  createdAt: string;
+  updatedAt: string;
+  articleTitle: string;
+}
+
+export async function createRewriteJobs(
+  input: { articleId: string; platforms: RewritePlatform[] },
+  options?: RequestApiOptions,
+): Promise<{ jobs: RewriteJobCreated[] }> {
+  return requestApi(
+    '/api/pipelines/rewrite',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    },
+    options,
+  );
+}
+
+export async function listPipelineJobs(
+  input?: { kind?: 'rewrite' | 'voiceover' | 'video'; status?: PipelineJobStatus; page?: number; pageSize?: number },
+  options?: RequestApiOptions,
+): Promise<{ items: PipelineJobItem[]; total: number }> {
+  const params = new URLSearchParams();
+  if (input?.kind) params.set('kind', input.kind);
+  if (input?.status) params.set('status', input.status);
+  if (typeof input?.page === 'number') params.set('page', String(input.page));
+  if (typeof input?.pageSize === 'number') params.set('pageSize', String(input.pageSize));
+  const suffix = params.size > 0 ? `?${params.toString()}` : '';
+  return requestApi(`/api/pipelines/jobs${suffix}`, undefined, options);
+}
+
+export async function retryPipelineJob(
+  id: string,
+  options?: RequestApiOptions,
+): Promise<unknown> {
+  return requestApi(
+    `/api/pipelines/jobs/${encodeURIComponent(id)}/retry`,
+    { method: 'POST' },
+    options,
+  );
+}
+
+export type OriginalityFlag = 'ok' | 'rewritten' | 'needs_review';
+export type DraftStatus = 'draft' | 'accepted' | 'exported';
+
+export interface DraftItem {
+  id: string;
+  articleId: string;
+  jobId: string | null;
+  platform: string;
+  title: string;
+  similarityScore: number | null;
+  originalityFlag: OriginalityFlag;
+  status: DraftStatus;
+  createdAt: string;
+  updatedAt: string;
+  articleTitle: string;
+}
+
+export interface DraftDetail extends DraftItem {
+  body: string;
+  articleTitle: string;
+  articleSummary: string | null;
+  articleLink: string | null;
+}
+
+export async function listDrafts(
+  input?: { articleId?: string; platform?: string; page?: number; pageSize?: number },
+  options?: RequestApiOptions,
+): Promise<{ items: DraftItem[]; total: number }> {
+  const params = new URLSearchParams();
+  if (input?.articleId) params.set('articleId', input.articleId);
+  if (input?.platform) params.set('platform', input.platform);
+  if (typeof input?.page === 'number') params.set('page', String(input.page));
+  if (typeof input?.pageSize === 'number') params.set('pageSize', String(input.pageSize));
+  const suffix = params.size > 0 ? `?${params.toString()}` : '';
+  return requestApi(`/api/drafts${suffix}`, undefined, options);
+}
+
+export async function getDraftDetail(
+  id: string,
+  options?: RequestApiOptions,
+): Promise<DraftDetail> {
+  // 路由返回 { draft } 包装，这里拆平
+  const result = await requestApi<{ draft: DraftDetail }>(
+    `/api/drafts/${encodeURIComponent(id)}`,
+    undefined,
+    options,
+  );
+  return result.draft;
+}
+
+export async function acceptDraft(
+  id: string,
+  options?: RequestApiOptions,
+): Promise<unknown> {
+  return requestApi(
+    `/api/drafts/${encodeURIComponent(id)}/accept`,
+    { method: 'POST' },
+    options,
+  );
+}
+
+/** 导出草稿 Markdown：返回文本与文件名（浏览器侧自行触发下载）。 */
+export async function exportDraftMarkdown(
+  id: string,
+  options?: RequestApiOptions & { timeoutMs?: number },
+): Promise<{ markdown: string; fileName: string }> {
+  let res: Response;
+  try {
+    res = await api(toAbsoluteUrl(`/api/drafts/${encodeURIComponent(id)}/export`), {
+      method: 'GET',
+      timeout: options?.timeoutMs ?? 15_000,
+    });
+  } catch (err) {
+    throwTransportApiError(err, options);
+  }
+  if (!res.ok) {
+    throwInvalidResponseApiError(res.status, options);
+  }
+  return {
+    markdown: await res.text(),
+    fileName:
+      parseContentDispositionFileName(res.headers.get('content-disposition')) ??
+      `draft-${id}.md`,
+  };
 }

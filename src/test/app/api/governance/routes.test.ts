@@ -101,6 +101,19 @@ describe('/api/governance/queue', () => {
     });
   });
 
+  it('keyword 参数透传并裁剪空白；超长 keyword 返回 400', async () => {
+    const res = await queueGET(
+      new Request('http://localhost/api/governance/queue?status=archived&keyword=%20%E6%B7%B1%E5%BA%A6%20'),
+    );
+    expect(res.status).toBe(200);
+    expect(listGovernanceQueueMock).toHaveBeenCalledWith(pool, expect.objectContaining({ keyword: '深度' }));
+
+    const tooLong = await queueGET(
+      new Request(`http://localhost/api/governance/queue?keyword=${'a'.repeat(121)}`),
+    );
+    expect(tooLong.status).toBe(400);
+  });
+
   it('非法 status / categoryId 返回 400', async () => {
     const res1 = await queueGET(new Request('http://localhost/api/governance/queue?status=bogus'));
     expect(res1.status).toBe(400);
