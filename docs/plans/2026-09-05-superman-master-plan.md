@@ -25,6 +25,7 @@
 | 三省六部现有部署 | 保留作个人阅读复习工具（SM-2 复习 FeedFuse 没有），不进生产链路 | |
 | TrendRadar | **原版保留、独立运行**，作为「热点雷达」采集引擎；通过 SQLite 同步 + 通用 Webhook 双轨接入，不 fork 不改码，保持跟随上游 v6.x 升级 | 它是热搜聚合+通知工具，不是社媒分发工具（无公众号/小红书发布能力） |
 | maigret + Aliens_eye | 封装为独立 Python OSINT worker（FastAPI 包 HTTP），Aliens_eye 做发现层（842 站、变更监控）、maigret 做深挖层（3221 站、资料抽取） | 两者都是 Python 异步程序，不能直接 import 进 Node |
+| DeepSeek Harness | **不作为核心，作为 AI 执行引擎层**：Superman 保持核心（多用户/Postgres/pg-boss/H5/PWA/公网分享），DSH 通过 `dsh sdk`（JSON-RPC）或 headless 承接 M4 级复杂多步 agent 任务；轻量路径 = Superman 暴露 MCP server 给 DSH | DSH 无 cron、无持久队列、单用户无认证、无移动端/PWA（0.1.3-alpha 开发者预览，有破坏性变更风险）；以其为核心会失去产品形态 |
 | 前端 | 保留三栏阅读器，新增「审批台」「选题卡」「提词器」「流水线」四个视图 | 见 §4 |
 
 ## 1. 目标架构
@@ -183,6 +184,7 @@ maigret（3221 站深挖）与 Aliens_eye（842 站快筛 + 变更监控 + MCP�
 
 - [ ] 媒体 adapter 接口 `MediaProvider`：`submit(prompt, opts) → jobId` / `poll(jobId) → status|url`，首批实现 MiniMax Hailuo；预留可灵/即梦/本地 ComfyUI
 - [ ] 分镜生成：LLM 把选题拆 4-8 镜（每镜 prompt + 时长 + 运镜）
+- [ ] **DSH 接入点（可选增强）**：分镜→生成→审片→重拍的多步循环是典型 agent 任务——pg-boss worker 可通过 `dsh sdk`（JSON-RPC profile）或 headless 模式把该循环委托给 DeepSeek Harness 执行，结果回写 Postgres；不接入时直接 LLM 单轮生成分镜也可跑通
 - [ ] 逐镜 pg-boss job，素材落 `video_materials`，失败单镜重试
 - [ ] 前端：分镜预览 + 单镜重生成 + 素材拼接导出（ffmpeg 或手动）
 
