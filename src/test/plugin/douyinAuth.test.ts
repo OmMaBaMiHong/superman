@@ -13,17 +13,17 @@ const publishDouyinMock = vi.fn();
 const markVerifiedMock = vi.fn();
 const getAccountMock = vi.fn();
 
-vi.mock('@/core/platform-accounts/douyin/douyinProvider', () => ({
-  startDouyinLoginSession: (...args: unknown[]) => startSessionMock(...args),
-  getDouyinLoginSession: (...args: unknown[]) => getSessionMock(...args),
+vi.mock('@/core/platform-accounts/sau/sauProvider', () => ({
+  startSauLoginSession: (...args: unknown[]) => startSessionMock(...args),
+  getSauLoginSession: (...args: unknown[]) => getSessionMock(...args),
 }));
-vi.mock('@/core/platform-accounts/douyin/douyinService', () => ({
-  confirmDouyinLoginSession: (...args: unknown[]) => confirmSessionMock(...args),
-  handleDouyinLoginCallback: (...args: unknown[]) => handleCallbackMock(...args),
-  verifyDouyinAccount: (...args: unknown[]) => verifyDouyinMock(...args),
+vi.mock('@/core/platform-accounts/sau/sauService', () => ({
+  confirmSauLoginSession: (...args: unknown[]) => confirmSessionMock(...args),
+  handleSauLoginCallback: (...args: unknown[]) => handleCallbackMock(...args),
+  verifySauAccount: (...args: unknown[]) => verifyDouyinMock(...args),
 }));
-vi.mock('@/core/platform-accounts/douyin/douyinPublishService', () => ({
-  publishDraftToDouyin: (...args: unknown[]) => publishDouyinMock(...args),
+vi.mock('@/core/platform-accounts/sau/sauPublishService', () => ({
+  publishDraftVideoToSau: (...args: unknown[]) => publishDouyinMock(...args),
 }));
 vi.mock('@/core/platform-accounts/repository', () => ({
   listPlatformAccounts: vi.fn(async () => []),
@@ -167,7 +167,7 @@ describe('plugin/host/api · 抖音扫码授权流（P2e-2）', () => {
   it('创建扫码会话 → 轮询二维码状态 → confirm 落库', async () => {
     startSessionMock.mockReturnValue({ id: 'sess-1' });
     getSessionMock.mockReturnValue({
-      id: 'sess-1', userId: '1', status: 'pending', qrSrc: 'https://douyin.example/qr.png',
+      id: 'sess-1', userId: '1', platform: 'douyin', status: 'pending', qrSrc: 'https://douyin.example/qr.png',
     });
     confirmSessionMock.mockResolvedValue({ id: 'acc-1', platform: 'douyin' });
 
@@ -178,7 +178,7 @@ describe('plugin/host/api · 抖音扫码授权流（P2e-2）', () => {
     await handler(makeReq('POST', '/s/api/platform-accounts/douyin/login-session', cookie, { accountName: '主号' }), create as never);
     expect(create.status).toBe(200);
     expect(JSON.parse(create.body).data.sessionId).toBe('sess-1');
-    expect(startSessionMock).toHaveBeenCalledWith({ userId: '1', accountName: '主号' });
+    expect(startSessionMock).toHaveBeenCalledWith({ platform: 'douyin', userId: '1', accountName: '主号' });
 
     const qr = makeRes();
     await handler(makeReq('GET', '/s/api/platform-accounts/douyin/login-session/sess-1/qr', cookie), qr as never);
@@ -191,7 +191,7 @@ describe('plugin/host/api · 抖音扫码授权流（P2e-2）', () => {
     expect(confirmSessionMock).toHaveBeenCalledWith(fakeDb, { sessionId: 'sess-1', userId: '1' });
 
     // 别人的会话 → 404
-    getSessionMock.mockReturnValue({ id: 'sess-1', userId: '7', status: 'pending', qrSrc: null });
+    getSessionMock.mockReturnValue({ id: 'sess-1', userId: '7', platform: 'douyin', status: 'pending', qrSrc: null });
     const foreign = makeRes();
     await handler(makeReq('GET', '/s/api/platform-accounts/douyin/login-session/sess-1/qr', cookie), foreign as never);
     expect(foreign.status).toBe(404);
@@ -268,6 +268,7 @@ describe('plugin/host/api · 抖音扫码授权流（P2e-2）', () => {
     }), res as never);
     expect(res.status).toBe(200);
     expect(publishDouyinMock).toHaveBeenCalledWith(fakeDb, expect.objectContaining({
+      platform: 'douyin',
       draftId: '9',
       accountId: '3',
       videoPath: 'uuid-1_v.mp4',

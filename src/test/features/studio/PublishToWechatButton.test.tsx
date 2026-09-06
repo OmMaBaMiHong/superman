@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   listPlatformAccounts,
+  publishDraftToSauVideo,
   publishDraftToWechat,
   type PlatformAccount,
 } from '@/lib/api/apiClient';
@@ -14,6 +15,7 @@ vi.mock('@/lib/api/apiClient', async (importOriginal) => {
     ...original,
     listPlatformAccounts: vi.fn(),
     publishDraftToWechat: vi.fn(),
+    publishDraftToSauVideo: vi.fn(),
   };
 });
 
@@ -22,7 +24,8 @@ vi.mock('@/features/toast/toast', () => ({
 }));
 
 const mockedList = vi.mocked(listPlatformAccounts);
-const mockedPublish = vi.mocked(publishDraftToWechat);
+const mockedPublishWechat = vi.mocked(publishDraftToWechat);
+const mockedPublishSau = vi.mocked(publishDraftToSauVideo);
 const mockedToast = vi.mocked(toast);
 
 function makeAccount(overrides: Partial<PlatformAccount> = {}): PlatformAccount {
@@ -44,25 +47,23 @@ function makeAccount(overrides: Partial<PlatformAccount> = {}): PlatformAccount 
 }
 
 beforeEach(() => {
-  mockedPublish.mockResolvedValue({ mediaId: 'm1', publishedPostId: 'pp1', postUrl: 'wechat-draft://m1' });
+  vi.clearAllMocks();
+  mockedPublishWechat.mockResolvedValue({ mediaId: 'm1', publishedPostId: 'pp1', postUrl: 'wechat-draft://m1' });
+  mockedPublishSau.mockResolvedValue({ vendorFilename: 'v.mp4', publishedPostId: 'pp2', postUrl: 'douyin-video://v.mp4' });
 });
 
-describe('发布到公众号按钮', () => {
-  it('无账号：按钮置灰 + tooltip 指引，不发请求', async () => {
+describe('发布按钮（多平台）', () => {
+  it('无账号：sheet 空态提示去授权，确认按钮不可用，不发请求', async () => {
     mockedList.mockResolvedValue({ items: [] });
     render(<PublishToWechatButton draftId="d1" />);
 
-    const button = screen.getByTestId('publish-to-wechat');
-    // 首次点击触发账号探测；探测结果为空后按钮置灰
-    fireEvent.click(button);
+    fireEvent.click(screen.getByTestId('publish-to-wechat'));
     await waitFor(() => {
       expect(mockedList).toHaveBeenCalledWith({ platform: 'wechat' }, expect.anything());
     });
-    await waitFor(() => {
-      expect(button).toBeDisabled();
-    });
-    expect(button).toHaveAttribute('title', '先去设置页添加公众号授权');
-    expect(mockedPublish).not.toHaveBeenCalled();
+    await screen.findByText(/还没有可用的公众号账号/);
+    expect(screen.getByRole('button', { name: '确认发布' })).toBeDisabled();
+    expect(mockedPublishWechat).not.toHaveBeenCalled();
   });
 
   it('单账号：预选 + 确认发布成功 → toast + 已发布徽章', async () => {
@@ -75,7 +76,7 @@ describe('发布到公众号按钮', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '确认发布' }));
     await waitFor(() => {
-      expect(mockedPublish).toHaveBeenCalledWith('d1', { accountId: 'a1' });
+      expect(mockedPublishWechat).toHaveBeenCalledWith('d1', { accountId: 'a1' });
     });
     await waitFor(() => {
       expect(mockedToast.success).toHaveBeenCalledWith('已送入公众号草稿箱');
@@ -96,7 +97,41 @@ describe('发布到公众号按钮', () => {
     fireEvent.click(screen.getByRole('radio', { name: /副号/ }));
     fireEvent.click(screen.getByRole('button', { name: '确认发布' }));
     await waitFor(() => {
-      expect(mockedPublish).toHaveBeenCalledWith('d1', { accountId: 'a2' });
+      expect(mockedPublishWechat).toHaveBeenCalledWith('d1', { accountId: 'a2' });
     });
+  });
+
+  it('抖音：即时发布红色确认 + 视频来源必填 + 调 SAU 发布', async () => {
+    mockedList.mockImplementation(({ platform }: { platform?: string }) =>
+      Promise.resolve({
+        items: platform === 'douyin'
+          ? [makeAccount({ id: 'dy1', platform: 'douyin', credKind: 'cookie', accountName: '抖音主号' })]
+          : [],
+      }),
+    );
+    render(<PublishToWechatButton draftId="d1" />);
+
+    fireEvent.click(screen.getByTestId('publish-to-wechat'));
+    // 切到抖音平台
+    fireEvent.click(await screen.findByRole('radio', { name: /抖音/ }));
+    // 红色二次确认文案
+    await screen.findByText(/即时发布，不可撤回/);
+    // 视频来源未填：确认按钮禁用 + 点击 toast 报错
+    const confirm = screen.getByRole('button', { name: '确认即时发布' });
+    expect(confirm).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('视频文件路径或视频 URL'), {
+      target: { value: 'https://cdn.example.com/v.mp4' },
+    });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    fireEvent.click(confirm);
+    await waitFor(() => {
+      expect(mockedPublishSau).toHaveBeenCalledWith('d1', expect.objectContaining({
+        platform: 'douyin',
+        accountId: 'dy1',
+        videoUrl: 'https://cdn.example.com/v.mp4',
+      }));
+    });
+    expect(mockedToast.success).toHaveBeenCalledWith('已发布到抖音');
   });
 });
