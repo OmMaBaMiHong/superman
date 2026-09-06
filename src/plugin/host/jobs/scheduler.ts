@@ -6,6 +6,7 @@
  *   - feed 抓取：每 60s 扫一轮到期订阅源，逐源 fetchAndIngestFeed（src/worker/index 导出，
  *     治理摄取在该 handler 内联执行；article filter 等后续 pg-boss 任务由 no-op boss 跳过，
  *     迁移期交由 Next.js worker 的队列侧继续消费）
+ *   - commentIntel.tick：每 6h 对已发布作品拉评论 → 粗分析 → 反哺选题候选（P3a）
  *   - pipeline.rewrite：每 15s 轮询 pipeline_jobs 里 queued 的 rewrite 任务，
  *     直接调 executeRewriteJob 执行（不经 pg-boss）
  *
@@ -22,6 +23,7 @@ import { executeRewriteJob } from '@/core/pipelines/services/rewriteService'
 import { notify, notifyOncePerWindow } from '@/core/notify/service'
 import { getGovernanceStats } from '@/core/governance/repository'
 import { runPublishTrackingTick } from '@/core/publish-tracking/service'
+import { runCommentIntelTick } from '@/core/comment-intel/service'
 import { fetchAndIngestFeed } from '@/worker/index'
 import { listEnabledFeedsForFetch } from '@/server/domains/feeds/repositories/feedsRepo'
 import { selectFeedsForRefreshAll } from '@/worker/refreshAll'
@@ -34,6 +36,7 @@ export interface PluginSchedulerConfig {
   feedRefreshIntervalMs?: number
   pipelinePollIntervalMs?: number
   publishTrackingIntervalMs?: number
+  commentIntelIntervalMs?: number
 }
 
 export interface SchedulerHandle {
@@ -49,6 +52,7 @@ const TRENDRADAR_INTERVAL = 30 * 60_000
 const FEED_TICK_INTERVAL = 60_000
 const PIPELINE_POLL_INTERVAL = 15_000
 const PUBLISH_TRACKING_INTERVAL = 30 * 60_000
+const COMMENT_INTEL_INTERVAL = 6 * 3600_000
 
 /** 每条 tick 最多执行的洗稿任务数（防雪崩）。 */
 const PIPELINE_BATCH_LIMIT = 10
@@ -203,7 +207,19 @@ export function startPluginScheduler(
     }
   })
 
-  logger.log('调度器已启动：trendradar.sync(30m) + feed.fetch(60s) + pipeline.rewrite(15s) + publishTracking.tick(30m)')
+  every('commentIntel.tick', config.commentIntelIntervalMs ?? COMMENT_INTEL_INTERVAL, async () => {
+    const users = await listUsers(pool as never)
+    for (const user of users.filter((u) => u.status === 'active')) {
+      const result = await runCommentIntelTick(pool as never, { userId: user.id })
+      if (result.synced > 0 || result.failed > 0) {
+        logger.log(
+          `commentIntel.tick: user=${user.id} due=${result.due} synced=${result.synced} analyzed=${result.analyzed} promoted=${result.promoted} failed=${result.failed}`,
+        )
+      }
+    }
+  })
+
+  logger.log('调度器已启动：trendradar.sync(30m) + feed.fetch(60s) + pipeline.rewrite(15s) + publishTracking.tick(30m) + commentIntel.tick(6h)')
   return {
     stop: () => {
       for (const timer of timers) clearInterval(timer)

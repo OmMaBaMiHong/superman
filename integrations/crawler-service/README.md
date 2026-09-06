@@ -4,7 +4,7 @@
 
 对内服务 Superman 的爬虫微服务。把「各平台作品数据 / 评论抓取」从主应用剥离成独立部署单元：
 
-- **对内**：Superman core 经 `core/crawlerClient.ts` 调用（`CRAWLER_SERVICE_URL`，默认 `http://127.0.0.1:5510`）
+- **对内**：Superman core 经 `src/core/crawlerClient.ts` 调用（`CRAWLER_SERVICE_URL`，默认 `http://127.0.0.1:5510`）；表现追踪（P2d 三平台快照）与评论反哺选题（P3a，调度器 `commentIntel.tick` 每 6h）共用此通路
 - **对外预留**：provider 注册表 + caller 鉴权 + 限流 + TTL 缓存 + 统一信封，架构上可对齐 TikHub 做成多租户数据平台（加 caller 配额/计费即可）
 
 ## 运行
