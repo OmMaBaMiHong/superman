@@ -53,3 +53,10 @@ uploads/
 .codebase-memory/
 **/cookies/
 **/cookiesFile/
+
+# P3a 爬虫服务本地环境
+integrations/crawler-service/.venv/
+
+# Python 运行时产物
+__pycache__/
+.pytest_cache/
