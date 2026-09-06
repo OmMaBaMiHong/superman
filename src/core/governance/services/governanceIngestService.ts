@@ -18,8 +18,10 @@ import { normalizeUserId } from '@/server/domains/users/userScope';
 import { isDuplicateTitle, matchExcludeKeyword } from '@/core/governance/dedup';
 import { normalizeUrl } from '@/core/governance/normalize';
 import {
+  DIRECTION_AI_CONFIDENCE_THRESHOLD,
   FALLBACK_DIRECTION_KEY,
   classifyByKeywords,
+  computeDirectionAlgoVersion,
   listDirectionStrategies,
 } from '@/core/governance/directions';
 import {
@@ -27,6 +29,11 @@ import {
   type GovernanceDraft,
 } from '@/core/governance/aiDraft';
 import { selectQuotaItems, shouldAutoApprove } from '@/core/governance/quota';
+import {
+  allocateDirectionQuotas,
+  selectWithDirectionQuotas,
+  splitQuota,
+} from '@/core/governance/quota';
 import {
   countTodayGovernedByCategory,
   getGovernancePreference,
@@ -112,6 +119,10 @@ export async function evaluateGovernanceBatch(
   const knownTitles = [...recentTitles, ...rejectMemory.map((row) => row.title)];
 
   const draftFn = deps?.draft ?? draftGovernanceArticle;
+  // P2c：算法版本快照（模板增删/权重/规则变化都会改变版本），记入 direction_reason 前缀。
+  const algoVersion = computeDirectionAlgoVersion(strategies);
+  const promptDirections = strategies.map((s) => ({ key: s.key, name: s.name, aiHint: s.aiHint }));
+  const enabledDirectionKeys = new Set(strategies.map((s) => s.key));
   const decisions: GovernanceIngestDecision[] = [];
   const scored: Array<{ decision: GovernanceIngestDecision; qualityScore: number }> = [];
   const batchTitles: string[] = [];
@@ -147,50 +158,142 @@ export async function evaluateGovernanceBatch(
         sourceUrl: item.link,
         feedTitle: input.feedTitle,
         categoryTitle: input.categoryTitle ?? null,
+        directions: promptDirections,
       },
       input.aiConfig,
     );
     batchTitles.push(item.title);
-    // ③ 方向分类（关键词派）：按模板 sort 先中先得，未命中归兜底 general。
-    const classified = classifyByKeywords(item.title, item.summary ?? '', strategies);
-    const strategyName = classified
-      ? strategies.find((s) => s.key === classified.directionKey)?.name ?? classified.directionKey
-      : null;
+
+    // ③ 方向分类（双通道）：关键词命中优先；未命中走 AI 分类
+    // （幻觉 key / 置信度 < 0.6 / 未配置 / 回退 → 兜底 general）。
+    const keywordClassified = classifyByKeywords(item.title, item.summary ?? '', strategies);
+    const aiDirectionKey =
+      draft.directionKey && enabledDirectionKeys.has(draft.directionKey) ? draft.directionKey : null;
+    const aiConfidence = draft.directionConfidence ?? 0;
+    const aiClassified =
+      !keywordClassified && aiDirectionKey && aiConfidence >= DIRECTION_AI_CONFIDENCE_THRESHOLD
+        ? { directionKey: aiDirectionKey, confidence: aiConfidence, reason: draft.directionReason }
+        : null;
+
+    let directionKey: string;
+    let directionReason: string;
+    if (keywordClassified) {
+      directionKey = keywordClassified.directionKey;
+      const strategyName =
+        strategies.find((s) => s.key === keywordClassified.directionKey)?.name ??
+        keywordClassified.directionKey;
+      directionReason = `命中关键词「${keywordClassified.matchedKeyword ?? ''}」，归入「${strategyName}」`;
+    } else if (aiClassified) {
+      directionKey = aiClassified.directionKey;
+      const strategyName =
+        strategies.find((s) => s.key === aiClassified.directionKey)?.name ?? aiClassified.directionKey;
+      directionReason =
+        `AI 分类（置信度 ${aiClassified.confidence.toFixed(2)}），归入「${strategyName}」` +
+        (aiClassified.reason ? `：${aiClassified.reason}` : '');
+    } else {
+      directionKey = FALLBACK_DIRECTION_KEY;
+      directionReason = '关键词未命中且 AI 未给出可信方向，归入「其他」';
+    }
+
     const accepted: GovernanceIngestDecision = {
       index,
       item,
       action: 'insert',
       status: 'candidate',
       draft,
-      directionKey: classified?.directionKey ?? FALLBACK_DIRECTION_KEY,
-      directionReason: classified
-        ? `命中关键词「${classified.matchedKeyword ?? ''}」，归入「${strategyName}」`
-        : '未命中方向关键词，归入「其他」（AI 分类待 P2c）',
+      directionKey,
+      directionReason: `[algo ${algoVersion}] ${directionReason}`,
     };
     scored.push({ decision: accepted, qualityScore: draft.qualityScore });
     decisions.push(accepted);
   }
 
-  // 配额：今日已占用计入，剩余配额在聚焦/常驻桶间按质量分截取。
+  // ⑤ 配额：今日已占用计入。
+  //   无方向模板（理论上 lazy seed 后不会发生）→ 退回 v1 聚焦/常驻桶行为；
+  //   有模板 → 第一层分类桶（focusRatio，per-feed 摄取常驻桶恒为空），
+  //   第二层桶内按方向 quota_weight 归一化分配（权重 0 的 general 不分配，
+  //   但 qualityScore ≥ autoApproveThreshold 时被动收纳直通归档）。
   const todayCount = await countTodayGovernedByCategory(db, {
     categoryId: input.categoryId,
     userId: scopedUserId,
   });
   const remaining = Math.max(0, dailyLimit - todayCount);
 
-  const selected =
-    remaining > 0
-      ? selectQuotaItems({
-          focusItems: scored,
-          residentItems: [],
-          dailyLimit: remaining,
-          focusRatio,
-        })
-      : [];
-  const selectedSet = new Set(selected.map((entry) => entry.decision.index));
+  const weights = strategies.map((s) => ({ key: s.key, quotaWeight: s.quotaWeight }));
+  const weightByKey = new Map(weights.map((w) => [w.key, w.quotaWeight]));
+
+  // 被动收纳：权重 0 方向的高分候选不占用配额，直接归档。
+  const directArchivedSet = new Set<number>();
+  if (autoApproveThreshold > 0 && strategies.length > 0) {
+    for (const entry of scored) {
+      const weight = weightByKey.get(entry.decision.directionKey ?? '') ?? 0;
+      if (weight === 0 && shouldAutoApprove(entry.qualityScore, autoApproveThreshold)) {
+        directArchivedSet.add(entry.decision.index);
+      }
+    }
+  }
+  const quotaPool = scored.filter((entry) => !directArchivedSet.has(entry.decision.index));
+
+  let selectedSet: Set<number>;
+  if (remaining <= 0) {
+    selectedSet = new Set();
+  } else if (strategies.length === 0) {
+    // 旧路径：聚焦/常驻桶（无方向概念）。
+    const selected = selectQuotaItems({
+      focusItems: quotaPool,
+      residentItems: [],
+      dailyLimit: remaining,
+      focusRatio,
+    });
+    selectedSet = new Set(selected.map((entry) => entry.decision.index));
+  } else {
+    // 第一层：分类桶（focusRatio）；第二层：聚焦桶内按方向权重分配。
+    const { focusQuota } = splitQuota(remaining, focusRatio);
+    const directionQuotas = allocateDirectionQuotas(weights, focusQuota);
+    const withDirection = quotaPool.map((entry) => ({
+      ...entry,
+      directionKey: entry.decision.directionKey ?? null,
+    }));
+    const selected = selectWithDirectionQuotas({
+      items: withDirection,
+      quotas: directionQuotas,
+      weights,
+      total: focusQuota,
+    });
+    // 桶级回填：常驻桶为空，其余量回填聚焦桶内有权重方向的剩余候选。
+    let slotsLeft = remaining - selected.length;
+    if (slotsLeft > 0) {
+      const chosen = new Set(selected);
+      const refill = withDirection
+        .filter(
+          (entry) =>
+            !chosen.has(entry) &&
+            entry.directionKey !== null &&
+            (weightByKey.get(entry.directionKey) ?? 0) > 0,
+        )
+        .sort((a, b) => b.qualityScore - a.qualityScore);
+      selected.push(...refill.slice(0, slotsLeft));
+      slotsLeft = remaining - selected.length;
+    }
+    selectedSet = new Set(selected.map((entry) => entry.decision.index));
+  }
 
   return decisions.map((decision) => {
     if (decision.action !== 'insert') return decision;
+    const score = decision.draft?.qualityScore ?? 0;
+    // 被动收纳直通：权重 0 方向 + 高分 → archived，不占配额。
+    if (directArchivedSet.has(decision.index)) {
+      return {
+        ...decision,
+        status: 'archived' as const,
+        draft: decision.draft
+          ? {
+              ...decision.draft,
+              aiReason: `${decision.draft.aiReason}（兜底方向高分直通：质量分 ${score} ≥ 自动准奏阈值 ${autoApproveThreshold}）`,
+            }
+          : decision.draft,
+      };
+    }
     if (!selectedSet.has(decision.index)) {
       return {
         index: decision.index,
@@ -198,9 +301,11 @@ export async function evaluateGovernanceBatch(
         action: 'skip',
         skipReason: 'quota_exceeded',
         skipDetail: `分类今日配额 ${dailyLimit} 已用完（今日已收 ${todayCount}）`,
+        // 保留方向判定结果便于观测（配额外跳过不等于未分类）。
+        directionKey: decision.directionKey,
+        directionReason: decision.directionReason,
       };
     }
-    const score = decision.draft?.qualityScore ?? 0;
     const autoApproved = shouldAutoApprove(score, autoApproveThreshold);
     return {
       ...decision,
