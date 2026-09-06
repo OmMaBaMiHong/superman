@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_DAILY_LIMIT,
   DEFAULT_FOCUS_RATIO,
+  allocateDirectionQuotas,
   clampDailyLimit,
   clampFocusRatio,
   selectQuotaItems,
+  selectWithDirectionQuotas,
   shouldAutoApprove,
   splitQuota,
-} from '@/server/domains/governance/quota';
+} from '@/core/governance/quota';
 
 function item(score: number, tag: string) {
   return { qualityScore: score, tag };
@@ -93,5 +95,88 @@ describe('governance quota / shouldAutoApprove', () => {
     expect(shouldAutoApprove(80, 80)).toBe(true);
     expect(shouldAutoApprove(79, 80)).toBe(false);
     expect(shouldAutoApprove(95, 80)).toBe(true);
+  });
+});
+
+describe('governance quota / allocateDirectionQuotas（P2c 方向权重归一化）', () => {
+  it('按权重比例分配（最大余数法），总量守恒', () => {
+    const quotas = allocateDirectionQuotas(
+      [
+        { key: 'topic', quotaWeight: 40 },
+        { key: 'money', quotaWeight: 30 },
+        { key: 'learning', quotaWeight: 30 },
+        { key: 'general', quotaWeight: 0 },
+      ],
+      5,
+    );
+    expect(quotas.get('topic')).toBe(2);
+    expect(quotas.get('money')).toBe(2); // 1.5 → 余数补给 money
+    expect(quotas.get('learning')).toBe(1);
+    expect(quotas.get('general')).toBe(0);
+    expect([...quotas.values()].reduce((a, b) => a + b, 0)).toBe(5);
+  });
+
+  it('权重和为 0 时退回均分（含 general）', () => {
+    const quotas = allocateDirectionQuotas(
+      [
+        { key: 'topic', quotaWeight: 0 },
+        { key: 'general', quotaWeight: 0 },
+      ],
+      3,
+    );
+    expect(quotas.get('topic')).toBe(2);
+    expect(quotas.get('general')).toBe(1);
+  });
+
+  it('total 为 0 或空权重表时全部为 0', () => {
+    expect(
+      [...allocateDirectionQuotas([{ key: 'a', quotaWeight: 10 }], 0).values()],
+    ).toEqual([0]);
+    expect(allocateDirectionQuotas([], 5).size).toBe(0);
+  });
+});
+
+describe('governance quota / selectWithDirectionQuotas（P2c 方向截取与顺延）', () => {
+  function ditem(score: number, directionKey: string | null, tag: string) {
+    return { qualityScore: score, directionKey, tag };
+  }
+  const weights = [
+    { key: 'topic', quotaWeight: 50 },
+    { key: 'money', quotaWeight: 50 },
+    { key: 'general', quotaWeight: 0 },
+  ];
+
+  it('各方向按配额取高分，总量不超限', () => {
+    const items = [
+      ditem(90, 'topic', 't1'),
+      ditem(80, 'topic', 't2'),
+      ditem(70, 'topic', 't3'),
+      ditem(60, 'money', 'm1'),
+    ];
+    const quotas = allocateDirectionQuotas(weights, 2); // topic 1 / money 1
+    const selected = selectWithDirectionQuotas({ items, quotas, weights, total: 2 });
+    expect(selected.map((s) => s.tag).sort()).toEqual(['m1', 't1']);
+  });
+
+  it('某方向无候选时余量顺延给其他有权重方向', () => {
+    const items = [
+      ditem(90, 'topic', 't1'),
+      ditem(80, 'topic', 't2'),
+      ditem(70, 'topic', 't3'),
+    ];
+    const quotas = allocateDirectionQuotas(weights, 4); // topic 2 / money 2，money 无候选
+    const selected = selectWithDirectionQuotas({ items, quotas, weights, total: 4 });
+    expect(selected.map((s) => s.tag)).toEqual(['t1', 't2', 't3']);
+  });
+
+  it('权重 0 的方向（general）不被分配也不参与顺延', () => {
+    const items = [
+      ditem(99, 'general', 'g1'),
+      ditem(60, 'topic', 't1'),
+    ];
+    const quotas = allocateDirectionQuotas(weights, 2); // topic 1 / money 1
+    const selected = selectWithDirectionQuotas({ items, quotas, weights, total: 2 });
+    // general 99 分也进不来（被动收纳只走 autoApprove 直通，不在本函数语义内）
+    expect(selected.map((s) => s.tag)).toEqual(['t1']);
   });
 });

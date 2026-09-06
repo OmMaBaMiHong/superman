@@ -27,6 +27,16 @@ vi.mock('@/core/governance/repository', () => ({
   getGovernanceItemDetail: vi.fn(async () => null),
 }));
 
+const backfillMock = vi.fn();
+vi.mock('@/core/governance/backfill', () => ({
+  backfillDirections: (...args: unknown[]) => backfillMock(...args),
+}));
+
+vi.mock('@/server/domains/settings/repositories/settingsRepo', () => ({
+  getUiSettings: vi.fn(async () => ({})),
+  getAiApiKey: vi.fn(async () => ''),
+}));
+
 vi.mock('@/core/governance/services/governanceActionsService', () => ({
   approveGovernanceItem: vi.fn(),
   rejectGovernanceItem: vi.fn(),
@@ -214,5 +224,40 @@ describe('plugin/host/api · 方向策略路由（P2b）', () => {
       direction: 'money',
       userId: '1',
     }));
+  });
+
+  it('POST /s/api/directions/backfill：默认关键词回填，不碰 AI 配置', async () => {
+    backfillMock.mockReset().mockResolvedValue({ scanned: 120, classified: 31, batches: 1 });
+    const { auth, handler } = makeHandler();
+    const cookie = await login(auth);
+    const res = makeRes();
+    await handler(makeReq('POST', '/s/api/directions/backfill', cookie, {}), res as never);
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).data).toMatchObject({ scanned: 120, classified: 31 });
+    expect(backfillMock).toHaveBeenCalledWith(fakeDb, {
+      userId: '1',
+      withAi: false,
+      aiConfig: null,
+    });
+  });
+
+  it('POST /s/api/directions/backfill：withAi=true 但 AI 未配置 → 400 且不执行', async () => {
+    backfillMock.mockReset();
+    const { auth, handler } = makeHandler();
+    const cookie = await login(auth);
+    const res = makeRes();
+    await handler(makeReq('POST', '/s/api/directions/backfill', cookie, { withAi: true }), res as never);
+    expect(res.status).toBe(400);
+    expect(backfillMock).not.toHaveBeenCalled();
+  });
+
+  it('POST /s/api/directions/backfill：进行中 409 透传', async () => {
+    const { ConflictError } = await import('@/server/infra/http/errors');
+    backfillMock.mockReset().mockRejectedValue(new ConflictError('该用户的方向回填正在进行中，请稍后再试'));
+    const { auth, handler } = makeHandler();
+    const cookie = await login(auth);
+    const res = makeRes();
+    await handler(makeReq('POST', '/s/api/directions/backfill', cookie, {}), res as never);
+    expect(res.status).toBe(409);
   });
 });

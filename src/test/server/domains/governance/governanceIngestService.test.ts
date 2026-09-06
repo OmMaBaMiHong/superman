@@ -28,8 +28,18 @@ vi.mock('@/core/governance/directions', async (importOriginal) => {
 
 const pool = {} as Pool;
 
-function makeDraft(score: number): GovernanceDraft {
-  return { title: '拟折标题', summary: '拟折摘要', aiReason: '拟折理由', qualityScore: score, usedFallback: false };
+function makeDraft(score: number, overrides: Partial<GovernanceDraft> = {}): GovernanceDraft {
+  return {
+    title: '拟折标题',
+    summary: '拟折摘要',
+    aiReason: '拟折理由',
+    qualityScore: score,
+    usedFallback: false,
+    directionKey: null,
+    directionReason: null,
+    directionConfidence: null,
+    ...overrides,
+  };
 }
 
 function makeItem(index: number, overrides: Record<string, unknown> = {}) {
@@ -234,10 +244,10 @@ describe('governanceIngestService / evaluateGovernanceBatch', () => {
     expect(draft).not.toHaveBeenCalled();
   });
 
-  it('方向分类：关键词命中落 directionKey，未命中兜底 general', async () => {
+  it('方向分类：关键词命中落 directionKey，未命中兜底 general（权重 0 不配额度跳过）', async () => {
     listDirectionStrategiesMock.mockResolvedValue([
-      { key: 'money', name: '搞钱', keywordsDsl: '变现 副业' },
-      { key: 'general', name: '其他', keywordsDsl: '' },
+      { key: 'money', name: '搞钱', keywordsDsl: '变现 副业', aiHint: '', quotaWeight: 30, updatedAt: '2026-09-05T00:00:00Z' },
+      { key: 'general', name: '其他', keywordsDsl: '', aiHint: '', quotaWeight: 0, updatedAt: '2026-09-05T00:00:00Z' },
     ]);
     const draft = vi.fn(async () => makeDraft(80));
     const decisions = await evaluateGovernanceBatch(
@@ -256,7 +266,164 @@ describe('governanceIngestService / evaluateGovernanceBatch', () => {
     );
     expect(decisions[0]).toMatchObject({ action: 'insert', directionKey: 'money' });
     expect(decisions[0].directionReason).toContain('变现');
-    expect(decisions[1]).toMatchObject({ action: 'insert', directionKey: 'general' });
+    // general 权重 0：关键词兜底命中 general 后不主动分配配额（P2c 语义）
+    expect(decisions[1]).toMatchObject({
+      action: 'skip',
+      skipReason: 'quota_exceeded',
+      directionKey: 'general',
+    });
     expect(decisions[1].directionReason).toContain('未命中');
+  });
+
+  it('P2c 方向语义：关键词命中优先于 AI 分类', async () => {
+    listDirectionStrategiesMock.mockResolvedValue([
+      { key: 'money', name: '搞钱', keywordsDsl: '变现', aiHint: '商机', quotaWeight: 30, updatedAt: '2026-09-05T00:00:00Z' },
+      { key: 'topic', name: '选题', keywordsDsl: '', aiHint: '热点', quotaWeight: 40, updatedAt: '2026-09-05T00:00:00Z' },
+    ]);
+    // AI 说是 topic，但关键词命中 money → 关键词赢
+    const draft = vi.fn(async () => makeDraft(80, { directionKey: 'topic', directionReason: '像热点', directionConfidence: 0.95 }));
+    const decisions = await evaluateGovernanceBatch(
+      pool,
+      {
+        categoryId: '7',
+        feedTitle: '订阅源',
+        items: [makeItem(0, { title: '这个变现案例火了' })],
+        aiConfig: null,
+        userId: '42',
+      },
+      { draft },
+    );
+    expect(decisions[0].directionKey).toBe('money');
+    expect(decisions[0].directionReason).toContain('命中关键词');
+  });
+
+  it('P2c 方向语义：关键词未命中时采信 AI（置信度达标），并带 algo 版本前缀', async () => {
+    listDirectionStrategiesMock.mockResolvedValue([
+      { key: 'money', name: '搞钱', keywordsDsl: '变现', aiHint: '商机', quotaWeight: 30, updatedAt: '2026-09-05T00:00:00Z' },
+      { key: 'learning', name: '学习', keywordsDsl: '', aiHint: '干货', quotaWeight: 30, updatedAt: '2026-09-06T00:00:00Z' },
+      { key: 'general', name: '其他', keywordsDsl: '', aiHint: '兜底', quotaWeight: 0, updatedAt: '2026-09-04T00:00:00Z' },
+    ]);
+    const draft = vi.fn(async () => makeDraft(80, { directionKey: 'learning', directionReason: '深度教程', directionConfidence: 0.83 }));
+    const decisions = await evaluateGovernanceBatch(
+      pool,
+      {
+        categoryId: '7',
+        feedTitle: '订阅源',
+        items: [makeItem(0)],
+        aiConfig: null,
+        userId: '42',
+      },
+      { draft },
+    );
+    expect(decisions[0].directionKey).toBe('learning');
+    expect(decisions[0].directionReason).toContain('[algo d3-w60-t');
+    expect(decisions[0].directionReason).toContain('AI 分类');
+    expect(decisions[0].directionReason).toContain('0.83');
+  });
+
+  it('P2c 方向语义：AI 置信度 <0.6 / 幻觉 key / 回退 → 落 general', async () => {
+    listDirectionStrategiesMock.mockResolvedValue([
+      { key: 'money', name: '搞钱', keywordsDsl: '', aiHint: '商机', quotaWeight: 30, updatedAt: '2026-09-05T00:00:00Z' },
+      { key: 'general', name: '其他', keywordsDsl: '', aiHint: '', quotaWeight: 0, updatedAt: '2026-09-05T00:00:00Z' },
+    ]);
+    // 低置信
+    let draft = vi.fn(async () => makeDraft(80, { directionKey: 'money', directionConfidence: 0.42 }));
+    let decisions = await evaluateGovernanceBatch(
+      pool,
+      { categoryId: '7', feedTitle: 's', items: [makeItem(0)], aiConfig: null, userId: '42' },
+      { draft },
+    );
+    expect(decisions[0].directionKey).toBe('general');
+
+    // 幻觉 key（不在启用模板里）
+    draft = vi.fn(async () => makeDraft(80, { directionKey: 'crypto', directionConfidence: 0.99 }));
+    decisions = await evaluateGovernanceBatch(
+      pool,
+      { categoryId: '7', feedTitle: 's', items: [makeItem(0)], aiConfig: null, userId: '42' },
+      { draft },
+    );
+    expect(decisions[0].directionKey).toBe('general');
+
+    // 回退模式（direction 字段全 null）
+    draft = vi.fn(async () => makeDraft(60, { usedFallback: true }));
+    decisions = await evaluateGovernanceBatch(
+      pool,
+      { categoryId: '7', feedTitle: 's', items: [makeItem(0)], aiConfig: null, userId: '42' },
+      { draft },
+    );
+    expect(decisions[0].directionKey).toBe('general');
+  });
+
+  it('P2c 方向配额：按权重归一化分配，无候选方向余量顺延', async () => {
+    getGovernancePreferenceMock.mockResolvedValue({
+      id: '1', userId: '42', categoryId: '7',
+      dailyLimit: 4, focusRatio: 100, autoApproveThreshold: 0, excludeKeywords: [],
+    });
+    listDirectionStrategiesMock.mockResolvedValue([
+      { key: 'topic', name: '选题', keywordsDsl: '', aiHint: '', quotaWeight: 50, updatedAt: '2026-09-05T00:00:00Z' },
+      { key: 'money', name: '搞钱', keywordsDsl: '', aiHint: '', quotaWeight: 50, updatedAt: '2026-09-05T00:00:00Z' },
+      { key: 'general', name: '其他', keywordsDsl: '', aiHint: '', quotaWeight: 0, updatedAt: '2026-09-05T00:00:00Z' },
+    ]);
+    // AI 把前三条都分到 topic，第四条分到 money。
+    // topic 配额 2、money 配额 2 → topic 第三条应顺延占用 money 的剩余 1 个名额
+    // （money 只有 1 条候选）→ 最终收 4 条中的 4 条？topic 3 + money 1 = 4 ≤ dailyLimit 4。
+    const keys = ['topic', 'topic', 'topic', 'money'];
+    let call = 0;
+    const draft = vi.fn(async () =>
+      makeDraft(90 - call, { directionKey: keys[call], directionConfidence: 0.9, ...(call++ >= 0 ? {} : {}) }),
+    );
+    const decisions = await evaluateGovernanceBatch(
+      pool,
+      {
+        categoryId: '7',
+        feedTitle: 's',
+        items: [makeItem(0), makeItem(1), makeItem(2), makeItem(3)],
+        aiConfig: null,
+        userId: '42',
+      },
+      { draft },
+    );
+    const inserted = decisions.filter((d) => d.action === 'insert');
+    expect(inserted).toHaveLength(4);
+    // 第四条（money 唯一候选）必收；topic 第三条靠顺延收录
+    expect(inserted.map((d) => d.directionKey).sort()).toEqual(['money', 'topic', 'topic', 'topic']);
+  });
+
+  it('P2c 方向配额：general 权重 0 不主动分配，但高分可被动直通归档', async () => {
+    getGovernancePreferenceMock.mockResolvedValue({
+      id: '1', userId: '42', categoryId: '7',
+      dailyLimit: 1, focusRatio: 100, autoApproveThreshold: 85, excludeKeywords: [],
+    });
+    listDirectionStrategiesMock.mockResolvedValue([
+      { key: 'topic', name: '选题', keywordsDsl: '', aiHint: '', quotaWeight: 100, updatedAt: '2026-09-05T00:00:00Z' },
+      { key: 'general', name: '其他', keywordsDsl: '', aiHint: '', quotaWeight: 0, updatedAt: '2026-09-05T00:00:00Z' },
+    ]);
+    // 两条 general：一条 95 分（直通 archived），一条 60 分（配额外跳过）；
+    // 一条 topic 80 分（占唯一配额）。
+    const plan = [
+      { key: 'general', score: 95 },
+      { key: 'general', score: 60 },
+      { key: 'topic', score: 80 },
+    ];
+    let call = 0;
+    const draft = vi.fn(async () => {
+      const entry = plan[call++];
+      return makeDraft(entry.score, { directionKey: entry.key, directionConfidence: 0.9 });
+    });
+    const decisions = await evaluateGovernanceBatch(
+      pool,
+      {
+        categoryId: '7',
+        feedTitle: 's',
+        items: [makeItem(0), makeItem(1), makeItem(2)],
+        aiConfig: null,
+        userId: '42',
+      },
+      { draft },
+    );
+    expect(decisions[0]).toMatchObject({ action: 'insert', status: 'archived', directionKey: 'general' });
+    expect(decisions[0].draft?.aiReason).toContain('兜底方向高分直通');
+    expect(decisions[1]).toMatchObject({ action: 'skip', skipReason: 'quota_exceeded' });
+    expect(decisions[2]).toMatchObject({ action: 'insert', directionKey: 'topic' });
   });
 });

@@ -150,4 +150,59 @@ describe('governance aiDraft / heuristicDraft', () => {
     const draft = heuristicDraft({ ...BASE_INPUT, contentText: '短文' });
     expect(draft.summary).toBe('短文');
   });
+
+  it('回退模式方向字段全 null（由管线落兜底 general）', () => {
+    const draft = heuristicDraft(BASE_INPUT);
+    expect(draft.directionKey).toBeNull();
+    expect(draft.directionReason).toBeNull();
+    expect(draft.directionConfidence).toBeNull();
+  });
+});
+
+describe('governance aiDraft / 方向分类（P2c）', () => {
+  const DIRECTIONS = [
+    { key: 'topic', name: '选题', aiHint: '热点事件、爆款视频、热议话题' },
+    { key: 'money', name: '搞钱', aiHint: '变现案例、新平台红利、工具差价' },
+    { key: 'general', name: '其他', aiHint: '兜底' },
+  ];
+
+  it('prompt 动态拼装全部启用模板的 key/name/ai_hint 与输出要求', async () => {
+    const { createClient, create } = fakeClient(
+      '{"title":"t","summary":"s","aiReason":"r","qualityScore":80,"directionKey":"money","directionReason":"变现案例","directionConfidence":0.9}',
+    );
+    await draftGovernanceArticle({ ...BASE_INPUT, directions: DIRECTIONS }, AI_CONFIG, { createClient });
+    const prompt = String((create.mock.calls[0]?.[0] as { messages: Array<{ content: string }> })
+      .messages[0].content);
+    expect(prompt).toContain('money（搞钱）：变现案例、新平台红利、工具差价');
+    expect(prompt).toContain('topic（选题）：热点事件、爆款视频、热议话题');
+    expect(prompt).toContain('general（其他）：兜底');
+    expect(prompt).toContain('direction_key 只能从下列 key 中选一个');
+    expect(prompt).toContain('directionConfidence');
+  });
+
+  it('无模板时 prompt 不含方向段（向后兼容）', () => {
+    const prompt = buildDraftPrompt(BASE_INPUT);
+    expect(prompt).not.toContain('方向分类选项');
+    expect(prompt).not.toContain('directionKey');
+  });
+
+  it('解析方向输出：合法 key + 置信度收敛', async () => {
+    const { createClient } = fakeClient(
+      '{"title":"t","summary":"s","aiReason":"r","qualityScore":80,"directionKey":"money","directionReason":"变现案例","directionConfidence":1.7}',
+    );
+    const draft = await draftGovernanceArticle({ ...BASE_INPUT, directions: DIRECTIONS }, AI_CONFIG, { createClient });
+    expect(draft.directionKey).toBe('money');
+    expect(draft.directionReason).toBe('变现案例');
+    expect(draft.directionConfidence).toBe(1);
+  });
+
+  it('幻觉 key（不在注入模板里）落 null，由管线兜底', async () => {
+    const { createClient } = fakeClient(
+      '{"title":"t","summary":"s","aiReason":"r","qualityScore":80,"directionKey":"crypto","directionReason":"炒币","directionConfidence":0.99}',
+    );
+    const draft = await draftGovernanceArticle({ ...BASE_INPUT, directions: DIRECTIONS }, AI_CONFIG, { createClient });
+    expect(draft.directionKey).toBeNull();
+    expect(draft.directionReason).toBeNull();
+    expect(draft.directionConfidence).toBeNull();
+  });
 });
