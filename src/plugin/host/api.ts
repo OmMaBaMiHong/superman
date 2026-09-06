@@ -41,6 +41,17 @@ import {
   verifyWechatAccount,
 } from '@/core/platform-accounts/wechat/publishService'
 import { WechatMpError } from '@/core/platform-accounts/wechat/mpClient'
+import {
+  getDouyinLoginSession,
+  startDouyinLoginSession,
+} from '@/core/platform-accounts/douyin/douyinProvider'
+import {
+  confirmDouyinLoginSession,
+  handleDouyinLoginCallback,
+  verifyDouyinAccount,
+  type DouyinCallbackPayload,
+} from '@/core/platform-accounts/douyin/douyinService'
+import { publishDraftToDouyin } from '@/core/platform-accounts/douyin/douyinPublishService'
 import { normalizePersistedSettings } from '@/features/settings/settingsSchema'
 import { getAiApiKey, getUiSettings } from '@/server/domains/settings/repositories/settingsRepo'
 import { isAiRuntimeConfigComplete, resolveSharedAiConfig } from '@/server/integrations/ai/runtimeConfig'
@@ -106,6 +117,8 @@ interface RouteDef {
   re: RegExp
   keys: string[]
   handler: RouteHandler
+  /** sauToken：vendor 执行器回调专用，校验 X-Sau-Token 共享密钥而非 session。 */
+  authMode?: 'session' | 'sauToken'
 }
 
 /** '/governance/items/:id/approve' → 正则 + 参数名表。 */
@@ -124,8 +137,8 @@ function compile(pattern: string): { re: RegExp; keys: string[] } {
   return { re: new RegExp(`^${source}/?$`), keys }
 }
 
-function route(method: RouteDef['method'], pattern: string, handler: RouteHandler): RouteDef {
-  return { method, pattern, handler, ...compile(pattern) }
+function route(method: RouteDef['method'], pattern: string, handler: RouteHandler, authMode?: RouteDef['authMode']): RouteDef {
+  return { method, pattern, handler, authMode, ...compile(pattern) }
 }
 
 function parsePositiveInt(value: string | null): number | null {
@@ -635,8 +648,22 @@ const ROUTES: RouteDef[] = [
   route('POST', '/platform-accounts/:id/verify', async ({ res, params, session, db }) => {
     const account = await getPlatformAccount(db as never, requireId(params.id, '账号 ID'), session.userId)
     if (!account) throw new NotFoundError('平台账号不存在')
+
+    // 抖音 cookie 账号：执行器对账验证（P2e-2）
+    if (account.platform === 'douyin' && account.credKind === 'cookie') {
+      const result = await verifyDouyinAccount(account)
+      await markAccountVerified(db as never, {
+        id: account.id,
+        ok: result.verified,
+        failStatus: 'expired',
+        userId: session.userId,
+      })
+      json(res, 200, { ok: true, data: result })
+      return
+    }
+
     if (account.platform !== 'wechat' || account.credKind !== 'app_secret') {
-      json(res, 200, { ok: true, data: { verified: false, reason: '该平台验证待 P2e-2/3 接入' } })
+      json(res, 200, { ok: true, data: { verified: false, reason: '该平台验证待 P2e-3 接入' } })
       return
     }
     try {
@@ -648,23 +675,91 @@ const ROUTES: RouteDef[] = [
       await markAccountVerified(db as never, {
         id: account.id,
         ok: false,
-        failStatus: err instanceof WechatMpError && err.errcode === 40013 ? 'error' : 'error',
+        failStatus: 'error',
         userId: session.userId,
       })
       json(res, 200, { ok: true, data: { verified: false, reason } })
     }
   }),
+
+  // —— 抖音扫码授权流（P2e-2）——
+  route('POST', '/platform-accounts/douyin/login-session', async ({ req, res, session }) => {
+    const body = await readJsonBody(req)
+    const accountName = typeof body.accountName === 'string' ? body.accountName.trim() : ''
+    if (!accountName) {
+      throw new ValidationError('请求参数非法', { accountName: '账号备注名不能为空' })
+    }
+    const loginSession = startDouyinLoginSession({
+      userId: session.userId,
+      accountName,
+    })
+    json(res, 200, { ok: true, data: { sessionId: loginSession.id } })
+  }),
+  route('GET', '/platform-accounts/douyin/login-session/:id/qr', async ({ res, params, session }) => {
+    const loginSession = getDouyinLoginSession(params.id ?? '')
+    if (!loginSession || loginSession.userId !== session.userId) {
+      throw new NotFoundError('扫码会话不存在')
+    }
+    json(res, 200, {
+      ok: true,
+      data: {
+        status: loginSession.status,
+        qrSrc: loginSession.qrSrc,
+      },
+    })
+  }),
+  route('POST', '/platform-accounts/douyin/login-session/:id/confirm', async ({ res, params, session, db }) => {
+    const account = await confirmDouyinLoginSession(db as never, {
+      sessionId: params.id ?? '',
+      userId: session.userId,
+    })
+    json(res, 200, { ok: true, data: { account } })
+  }),
+  // vendor 执行器回调（共享密钥鉴权，不走 session）
+  route('POST', '/platform-accounts/douyin/callback', async ({ req, res, db }) => {
+    const body = await readJsonBody(req)
+    const payload: DouyinCallbackPayload = {
+      type: Number(body.type),
+      userName: typeof body.userName === 'string' ? body.userName : '',
+      filePath: typeof body.filePath === 'string' ? body.filePath : '',
+      storageState:
+        typeof body.storageState === 'object' && body.storageState !== null
+          ? (body.storageState as Record<string, unknown>)
+          : {},
+    }
+    if (payload.type !== 3 || !payload.userName || !payload.filePath) {
+      throw new ValidationError('回调报文非法', { payload: 'type/userName/filePath 缺失' })
+    }
+    const result = await handleDouyinLoginCallback(db as never, payload)
+    json(res, 200, { ok: true, data: result })
+  }, 'sauToken'),
+
   route('POST', '/drafts/:id/publish', async ({ req, res, params, session, db }) => {
     const body = await readJsonBody(req)
     const platform = typeof body.platform === 'string' ? body.platform.trim() : ''
-    if (platform !== 'wechat') {
-      throw new ValidationError('请求参数非法', { platform: '当前仅支持 wechat（公众号草稿箱）' })
-    }
     const accountId = typeof body.accountId === 'string' || typeof body.accountId === 'number'
       ? String(body.accountId)
       : ''
     if (!/^\d+$/.test(accountId)) {
       throw new ValidationError('请求参数非法', { accountId: '必须为正整数' })
+    }
+
+    if (platform === 'douyin') {
+      const result = await publishDraftToDouyin(db as never, {
+        draftId: requireId(params.id, '草稿 ID'),
+        accountId,
+        videoPath: typeof body.videoPath === 'string' ? body.videoPath : undefined,
+        videoUrl: typeof body.videoUrl === 'string' ? body.videoUrl : undefined,
+        title: typeof body.title === 'string' ? body.title : undefined,
+        tags: Array.isArray(body.tags) ? body.tags.map(String) : undefined,
+        userId: session.userId,
+      })
+      json(res, 200, { ok: true, data: result })
+      return
+    }
+
+    if (platform !== 'wechat') {
+      throw new ValidationError('请求参数非法', { platform: '当前仅支持 wechat（公众号草稿箱）/ douyin（抖音视频）' })
     }
     const result = await publishDraftToWechat(db as never, {
       draftId: requireId(params.id, '草稿 ID'),
@@ -885,8 +980,21 @@ export async function handleBusinessApi(req: IncomingMessage, res: ServerRespons
     if (!m) continue
 
     try {
-      const session = await deps.auth.authenticate(req)
-      if (!session) throw new UnauthorizedError('请先登录后再继续')
+      let session: Session
+      if (def.authMode === 'sauToken') {
+        // vendor 执行器回调：共享密钥鉴权（SAU_TOKEN 未配置时一律拒绝，避免裸奔）。
+        const expected = (process.env.SAU_TOKEN ?? '').trim()
+        const provided = String(req.headers['x-sau-token'] ?? '')
+        if (!expected || provided !== expected) {
+          throw new UnauthorizedError('回调鉴权失败')
+        }
+        // 回调的用户绑定由扫码会话表完成，此处只占位。
+        session = { userId: '0', role: 'member', sessionVersion: 0, username: 'sau-callback' }
+      } else {
+        const authenticated = await deps.auth.authenticate(req)
+        if (!authenticated) throw new UnauthorizedError('请先登录后再继续')
+        session = authenticated
+      }
       if (!deps.db) {
         json(res, 503, { ok: false, error: { code: 'service_unavailable', message: '数据库未连接' } })
         return true
