@@ -16,6 +16,10 @@ import {
   updateDirectionStrategy,
   DIRECTION_KEY_PATTERN,
 } from '@/core/governance/directions'
+import { backfillDirections } from '@/core/governance/backfill'
+import { normalizePersistedSettings } from '@/features/settings/settingsSchema'
+import { getAiApiKey, getUiSettings } from '@/server/domains/settings/repositories/settingsRepo'
+import { isAiRuntimeConfigComplete, resolveSharedAiConfig } from '@/server/integrations/ai/runtimeConfig'
 import {
   getGovernanceItemDetail,
   getGovernanceStats,
@@ -166,6 +170,26 @@ const ROUTES: RouteDef[] = [
   route('GET', '/directions/all', async ({ res, session, db }) => {
     const items = await listDirectionStrategies(db as never, { userId: session.userId })
     json(res, 200, { ok: true, data: { items } })
+  }),
+  route('POST', '/directions/backfill', async ({ req, res, session, db }) => {
+    const body = await readJsonBody(req)
+    const withAi = body.withAi === true
+    let aiConfig = null
+    if (withAi) {
+      const uiSettings = normalizePersistedSettings(await getUiSettings(db as never, session.userId))
+      const aiApiKey = await getAiApiKey(db as never, session.userId)
+      const resolved = resolveSharedAiConfig({ settings: { ai: uiSettings.ai }, aiApiKey })
+      if (!isAiRuntimeConfigComplete(resolved)) {
+        throw new ValidationError('AI 未配置，无法使用 withAi 回填', { withAi: '请先配置 AI 或改用关键词回填' })
+      }
+      aiConfig = resolved
+    }
+    const result = await backfillDirections(db as never, {
+      userId: session.userId,
+      withAi,
+      aiConfig,
+    })
+    json(res, 200, { ok: true, data: result })
   }),
   route('POST', '/directions', async ({ req, res, session, db }) => {
     const body = await readJsonBody(req)
