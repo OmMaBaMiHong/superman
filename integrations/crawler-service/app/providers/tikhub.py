@@ -180,15 +180,23 @@ class TikhubProvider(BaseProvider):
             return cached
 
         detail = {}
-        for attempt in range(3):  # 偶发返回空，带间隔重试（参考实现的实战结论）
+        last_err: ProviderError | None = None
+        for attempt in range(3):  # 偶发返回空/瞬时 400，带间隔重试（真调实测 400 重试即恢复）
             if attempt:
                 import time as _time
                 _time.sleep(0.5)
-            detail = (self._call(f"{DY}/web/fetch_one_video", {"aweme_id": aweme_id}) or {}).get("aweme_detail") or {}
+            try:
+                detail = (self._call(f"{DY}/web/fetch_one_video", {"aweme_id": aweme_id}) or {}).get("aweme_detail") or {}
+            except ProviderError as e:
+                if any(f"HTTP {c}" in str(e) for c in (400, 408, 429)) or "HTTP 5" in str(e):
+                    last_err = e
+                    continue
+                raise
             if detail:
+                last_err = None
                 break
         if not detail:
-            raise ProviderError("抖音作品详情为空")
+            raise last_err or ProviderError("抖音作品详情为空")
         stat = detail.get("statistics") or {}
         result = normalize_stats(
             views=stat.get("play_count"),
@@ -200,6 +208,7 @@ class TikhubProvider(BaseProvider):
             platform="douyin",
             post_id=aweme_id,
         )
+        result["title"] = detail.get("title") or detail.get("desc") or None
         self._cache.set(cache_key, result, _DETAIL_TTL)
         return result
 
@@ -232,6 +241,7 @@ class TikhubProvider(BaseProvider):
             platform="xhs",
             post_id=note_id,
         )
+        result["title"] = note.get("title") or note.get("desc") or None
         self._cache.set(cache_key, result, _DETAIL_TTL)
         return result
 

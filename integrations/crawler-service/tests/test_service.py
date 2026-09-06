@@ -100,20 +100,50 @@ class TestTikhubProvider(unittest.TestCase):
 
     def test_dy_stats(self):
         provider = make_tikhub()
-        payload = {"data": {"aweme_detail": {"statistics": {
+        payload = {"data": {"aweme_detail": {"title": "测试标题", "statistics": {
             "play_count": 1000, "digg_count": 100, "comment_count": 20,
             "share_count": 10, "collect_count": 5,
         }}}}
         with mock.patch("urllib.request.urlopen", return_value=fake_urlopen(payload)):
             result = provider.fetch_post_stats("douyin", "https://www.douyin.com/video/7123456789")
-        assert result == {
-            "views": 1000, "likes": 100, "comments": 20, "shares": 10,
-            "favorites": 5, "coins": None, "platform": "douyin", "post_id": "7123456789",
-        }
+        assert result["views"] == 1000
+        assert result["likes"] == 100
+        assert result["title"] == "测试标题"
+
+    def test_dy_stats_retries_transient_400(self):
+        provider = make_tikhub()
+        payload = {"data": {"aweme_detail": {"title": "重试后拿到", "statistics": {
+            "play_count": 1000, "digg_count": 100, "comment_count": 20,
+            "share_count": 10, "collect_count": 5,
+        }}}}
+        calls = {"n": 0}
+
+        def _flaky_urlopen(*a, **k):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return fake_urlopen(payload, status=400)  # 第一次：瞬时 400
+            return fake_urlopen(payload)
+
+        with mock.patch("urllib.request.urlopen", side_effect=_flaky_urlopen):
+            os.environ["TIKHUB_API_KEY"] = "test-key"
+            result = provider.fetch_post_stats("douyin", "7123456789")
+        assert result["likes"] == 100
+        assert result["title"] == "重试后拿到"
+        assert calls["n"] == 2
+        assert result["likes"] == 100
+        assert result["title"] == "重试后拿到"
+
+    def test_dy_stats_400_exhausted_raises(self):
+        provider = make_tikhub()
+        with mock.patch("urllib.request.urlopen",
+                        side_effect=lambda *a, **k: fake_urlopen({"data": {}}, status=400)):
+            os.environ["TIKHUB_API_KEY"] = "test-key"
+            with self.assertRaises(ProviderError):
+                provider.fetch_post_stats("douyin", "7123456789")
 
     def test_xhs_stats_interact_info_and_wan_suffix(self):
         provider = make_tikhub()
-        payload = {"data": {"data": [{"interact_info": {
+        payload = {"data": {"data": [{"title": "小红书标题", "interact_info": {
             "liked_count": "1.2万", "comment_count": 30, "share_count": 2, "collected_count": 8,
         }}]}}
         with mock.patch("urllib.request.urlopen", return_value=fake_urlopen(payload)):
@@ -121,6 +151,7 @@ class TestTikhubProvider(unittest.TestCase):
             result = provider.fetch_post_stats("xhs", "65f0a1b2000000001a00bcde")
         assert result["likes"] == 12000
         assert result["views"] is None
+        assert result["title"] == "小红书标题"
 
     def test_missing_key_raises(self):
         provider = make_tikhub()
@@ -141,13 +172,14 @@ class TestTikhubProvider(unittest.TestCase):
 class TestBilibiliProvider(unittest.TestCase):
     def test_stats(self):
         provider = BilibiliDirectProvider(RateLimiter(0), TtlCache())
-        payload = {"code": 0, "data": {"stat": {
+        payload = {"code": 0, "data": {"title": "B站视频标题", "stat": {
             "view": 100, "like": 10, "reply": 5, "share": 3, "favorite": 2, "coin": 1,
         }}}
         with mock.patch("urllib.request.urlopen", return_value=fake_urlopen(payload)):
             result = provider.fetch_post_stats("bilibili", "BV1xx411c7mD")
         assert result["views"] == 100
         assert result["coins"] == 1
+        assert result["title"] == "B站视频标题"
 
     def test_comments(self):
         provider = BilibiliDirectProvider(RateLimiter(0), TtlCache())

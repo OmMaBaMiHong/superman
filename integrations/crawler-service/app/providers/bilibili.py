@@ -62,6 +62,7 @@ class BilibiliDirectProvider(BaseProvider):
             platform="bilibili",
             post_id=bvid,
         )
+        result["title"] = (payload.get("data") or {}).get("title") or None
         self._cache.set(cache_key, result, 3600)
         return result
 

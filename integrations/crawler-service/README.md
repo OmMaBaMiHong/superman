@@ -30,7 +30,7 @@ TIKHUB_API_KEY=... CRAWLER_SERVICE_KEY=... \
 | `GET /v1/health` | 探活（免鉴权）：版本/uptime/已接入 provider |
 | `GET /v1/providers` | provider 清单（含未接入的注册位 mediacrawler/selfsign） |
 | `GET /v1/comments?platform=&post_id=&max=` | 归一评论：`{cid, text, user, likes, time, reply_count, platform, post_id, ip_location?}` |
-| `GET /v1/post-stats?platform=&post_id=` | 归一数据：`{views, likes, comments, shares, favorites, coins, platform, post_id}` |
+| `GET /v1/post-stats?platform=&post_id=` | 归一数据：`{views, likes, comments, shares, favorites, coins, platform, post_id, title?}`（title 为平台标题/文案，P3a-1 起） |
 
 统一信封：成功 `{code: 0, data, provider}`；失败 `{code: <http status>, error}`。
 
