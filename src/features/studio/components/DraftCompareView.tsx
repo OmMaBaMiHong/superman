@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { Check, Download, ExternalLink, TriangleAlert } from 'lucide-react';
 import type { DraftDetail } from '@/lib/api/apiClient';
+import PublishToWechatButton from './PublishToWechatButton';
 import { renderMarkdownToSafeHtml } from '@/lib/markdown/renderMarkdown';
 import { cn } from '@/lib/utils';
 import {
@@ -199,6 +200,7 @@ export default function DraftCompareView({
           <Check aria-hidden="true" className="h-4 w-4" />
           {accepted ? '已采用' : accepting ? '采用中…' : '采用'}
         </button>
+        {accepted ? <PublishToWechatButton draftId={detail.id} /> : null}
       </div>
     </div>
   );

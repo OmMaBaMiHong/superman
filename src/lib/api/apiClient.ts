@@ -2770,3 +2770,93 @@ export async function deletePublishedPost(
     options,
   );
 }
+
+/* ── 平台授权中心（P2e-1b）── */
+
+export type AccountPlatform = 'wechat' | 'douyin' | 'xhs' | 'bilibili' | 'channels';
+export type AccountCredKind = 'app_secret' | 'cookie' | 'oauth';
+export type AccountStatus = 'active' | 'expired' | 'error';
+
+export interface PlatformAccount {
+  id: string;
+  userId: string;
+  platform: AccountPlatform;
+  accountName: string;
+  credKind: AccountCredKind;
+  /** 已脱敏凭据（形如 wxab****12ab），永不回显明文。 */
+  credentialMasked: string;
+  status: AccountStatus;
+  expiresAt: string | null;
+  lastVerifiedAt: string | null;
+  metaJson: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function listPlatformAccounts(
+  input?: { platform?: AccountPlatform },
+  options?: RequestApiOptions,
+): Promise<{ items: PlatformAccount[] }> {
+  const suffix = input?.platform ? `?platform=${encodeURIComponent(input.platform)}` : '';
+  return requestApi(`/api/platform-accounts${suffix}`, undefined, options);
+}
+
+export async function createPlatformAccount(
+  input: {
+    platform: AccountPlatform;
+    accountName: string;
+    credKind: AccountCredKind;
+    credential: Record<string, unknown>;
+    metaJson?: Record<string, unknown>;
+  },
+  options?: RequestApiOptions,
+): Promise<{ account: PlatformAccount }> {
+  return requestApi(
+    '/api/platform-accounts',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    },
+    options,
+  );
+}
+
+export async function deletePlatformAccount(
+  id: string,
+  options?: RequestApiOptions,
+): Promise<{ deleted: boolean }> {
+  return requestApi(
+    `/api/platform-accounts/${encodeURIComponent(id)}`,
+    { method: 'DELETE' },
+    options,
+  );
+}
+
+export async function verifyPlatformAccount(
+  id: string,
+  options?: RequestApiOptions,
+): Promise<{ verified: boolean; reason?: string }> {
+  return requestApi(
+    `/api/platform-accounts/${encodeURIComponent(id)}/verify`,
+    { method: 'POST' },
+    options,
+  );
+}
+
+/** 发布草稿到公众号草稿箱（仅 wechat；须 accepted 状态）。 */
+export async function publishDraftToWechat(
+  draftId: string,
+  input: { accountId: string },
+  options?: RequestApiOptions,
+): Promise<{ mediaId: string; publishedPostId: string; postUrl: string }> {
+  return requestApi(
+    `/api/drafts/${encodeURIComponent(draftId)}/publish`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ platform: 'wechat', accountId: input.accountId }),
+    },
+    options,
+  );
+}

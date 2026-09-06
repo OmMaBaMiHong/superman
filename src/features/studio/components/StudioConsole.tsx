@@ -11,6 +11,7 @@ import {
   getGovernanceQueue,
   listDrafts,
   listPipelineJobs,
+  listPublishedPosts,
   retryPipelineJob,
   type DraftDetail,
   type DraftItem,
@@ -81,6 +82,8 @@ export default function StudioConsole({ initialSection }: { initialSection?: 'qu
   // ── 草稿箱 ──
   const [drafts, setDrafts] = useState<DraftItem[]>([]);
   const [draftsLoading, setDraftsLoading] = useState(true);
+  // 已发布草稿（published_posts.draftId 交叉比对，P2e-1b）
+  const [publishedDraftIds, setPublishedDraftIds] = useState<Set<string>>(new Set());
 
   // ── 平台多选 sheet ──
   const [pickerItem, setPickerItem] = useState<GovernanceQueueItem | null>(null);
@@ -155,8 +158,14 @@ export default function StudioConsole({ initialSection }: { initialSection?: 'qu
 
   const loadDrafts = useCallback(async () => {
     try {
-      const result = await listDrafts({ pageSize: 50 }, { notifyOnError: false });
+      const [result, postsResult] = await Promise.all([
+        listDrafts({ pageSize: 50 }, { notifyOnError: false }),
+        listPublishedPosts({ notifyOnError: false }),
+      ]);
       setDrafts(result.items);
+      setPublishedDraftIds(
+        new Set(postsResult.items.map((post) => post.draftId).filter((id): id is string => id !== null)),
+      );
     } catch {
       // 静默
     } finally {
@@ -477,6 +486,14 @@ export default function StudioConsole({ initialSection }: { initialSection?: 'qu
                         {draft.status !== 'draft' ? (
                           <span className="inline-flex h-6 shrink-0 items-center rounded-full border border-success/40 bg-success/10 px-2 text-[11px] font-medium text-success">
                             已采用
+                          </span>
+                        ) : null}
+                        {publishedDraftIds.has(draft.id) ? (
+                          <span
+                            data-testid="draft-published-badge"
+                            className="inline-flex h-6 shrink-0 items-center rounded-full border border-primary/40 bg-primary/10 px-2 text-[11px] font-medium text-primary"
+                          >
+                            已发布
                           </span>
                         ) : null}
                       </button>

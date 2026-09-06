@@ -9,6 +9,7 @@ import {
   getGovernanceStats,
   listDrafts,
   listPipelineJobs,
+  listPublishedPosts,
   retryPipelineJob,
   type DraftDetail,
   type DraftItem,
@@ -31,6 +32,7 @@ vi.mock('@/lib/api/apiClient', async (importOriginal) => {
     listPipelineJobs: vi.fn(),
     retryPipelineJob: vi.fn(),
     listDrafts: vi.fn(),
+    listPublishedPosts: vi.fn(),
     getDraftDetail: vi.fn(),
     acceptDraft: vi.fn(),
     exportDraftMarkdown: vi.fn(),
@@ -123,6 +125,7 @@ beforeEach(() => {
   mockedJobs.mockResolvedValue({ items: [], total: 0 });
   mockedRetry.mockResolvedValue({});
   mockedDrafts.mockResolvedValue({ items: [makeDraft()], total: 1 });
+  vi.mocked(listPublishedPosts).mockResolvedValue({ items: [] });
   mockedDraftDetail.mockResolvedValue(makeDraftDetail());
   mockedAccept.mockResolvedValue({});
   mockedExport.mockResolvedValue({ markdown: '# x', fileName: 'draft-d1.md' });
