@@ -156,6 +156,60 @@ export async function deletePlatformAccount(
   return (res.rowCount ?? 0) > 0;
 }
 
+/** 按 (user_id, platform, account_name) 查找（回调/拉取上收时对账用）。 */
+export async function findPlatformAccountByName(
+  db: DbClient,
+  input: { platform: AccountPlatform; accountName: string; userId?: string },
+): Promise<PlatformAccountView | null> {
+  const { rows } = await db.query<PlatformAccountView>(
+    `
+      select ${viewSelectSql}
+      from platform_accounts
+      where user_id = $1 and platform = $2 and account_name = $3
+      limit 1
+    `,
+    [normalizeUserId(input.userId), input.platform, input.accountName],
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * 覆盖更新凭据（重新授权/扫码刷新 cookie 时用）：
+ * 重新加密 + masked，状态复位 active。
+ */
+export async function updatePlatformAccountCredential(
+  db: DbClient,
+  input: {
+    id: string;
+    credentialPlaintext: string;
+    metaJson?: Record<string, unknown> | null;
+    userId?: string;
+  },
+): Promise<PlatformAccountView | null> {
+  const credentialEncrypted = await sealCredential(db, input.credentialPlaintext);
+  const credentialMasked = maskCredential(input.credentialPlaintext);
+  const { rows } = await db.query<PlatformAccountView>(
+    `
+      update platform_accounts
+      set credential_encrypted = $3,
+          credential_masked = $4,
+          meta_json = coalesce($5::jsonb, meta_json),
+          status = 'active',
+          updated_at = now()
+      where id = $1 and user_id = $2
+      returning ${viewSelectSql}
+    `,
+    [
+      input.id,
+      normalizeUserId(input.userId),
+      credentialEncrypted,
+      credentialMasked,
+      input.metaJson ? JSON.stringify(input.metaJson) : null,
+    ],
+  );
+  return rows[0] ?? null;
+}
+
 /** verify 结果回写：成功 → active + last_verified_at；失败 → status（expired/error）。 */
 export async function markAccountVerified(
   db: DbClient,
