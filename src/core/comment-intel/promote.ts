@@ -41,7 +41,7 @@ async function hasRecentCandidate(
       select 1 from articles
       where user_id = $1
         and dedupe_key like 'comment-intel:' || $2 || ':%'
-        and created_at > now() - interval '72 hours'
+        and fetched_at > now() - interval '72 hours'
       limit 1
     `,
     [input.userId, input.postId],
