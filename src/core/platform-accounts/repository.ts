@@ -230,3 +230,18 @@ export async function markAccountVerified(
     ],
   );
 }
+
+/** 覆盖 meta_json（发布限频计数等对账字段；整体替换，调用方先读合并）。 */
+export async function updatePlatformAccountMeta(
+  db: DbClient,
+  input: { id: string; metaJson: Record<string, unknown>; userId?: string },
+): Promise<void> {
+  await db.query(
+    `
+      update platform_accounts
+      set meta_json = $3::jsonb, updated_at = now()
+      where id = $1 and user_id = $2
+    `,
+    [input.id, normalizeUserId(input.userId), JSON.stringify(input.metaJson)],
+  );
+}
