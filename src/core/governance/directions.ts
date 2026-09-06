@@ -165,6 +165,7 @@ export interface DirectionStrategyRow {
   enabled: boolean;
   sort: number;
   builtin: boolean;
+  updatedAt: string;
 }
 
 const strategySelectSql = `
@@ -179,7 +180,8 @@ const strategySelectSql = `
   quota_weight as "quotaWeight",
   enabled,
   sort,
-  builtin
+  builtin,
+  updated_at as "updatedAt"
 `;
 
 /** 内置模板 lazy seed：每用户首次访问时插入，幂等。 */
@@ -377,3 +379,23 @@ export function classifyByKeywords(
 
 /** 兜底方向 key（治理管线与拟折回退共用）。 */
 export const FALLBACK_DIRECTION_KEY = 'general';
+
+/** AI 方向分类置信度阈值：低于此值落兜底 general。 */
+export const DIRECTION_AI_CONFIDENCE_THRESHOLD = 0.6;
+
+/**
+ * 算法版本快照（P2c）：把当前启用模板状态浓缩成可追溯的版本串，
+ * 形如 `d4-w100-t1736000000`（模板数-权重和-最近 updated_at epoch 秒）。
+ * 模板增删、权重调整、规则修改都会改变版本，摄取时记入 direction_reason 前缀。
+ */
+export function computeDirectionAlgoVersion(
+  strategies: readonly Pick<DirectionStrategyRow, 'quotaWeight' | 'updatedAt'>[],
+): string {
+  const count = strategies.length;
+  const weightSum = strategies.reduce((sum, s) => sum + s.quotaWeight, 0);
+  const maxUpdatedSec = strategies.reduce((max, s) => {
+    const epoch = Math.floor(new Date(s.updatedAt).getTime() / 1000);
+    return Number.isFinite(epoch) && epoch > max ? epoch : max;
+  }, 0);
+  return `d${count}-w${weightSum}-t${maxUpdatedSec}`;
+}
