@@ -24,7 +24,8 @@ export interface PublishedPostRow {
   updatedAt: string;
 }
 
-const postSelectSql = `
+/** 列字段（camelCase 别名）；comment-intel 等域复用同一投影。 */
+export const postSelectSql = `
   id,
   user_id::text as "userId",
   draft_id as "draftId",
@@ -172,7 +173,7 @@ export async function listDueTrackingPosts(
       from published_posts
       where user_id = $1
         and tracking_enabled = true
-        and platform = 'bilibili'
+        and platform in ('bilibili', 'douyin', 'xhs')
         and (
           last_fetched_at is null
           or (

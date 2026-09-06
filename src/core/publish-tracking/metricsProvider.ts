@@ -2,11 +2,17 @@
  * 平台表现数据适配层。
  *
  * MetricsProvider 接口：submit 一帖 URL，拿回标准化指标。
- *   - bilibili：公开 API（api.bilibili.com/x/web-interface/view?bvid=），
- *     走项目统一的 fetchExternalJson（SSRF 校验 + allowedHosts 白名单 + 系统日志）。
- *   - douyin/xhs/wechat：stub（返回 null + reason），等 P2e 授权中心接 Cookie 后补实现。
+ *   - bilibili/douyin/xhs：经独立爬虫服务（P3a crawler-service，TikHub/B站直连下沉）。
+ *     bilibili 在服务不可用时回落直连公开 API，保住 P2d 快照与登记标题补全。
+ *   - wechat/other：stub（返回 null + reason），等 P2e 授权中心接 Cookie 后补实现。
  */
 import { fetchExternalJson } from '@/server/infra/http/externalHttpClient';
+import {
+  createCrawlerClient,
+  CrawlerServiceError,
+  type CrawlerClient,
+  type CrawlerPostStats,
+} from '@/core/crawlerClient';
 import { extractBvid, type PublishPlatform } from '@/core/publish-tracking/platform';
 
 export interface PostMetrics {
@@ -112,7 +118,7 @@ export function createBilibiliProvider(fetchJson: BilibiliJsonFetcher = defaultB
   };
 }
 
-function createStubProvider(platform: Exclude<PublishPlatform, 'bilibili'>): MetricsProvider {
+function createStubProvider(platform: PublishPlatform): MetricsProvider {
   return {
     platform,
     async fetchMetrics(): Promise<MetricsFetchResult> {
@@ -123,9 +129,60 @@ function createStubProvider(platform: Exclude<PublishPlatform, 'bilibili'>): Met
 
 const stubProviders = new Map<PublishPlatform, MetricsProvider>();
 
-/** 按平台取 provider；未实现的返回 stub（接口语义完整）。 */
-export function getMetricsProvider(platform: PublishPlatform): MetricsProvider {
-  if (platform === 'bilibili') return createBilibiliProvider();
+export interface CrawlerMetricsDeps {
+  client?: CrawlerClient;
+  /** B站服务失败时的直连兜底（服务没起时保住 P2d 快照与登记标题补全）。 */
+  bilibiliFallback?: MetricsProvider;
+}
+
+function statsToPostMetrics(stats: CrawlerPostStats): PostMetrics {
+  return {
+    views: stats.views,
+    likes: stats.likes,
+    comments: stats.comments,
+    shares: stats.shares,
+    favorites: stats.favorites,
+    coins: stats.coins,
+    followersDelta: null,
+    rawJson: { provider: 'crawler-service', crawlerPostId: stats.postId },
+  };
+}
+
+/** 经 crawler-service 抓表现数据（douyin/xhs 唯一通路；bilibili 失败回落直连）。 */
+export function createCrawlerServiceMetricsProvider(
+  platform: 'bilibili' | 'douyin' | 'xhs',
+  deps?: CrawlerMetricsDeps,
+): MetricsProvider {
+  const client = deps?.client ?? createCrawlerClient();
+  return {
+    platform,
+    async fetchMetrics(postUrl: string): Promise<MetricsFetchResult> {
+      try {
+        const stats = await client.fetchPostStats({ platform, postId: postUrl });
+        return { ok: true, title: stats.title ?? undefined, metrics: statsToPostMetrics(stats) };
+      } catch (err) {
+        const reason = err instanceof CrawlerServiceError
+          ? `爬虫服务：${err.message}`
+          : err instanceof Error ? err.message : String(err);
+        const fallback = deps?.bilibiliFallback;
+        if (platform === 'bilibili' && fallback) return fallback.fetchMetrics(postUrl);
+        return { ok: false, reason };
+      }
+    },
+  };
+}
+
+/** 按平台取 provider；crawler 服务覆盖 bilibili/douyin/xhs，其余返回 stub（接口语义完整）。 */
+export function getMetricsProvider(
+  platform: PublishPlatform,
+  crawlerDeps?: CrawlerMetricsDeps,
+): MetricsProvider {
+  if (platform === 'bilibili' || platform === 'douyin' || platform === 'xhs') {
+    return createCrawlerServiceMetricsProvider(platform, {
+      bilibiliFallback: platform === 'bilibili' ? createBilibiliProvider() : undefined,
+      ...crawlerDeps,
+    });
+  }
   let stub = stubProviders.get(platform);
   if (!stub) {
     stub = createStubProvider(platform);

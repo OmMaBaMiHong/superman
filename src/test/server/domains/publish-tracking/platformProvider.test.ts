@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
+import { CrawlerServiceError } from '@/core/crawlerClient';
 import { extractBvid, inferPlatformFromUrl, isPublishPlatform } from '@/core/publish-tracking/platform';
-import { createBilibiliProvider, getMetricsProvider } from '@/core/publish-tracking/metricsProvider';
+import {
+  createBilibiliProvider,
+  createCrawlerServiceMetricsProvider,
+  getMetricsProvider,
+} from '@/core/publish-tracking/metricsProvider';
 
 describe('publish-tracking / 平台推断与 bvid 解析', () => {
   it('inferPlatformFromUrl 各平台域名', () => {
@@ -79,11 +84,71 @@ describe('publish-tracking / bilibili provider', () => {
   });
 
   it('stub 平台返回 P2e 提示（接口语义完整）', async () => {
-    for (const platform of ['douyin', 'xhs', 'wechat', 'other'] as const) {
+    for (const platform of ['wechat', 'other'] as const) {
       const provider = getMetricsProvider(platform);
       const result = await provider.fetchMetrics('https://example.com/x');
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.reason).toContain('P2e');
     }
+  });
+});
+
+describe('publish-tracking / crawler 服务 provider（P3a）', () => {
+  const STATS_OK = {
+    views: 100, likes: 10, comments: 2, shares: 1, favorites: 3, coins: null,
+    platform: 'douyin', postId: '712', title: '抖音文案',
+  };
+
+  function makeClient(overrides: Partial<{ stats: unknown; error: Error }> = {}) {
+    return {
+      fetchPostStats: overrides.error
+        ? vi.fn().mockRejectedValue(overrides.error)
+        : vi.fn().mockResolvedValue(overrides.stats ?? STATS_OK),
+      fetchComments: vi.fn(),
+    };
+  }
+
+  it('服务成功时映射 PostMetrics 并透传 title（douyin）', async () => {
+    const provider = createCrawlerServiceMetricsProvider('douyin', { client: makeClient() as never });
+    const result = await provider.fetchMetrics('https://www.douyin.com/video/712');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.title).toBe('抖音文案');
+      expect(result.metrics).toMatchObject({ views: 100, likes: 10, comments: 2, followersDelta: null });
+      expect(result.metrics.rawJson).toMatchObject({ provider: 'crawler-service', crawlerPostId: '712' });
+    }
+  });
+
+  it('服务失败且无兜底时返回 ok:false（原因透出，不抛错）', async () => {
+    const provider = createCrawlerServiceMetricsProvider('xhs', {
+      client: makeClient({ error: new CrawlerServiceError(0, '爬虫服务不可达') }) as never,
+    });
+    const result = await provider.fetchMetrics('https://www.xiaohongshu.com/explore/abc');
+    expect(result).toEqual({ ok: false, reason: '爬虫服务：爬虫服务不可达' });
+  });
+
+  it('B站服务失败回落直连 provider', async () => {
+    const fallback = {
+      platform: 'bilibili' as const,
+      fetchMetrics: vi.fn().mockResolvedValue({ ok: true, metrics: { views: 1, likes: null, comments: null, shares: null, favorites: null, coins: null, followersDelta: null, rawJson: {} } }),
+    };
+    const provider = createCrawlerServiceMetricsProvider('bilibili', {
+      client: makeClient({ error: new Error('不可达') }) as never,
+      bilibiliFallback: fallback as never,
+    });
+    const result = await provider.fetchMetrics('https://www.bilibili.com/video/BV1xx411c7mD');
+    expect(fallback.fetchMetrics).toHaveBeenCalledWith('https://www.bilibili.com/video/BV1xx411c7mD');
+    expect(result.ok).toBe(true);
+  });
+
+  it('getMetricsProvider：douyin/xhs 走 crawler 通路（注入 client 验证），wechat/other 走 stub', async () => {
+    const client = makeClient();
+    const dyProvider = getMetricsProvider('douyin', { client: client as never });
+    const dyResult = await dyProvider.fetchMetrics('https://www.douyin.com/video/712');
+    expect(client.fetchPostStats).toHaveBeenCalled();
+    expect(dyResult.ok).toBe(true);
+
+    const stubResult = await getMetricsProvider('wechat').fetchMetrics('https://example.com/x');
+    expect(stubResult.ok).toBe(false);
   });
 });
