@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { KeyRound, Plus, QrCode, RefreshCw } from 'lucide-react';
 import {
-  confirmDouyinLoginSession,
-  createDouyinLoginSession,
-  getDouyinLoginQr,
+  confirmSauLoginSession,
+  createSauLoginSession,
+  getSauLoginQr,
   type AccountPlatform,
-  type DouyinLoginSessionStatus,
+  type SauLoginSessionStatus,
+  type SauQrPlatform,
 } from '@/lib/api/apiClient';
 import GlassDetailSheet from '@/components/ui/glass-detail-sheet';
 import { cn } from '@/lib/utils';
@@ -29,10 +30,10 @@ interface AddAccountSheetProps {
   onDouyinAdded?: () => void;
 }
 
-interface DouyinQrState {
+interface SauQrState {
   sessionId: string;
   qrSrc: string | null;
-  status: DouyinLoginSessionStatus;
+  status: SauLoginSessionStatus;
   error: string | null;
 }
 
@@ -44,13 +45,13 @@ export default function AddAccountSheet({ open, submitting, onClose, onSubmit, o
   const [secret, setSecret] = useState('');
   const [cookie, setCookie] = useState('');
   const [showAdvancedCookie, setShowAdvancedCookie] = useState(false);
-  const [douyinQr, setDouyinQr] = useState<DouyinQrState | null>(null);
+  const [sauQr, setSauQr] = useState<SauQrState | null>(null);
   const [douyinBusy, setDouyinBusy] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const meta = ACCOUNT_PLATFORM_META[platform];
   const isWechat = platform === 'wechat';
-  const isDouyin = platform === 'douyin';
+  const isSauQr = platform === 'douyin' || platform === 'xhs';
   const canSubmit = isWechat
     ? appid.trim() !== '' && secret.trim() !== ''
     : cookie.trim() !== '';
@@ -69,27 +70,29 @@ export default function AddAccountSheet({ open, submitting, onClose, onSubmit, o
 
   useEffect(() => stopPolling, [stopPolling]);
 
-  const resetDouyinFlow = useCallback(() => {
+  const resetSauFlow = useCallback(() => {
     stopPolling();
-    setDouyinQr(null);
+    setSauQr(null);
     setShowAdvancedCookie(false);
   }, [stopPolling]);
 
-  const handleStartDouyinQr = useCallback(() => {
-    const name = accountName.trim() || '抖音账号';
+  const handleStartSauQr = useCallback(() => {
+    if (!isSauQr) return;
+    const sauPlatform: SauQrPlatform = platform === 'xhs' ? 'xhs' : 'douyin';
+    const name = accountName.trim() || `${meta.name}账号`;
     setDouyinBusy(true);
-    void createDouyinLoginSession({ accountName: name })
+    void createSauLoginSession(sauPlatform, { accountName: name })
       .then(({ sessionId }) => {
-        setDouyinQr({ sessionId, qrSrc: null, status: 'pending', error: null });
+        setSauQr({ sessionId, qrSrc: null, status: 'pending', error: null });
         stopPolling();
         pollTimer.current = setInterval(() => {
-          void getDouyinLoginQr(sessionId)
+          void getSauLoginQr(sauPlatform, sessionId)
             .then(async (qr) => {
-              setDouyinQr({ sessionId, qrSrc: qr.qrSrc, status: qr.status, error: null });
+              setSauQr({ sessionId, qrSrc: qr.qrSrc, status: qr.status, error: null });
               if (qr.status === 'confirmed') {
                 stopPolling();
                 // 回调没到时 confirm 拉取兜底上收；成功后账号已在库里。
-                await confirmDouyinLoginSession(sessionId).catch(() => {});
+                await confirmSauLoginSession(sauPlatform, sessionId).catch(() => {});
                 onDouyinAdded?.();
               }
               if (qr.status === 'expired') {
@@ -100,10 +103,10 @@ export default function AddAccountSheet({ open, submitting, onClose, onSubmit, o
         }, 3000);
       })
       .catch(() => {
-        setDouyinQr({ sessionId: '', qrSrc: null, status: 'expired', error: '登录会话创建失败，请确认执行器已启动' });
+        setSauQr({ sessionId: '', qrSrc: null, status: 'expired', error: '登录会话创建失败，请确认执行器已启动' });
       })
       .finally(() => setDouyinBusy(false));
-  }, [accountName, onDouyinAdded, stopPolling]);
+  }, [platform, isSauQr, meta.name, accountName, onDouyinAdded, stopPolling]);
 
   const handleSubmit = useCallback(
     (event: React.FormEvent) => {
@@ -141,7 +144,7 @@ export default function AddAccountSheet({ open, submitting, onClose, onSubmit, o
                 role="radio"
                 aria-checked={selected}
                 onClick={() => {
-                  if (platform === 'douyin' && id !== 'douyin') resetDouyinFlow();
+                  if (platform !== id) resetSauFlow();
                   setPlatform(id);
                 }}
                 className={cn(
@@ -191,41 +194,41 @@ export default function AddAccountSheet({ open, submitting, onClose, onSubmit, o
               凭据加密落库，只显示脱敏值，永不回显明文。
             </p>
           </div>
-        ) : isDouyin ? (
+        ) : isSauQr ? (
           <div className="space-y-3">
             {/* 抖音：扫码授权（主路径） */}
             <div className="rounded-2xl border border-border/70 bg-card/60 p-3.5">
               <div className="flex items-center gap-2">
                 <QrCode aria-hidden="true" className="h-4 w-4 text-primary" />
-                <p className="text-xs font-medium text-foreground">手机抖音扫码授权</p>
+                <p className="text-xs font-medium text-foreground">手机{meta.name}扫码授权</p>
               </div>
-              {douyinQr ? (
+              {sauQr ? (
                 <div className="mt-3 space-y-2.5">
-                  {douyinQr.qrSrc ? (
+                  {sauQr.qrSrc ? (
                     // 原生 img：二维码来自执行器（data-url 或抖音 CDN），next/image 不适用
                     <img
-                      src={douyinQr.qrSrc}
-                      alt="抖音登录二维码"
+                      src={sauQr.qrSrc}
+                      alt={`${meta.name}登录二维码`}
                       className="mx-auto h-44 w-44 rounded-xl border border-border bg-white object-contain"
                     />
                   ) : (
                     <div className="mx-auto flex h-44 w-44 items-center justify-center rounded-xl border border-dashed border-border text-[11px] text-muted-foreground">
-                      {douyinQr.status === 'expired' ? '二维码已过期' : '二维码生成中…'}
+                      {sauQr.status === 'expired' ? '二维码已过期' : '二维码生成中…'}
                     </div>
                   )}
                   <p className="text-center text-[11px] text-muted-foreground" role="status">
-                    {douyinQr.error
-                      ? douyinQr.error
-                      : douyinQr.status === 'confirmed'
+                    {sauQr.error
+                      ? sauQr.error
+                      : sauQr.status === 'confirmed'
                         ? '已扫码确认，正在落库…'
-                        : douyinQr.status === 'expired'
+                        : sauQr.status === 'expired'
                           ? '二维码已过期，请重新生成'
-                          : '打开抖音 App 扫码，3 秒自动刷新状态'}
+                          : `打开${meta.name} App 扫码，3 秒自动刷新状态`}
                   </p>
-                  {douyinQr.status === 'expired' ? (
+                  {sauQr.status === 'expired' ? (
                     <button
                       type="button"
-                      onClick={handleStartDouyinQr}
+                      onClick={handleStartSauQr}
                       className="mx-auto flex h-9 items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-4 text-xs font-medium text-primary transition-all duration-150 hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                     >
                       <RefreshCw aria-hidden="true" className="h-3.5 w-3.5" />
@@ -237,7 +240,7 @@ export default function AddAccountSheet({ open, submitting, onClose, onSubmit, o
                 <button
                   type="button"
                   disabled={douyinBusy}
-                  onClick={handleStartDouyinQr}
+                  onClick={handleStartSauQr}
                   className={cn(
                     'mt-3 inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-primary/40 bg-primary/10',
                     'text-xs font-medium text-primary transition-all duration-150 hover:bg-primary/20 active:scale-[0.98]',
@@ -265,7 +268,7 @@ export default function AddAccountSheet({ open, submitting, onClose, onSubmit, o
               </summary>
               <div className="mt-2.5 space-y-1.5">
                 <textarea
-                  id="douyin-cookie"
+                  id="sau-cookie"
                   rows={3}
                   value={cookie}
                   onChange={(event) => setCookie(event.target.value)}
@@ -314,8 +317,8 @@ export default function AddAccountSheet({ open, submitting, onClose, onSubmit, o
           >
             取消
           </button>
-          {/* 抖音走扫码流时无需手动保存；仅高级 cookie 路径或其他平台显示 */}
-          {(!isDouyin || showAdvancedCookie) ? (
+          {/* 扫码平台走扫码流时无需手动保存；仅高级 cookie 路径或其他平台显示 */}
+          {(!isSauQr || showAdvancedCookie) ? (
             <button
               type="submit"
               disabled={!canSubmit || submitting}

@@ -2844,39 +2844,90 @@ export async function verifyPlatformAccount(
   );
 }
 
-// —— 抖音扫码授权流（P2e-2）——
+// —— SAU 扫码授权流（P2e-2 抖音 / P2e-3 小红书）——
 
 export type DouyinLoginSessionStatus = 'pending' | 'scanned' | 'confirmed' | 'expired';
+export type SauLoginSessionStatus = DouyinLoginSessionStatus;
+export type SauQrPlatform = 'douyin' | 'xhs';
 
-export async function createDouyinLoginSession(
+export async function createSauLoginSession(
+  platform: SauQrPlatform,
   input: { accountName: string },
   options?: RequestApiOptions,
 ): Promise<{ sessionId: string }> {
-  return requestApi('/api/platform-accounts/douyin/login-session', {
+  return requestApi(`/api/platform-accounts/${platform}/login-session`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(input),
   }, options);
 }
 
+export async function getSauLoginQr(
+  platform: SauQrPlatform,
+  sessionId: string,
+  options?: RequestApiOptions,
+): Promise<{ status: SauLoginSessionStatus; qrSrc: string | null }> {
+  return requestApi(
+    `/api/platform-accounts/${platform}/login-session/${encodeURIComponent(sessionId)}/qr`,
+    undefined,
+    options,
+  );
+}
+
+export async function confirmSauLoginSession(
+  platform: SauQrPlatform,
+  sessionId: string,
+  options?: RequestApiOptions,
+): Promise<{ account: PlatformAccount }> {
+  return requestApi(
+    `/api/platform-accounts/${platform}/login-session/${encodeURIComponent(sessionId)}/confirm`,
+    { method: 'POST' },
+    options,
+  );
+}
+
+/** 兼容旧名（P2e-2 抖音扫码流）。 */
+export async function createDouyinLoginSession(
+  input: { accountName: string },
+  options?: RequestApiOptions,
+): Promise<{ sessionId: string }> {
+  return createSauLoginSession('douyin', input, options);
+}
+
 export async function getDouyinLoginQr(
   sessionId: string,
   options?: RequestApiOptions,
 ): Promise<{ status: DouyinLoginSessionStatus; qrSrc: string | null }> {
-  return requestApi(
-    `/api/platform-accounts/douyin/login-session/${encodeURIComponent(sessionId)}/qr`,
-    undefined,
-    options,
-  );
+  return getSauLoginQr('douyin', sessionId, options);
 }
 
 export async function confirmDouyinLoginSession(
   sessionId: string,
   options?: RequestApiOptions,
 ): Promise<{ account: PlatformAccount }> {
+  return confirmSauLoginSession('douyin', sessionId, options);
+}
+
+/** 发布草稿为 SAU 平台视频（douyin 抖音 / xhs 小红书视频笔记；须 accepted 状态）。 */
+export async function publishDraftToSauVideo(
+  draftId: string,
+  input: {
+    platform: SauQrPlatform;
+    accountId: string;
+    videoPath?: string;
+    videoUrl?: string;
+    title?: string;
+    tags?: string[];
+  },
+  options?: RequestApiOptions,
+): Promise<{ vendorFilename: string; publishedPostId: string; postUrl: string }> {
   return requestApi(
-    `/api/platform-accounts/douyin/login-session/${encodeURIComponent(sessionId)}/confirm`,
-    { method: 'POST' },
+    `/api/drafts/${encodeURIComponent(draftId)}/publish`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    },
     options,
   );
 }
