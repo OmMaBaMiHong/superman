@@ -6,7 +6,7 @@ export const ACCOUNT_PLATFORM_META: Record<
   { name: string; icon: string; supported: boolean }
 > = {
   wechat: { name: '公众号', icon: '💬', supported: true },
-  douyin: { name: '抖音', icon: '🎵', supported: false },
+  douyin: { name: '抖音', icon: '🎵', supported: true },
   xhs: { name: '小红书', icon: '📕', supported: false },
   bilibili: { name: 'B站', icon: '📺', supported: false },
   channels: { name: '视频号', icon: '🎬', supported: false },

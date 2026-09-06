@@ -2844,6 +2844,43 @@ export async function verifyPlatformAccount(
   );
 }
 
+// —— 抖音扫码授权流（P2e-2）——
+
+export type DouyinLoginSessionStatus = 'pending' | 'scanned' | 'confirmed' | 'expired';
+
+export async function createDouyinLoginSession(
+  input: { accountName: string },
+  options?: RequestApiOptions,
+): Promise<{ sessionId: string }> {
+  return requestApi('/api/platform-accounts/douyin/login-session', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  }, options);
+}
+
+export async function getDouyinLoginQr(
+  sessionId: string,
+  options?: RequestApiOptions,
+): Promise<{ status: DouyinLoginSessionStatus; qrSrc: string | null }> {
+  return requestApi(
+    `/api/platform-accounts/douyin/login-session/${encodeURIComponent(sessionId)}/qr`,
+    undefined,
+    options,
+  );
+}
+
+export async function confirmDouyinLoginSession(
+  sessionId: string,
+  options?: RequestApiOptions,
+): Promise<{ account: PlatformAccount }> {
+  return requestApi(
+    `/api/platform-accounts/douyin/login-session/${encodeURIComponent(sessionId)}/confirm`,
+    { method: 'POST' },
+    options,
+  );
+}
+
 /** 发布草稿到公众号草稿箱（仅 wechat；须 accepted 状态）。 */
 export async function publishDraftToWechat(
   draftId: string,
