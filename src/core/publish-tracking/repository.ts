@@ -20,6 +20,10 @@ export interface PublishedPostRow {
   fetchFailCount: number;
   lastError: string | null;
   lastHotNotifiedAt: string | null;
+  /** 评论同步游标（P3a，24h 一轮）。 */
+  commentsSyncedAt: string | null;
+  /** 上次评论粗分析时间（P3a，观察用）。 */
+  commentIntelAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -40,6 +44,8 @@ export const postSelectSql = `
   fetch_fail_count as "fetchFailCount",
   last_error as "lastError",
   last_hot_notified_at as "lastHotNotifiedAt",
+  comments_synced_at as "commentsSyncedAt",
+  comment_intel_at as "commentIntelAt",
   created_at as "createdAt",
   updated_at as "updatedAt"
 `;
@@ -357,6 +363,8 @@ function mapPostRow(row: Record<string, unknown>): PublishedPostRow {
     fetchFailCount: Number(row.fetch_fail_count ?? 0),
     lastError: (row.last_error as string | null) ?? null,
     lastHotNotifiedAt: row.last_hot_notified_at ? String(row.last_hot_notified_at) : null,
+    commentsSyncedAt: row.comments_synced_at ? String(row.comments_synced_at) : null,
+    commentIntelAt: row.comment_intel_at ? String(row.comment_intel_at) : null,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };
