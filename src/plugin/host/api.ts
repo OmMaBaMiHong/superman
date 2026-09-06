@@ -29,6 +29,18 @@ import {
   refreshPublishedPost,
   registerPublishedPost,
 } from '@/core/publish-tracking/service'
+import {
+  createPlatformAccount,
+  deletePlatformAccount,
+  getPlatformAccount,
+  listPlatformAccounts,
+  markAccountVerified,
+} from '@/core/platform-accounts/repository'
+import {
+  publishDraftToWechat,
+  verifyWechatAccount,
+} from '@/core/platform-accounts/wechat/publishService'
+import { WechatMpError } from '@/core/platform-accounts/wechat/mpClient'
 import { normalizePersistedSettings } from '@/features/settings/settingsSchema'
 import { getAiApiKey, getUiSettings } from '@/server/domains/settings/repositories/settingsRepo'
 import { isAiRuntimeConfigComplete, resolveSharedAiConfig } from '@/server/integrations/ai/runtimeConfig'
@@ -561,6 +573,105 @@ const ROUTES: RouteDef[] = [
     const deleted = await deletePublishedPost(db as never, requireId(params.id, '帖子 ID'), session.userId)
     if (!deleted) throw new NotFoundError('帖子不存在')
     json(res, 200, { ok: true, data: { deleted: true } })
+  }),
+
+  // —— 平台授权中心（P2e-1）——
+  route('GET', '/platform-accounts', async ({ res, query, session, db }) => {
+    const platform = query.get('platform')?.trim() || undefined
+    const items = await listPlatformAccounts(db as never, {
+      userId: session.userId,
+      platform: platform as 'wechat' | 'douyin' | 'xhs' | 'bilibili' | 'channels' | undefined,
+    })
+    json(res, 200, { ok: true, data: { items } })
+  }),
+  route('POST', '/platform-accounts', async ({ req, res, session, db }) => {
+    const body = await readJsonBody(req)
+    const platform = typeof body.platform === 'string' ? body.platform.trim() : ''
+    if (!['wechat', 'douyin', 'xhs', 'bilibili', 'channels'].includes(platform)) {
+      throw new ValidationError('请求参数非法', { platform: '仅支持 wechat/douyin/xhs/bilibili/channels' })
+    }
+    const credKind = typeof body.credKind === 'string' ? body.credKind.trim() : ''
+    if (!['app_secret', 'cookie', 'oauth'].includes(credKind)) {
+      throw new ValidationError('请求参数非法', { credKind: '仅支持 app_secret/cookie/oauth' })
+    }
+    const credential = typeof body.credential === 'object' && body.credential !== null
+      ? body.credential as Record<string, unknown>
+      : null
+    if (!credential || Object.keys(credential).length === 0) {
+      throw new ValidationError('请求参数非法', { credential: '凭据不能为空' })
+    }
+    if (credKind === 'app_secret') {
+      const appid = typeof credential.appid === 'string' ? credential.appid.trim() : ''
+      const secret = typeof credential.secret === 'string' ? credential.secret.trim() : ''
+      if (!appid || !secret) {
+        throw new ValidationError('请求参数非法', { credential: 'app_secret 需要 appid 与 secret 字段' })
+      }
+    }
+    try {
+      const account = await createPlatformAccount(db as never, {
+        platform: platform as 'wechat',
+        accountName: typeof body.accountName === 'string' ? body.accountName.trim() : '',
+        credKind: credKind as 'app_secret',
+        // 明文只在加密封装内存在，落库即密文。
+        credentialPlaintext: JSON.stringify(credential),
+        metaJson: typeof body.metaJson === 'object' && body.metaJson !== null
+          ? body.metaJson as Record<string, unknown>
+          : null,
+        userId: session.userId,
+      })
+      json(res, 200, { ok: true, data: { account } })
+    } catch (err) {
+      if (typeof err === 'object' && err !== null && (err as { code?: unknown }).code === '23505') {
+        throw new ConflictError('该平台账号已存在', { accountName: '同平台同名账号重复' })
+      }
+      throw err
+    }
+  }),
+  route('DELETE', '/platform-accounts/:id', async ({ res, params, session, db }) => {
+    const deleted = await deletePlatformAccount(db as never, requireId(params.id, '账号 ID'), session.userId)
+    if (!deleted) throw new NotFoundError('平台账号不存在')
+    json(res, 200, { ok: true, data: { deleted: true } })
+  }),
+  route('POST', '/platform-accounts/:id/verify', async ({ res, params, session, db }) => {
+    const account = await getPlatformAccount(db as never, requireId(params.id, '账号 ID'), session.userId)
+    if (!account) throw new NotFoundError('平台账号不存在')
+    if (account.platform !== 'wechat' || account.credKind !== 'app_secret') {
+      json(res, 200, { ok: true, data: { verified: false, reason: '该平台验证待 P2e-2/3 接入' } })
+      return
+    }
+    try {
+      await verifyWechatAccount(db as never, account)
+      await markAccountVerified(db as never, { id: account.id, ok: true, userId: session.userId })
+      json(res, 200, { ok: true, data: { verified: true } })
+    } catch (err) {
+      const reason = err instanceof WechatMpError ? err.message : '验证失败'
+      await markAccountVerified(db as never, {
+        id: account.id,
+        ok: false,
+        failStatus: err instanceof WechatMpError && err.errcode === 40013 ? 'error' : 'error',
+        userId: session.userId,
+      })
+      json(res, 200, { ok: true, data: { verified: false, reason } })
+    }
+  }),
+  route('POST', '/drafts/:id/publish', async ({ req, res, params, session, db }) => {
+    const body = await readJsonBody(req)
+    const platform = typeof body.platform === 'string' ? body.platform.trim() : ''
+    if (platform !== 'wechat') {
+      throw new ValidationError('请求参数非法', { platform: '当前仅支持 wechat（公众号草稿箱）' })
+    }
+    const accountId = typeof body.accountId === 'string' || typeof body.accountId === 'number'
+      ? String(body.accountId)
+      : ''
+    if (!/^\d+$/.test(accountId)) {
+      throw new ValidationError('请求参数非法', { accountId: '必须为正整数' })
+    }
+    const result = await publishDraftToWechat(db as never, {
+      draftId: requireId(params.id, '草稿 ID'),
+      accountId,
+      userId: session.userId,
+    })
+    json(res, 200, { ok: true, data: result })
   }),
 
   // —— 订阅源（P1-A）——
