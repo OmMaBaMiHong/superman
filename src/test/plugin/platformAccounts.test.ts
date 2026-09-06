@@ -232,8 +232,8 @@ describe('plugin/host/api · 平台授权中心路由（P2e-1）', () => {
     expect(body.data.reason).toContain('invalid appid');
     expect(markVerifiedMock).toHaveBeenCalledWith(fakeDb, expect.objectContaining({ id: '3', ok: false }));
 
-    // 非 wechat 平台 → stub
-    getAccountMock.mockResolvedValue({ ...ACCOUNT, platform: 'douyin', credKind: 'cookie' });
+    // 非 wechat/douyin 平台 → stub（P2e-3）
+    getAccountMock.mockResolvedValue({ ...ACCOUNT, platform: 'xhs', credKind: 'cookie' });
     const stub = makeRes();
     await handler(makeReq('POST', '/s/api/platform-accounts/3/verify', cookie, {}), stub as never);
     expect(JSON.parse(stub.body).data.reason).toContain('P2e');
@@ -255,7 +255,7 @@ describe('plugin/host/api · 平台授权中心路由（P2e-1）', () => {
     expect(publishToWechatMock).toHaveBeenCalledWith(fakeDb, { draftId: '9', accountId: '3', userId: '1' });
 
     const badPlatform = makeRes();
-    await handler(makeReq('POST', '/s/api/drafts/9/publish', cookie, { platform: 'douyin', accountId: '3' }), badPlatform as never);
+    await handler(makeReq('POST', '/s/api/drafts/9/publish', cookie, { platform: 'xhs', accountId: '3' }), badPlatform as never);
     expect(badPlatform.status).toBe(400);
   });
 
