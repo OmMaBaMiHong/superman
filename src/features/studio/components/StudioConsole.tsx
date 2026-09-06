@@ -19,6 +19,7 @@ import {
   type RewritePlatform,
 } from '@/lib/api/apiClient';
 import GlassDetailSheet from '@/components/ui/glass-detail-sheet';
+import PerformanceSection from './PerformanceSection';
 import GovernanceConsole from '@/features/governance/components/GovernanceConsole';
 import MobileTabBar from '@/features/mobile/components/MobileTabBar';
 import { cn } from '@/lib/utils';
@@ -34,13 +35,14 @@ import {
   similarityToneClass,
 } from '../lib/platforms';
 
-type StudioSection = 'queue' | 'topics' | 'jobs' | 'drafts';
+type StudioSection = 'queue' | 'topics' | 'jobs' | 'drafts' | 'performance';
 
 const SECTIONS: Array<{ id: StudioSection; name: string }> = [
   { id: 'queue', name: '审批' },
   { id: 'topics', name: '选题池' },
   { id: 'jobs', name: '流水线任务' },
   { id: 'drafts', name: '草稿箱' },
+  { id: 'performance', name: '表现' },
 ];
 
 const TOPIC_PAGE_SIZE = 24;
@@ -317,6 +319,9 @@ export default function StudioConsole({ initialSection }: { initialSection?: 'qu
             <GovernanceConsole embedded />
           </section>
         ) : null}
+
+        {/* ── 表现（发布后作品数据追踪，P2d） ── */}
+        {section === 'performance' ? <PerformanceSection /> : null}
 
         {/* ── 选题卡池 ── */}
         {section === 'topics' ? (

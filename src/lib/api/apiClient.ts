@@ -2652,3 +2652,121 @@ export async function listDirections(
 ): Promise<{ items: DirectionTemplate[] }> {
   return requestApi('/api/directions', undefined, options);
 }
+
+/* ── 发布后表现追踪（P2d）── */
+
+export type PublishPlatform = 'bilibili' | 'douyin' | 'xhs' | 'wechat' | 'other';
+
+export interface PostMetricsSnapshot {
+  id: string;
+  postId: string;
+  fetchedAt: string;
+  views: number | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  favorites: number | null;
+  coins: number | null;
+  followersDelta: number | null;
+  rawJson: Record<string, unknown> | null;
+}
+
+export interface PublishedPost {
+  id: string;
+  userId: string;
+  draftId: string | null;
+  articleId: string | null;
+  platform: PublishPlatform;
+  accountName: string;
+  postUrl: string;
+  title: string;
+  publishedAt: string | null;
+  trackingEnabled: boolean;
+  lastFetchedAt: string | null;
+  fetchFailCount: number;
+  lastError: string | null;
+  lastHotNotifiedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PublishedPostListItem extends PublishedPost {
+  latestSnapshot: PostMetricsSnapshot | null;
+  delta24h: { views: number | null; likes: number | null; comments: number | null } | null;
+  hot: boolean;
+  hotReasons: string[];
+}
+
+export async function registerPublishedPost(
+  input: {
+    postUrl: string;
+    title?: string;
+    platform?: string;
+    accountName?: string;
+    draftId?: string | null;
+    articleId?: string | null;
+    publishedAt?: string | null;
+  },
+  options?: RequestApiOptions,
+): Promise<{ post: PublishedPost }> {
+  return requestApi(
+    '/api/published-posts',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    },
+    options,
+  );
+}
+
+export async function listPublishedPosts(
+  options?: RequestApiOptions,
+): Promise<{ items: PublishedPostListItem[] }> {
+  return requestApi('/api/published-posts', undefined, options);
+}
+
+export async function getPublishedPostDetail(
+  id: string,
+  options?: RequestApiOptions,
+): Promise<{ post: PublishedPost; snapshots: PostMetricsSnapshot[] }> {
+  return requestApi(`/api/published-posts/${encodeURIComponent(id)}`, undefined, options);
+}
+
+export async function refreshPublishedPost(
+  id: string,
+  options?: RequestApiOptions,
+): Promise<unknown> {
+  return requestApi(
+    `/api/published-posts/${encodeURIComponent(id)}/refresh`,
+    { method: 'POST' },
+    options,
+  );
+}
+
+export async function setPublishedPostTracking(
+  id: string,
+  trackingEnabled: boolean,
+  options?: RequestApiOptions,
+): Promise<{ post: PublishedPost }> {
+  return requestApi(
+    `/api/published-posts/${encodeURIComponent(id)}/tracking`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ trackingEnabled }),
+    },
+    options,
+  );
+}
+
+export async function deletePublishedPost(
+  id: string,
+  options?: RequestApiOptions,
+): Promise<{ deleted: boolean }> {
+  return requestApi(
+    `/api/published-posts/${encodeURIComponent(id)}`,
+    { method: 'DELETE' },
+    options,
+  );
+}
