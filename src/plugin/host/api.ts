@@ -17,6 +17,18 @@ import {
   DIRECTION_KEY_PATTERN,
 } from '@/core/governance/directions'
 import { backfillDirections } from '@/core/governance/backfill'
+import {
+  deletePublishedPost,
+  getPublishedPost,
+  listPublishedPostsWithMetrics,
+  listSnapshotsSince,
+  setPublishedPostTracking,
+} from '@/core/publish-tracking/repository'
+import {
+  evaluateHot,
+  refreshPublishedPost,
+  registerPublishedPost,
+} from '@/core/publish-tracking/service'
 import { normalizePersistedSettings } from '@/features/settings/settingsSchema'
 import { getAiApiKey, getUiSettings } from '@/server/domains/settings/repositories/settingsRepo'
 import { isAiRuntimeConfigComplete, resolveSharedAiConfig } from '@/server/integrations/ai/runtimeConfig'
@@ -474,6 +486,81 @@ const ROUTES: RouteDef[] = [
       userId: session.userId,
     })
     json(res, 200, { ok: true, data: { item } })
+  }),
+
+  // —— 发布后表现追踪（P2d）——
+  route('POST', '/published-posts', async ({ req, res, session, db }) => {
+    const body = await readJsonBody(req)
+    const postUrl = typeof body.postUrl === 'string' ? body.postUrl : ''
+    const post = await registerPublishedPost(db as never, {
+      postUrl,
+      title: typeof body.title === 'string' ? body.title : undefined,
+      platform: typeof body.platform === 'string' ? body.platform : undefined,
+      accountName: typeof body.accountName === 'string' ? body.accountName : undefined,
+      draftId: typeof body.draftId === 'string' || typeof body.draftId === 'number' ? String(body.draftId) : null,
+      articleId: typeof body.articleId === 'string' || typeof body.articleId === 'number' ? String(body.articleId) : null,
+      publishedAt: typeof body.publishedAt === 'string' ? body.publishedAt : null,
+      userId: session.userId,
+    })
+    json(res, 200, { ok: true, data: { post } })
+  }),
+  route('GET', '/published-posts', async ({ res, session, db }) => {
+    const rows = await listPublishedPostsWithMetrics(db as never, { userId: session.userId })
+    const items = rows.map(({ latestSnapshot, baselineSnapshot, ...post }) => {
+      const delta = latestSnapshot && baselineSnapshot
+        ? {
+            views: latestSnapshot.views !== null && baselineSnapshot.views !== null
+              ? latestSnapshot.views - baselineSnapshot.views
+              : null,
+            likes: latestSnapshot.likes !== null && baselineSnapshot.likes !== null
+              ? latestSnapshot.likes - baselineSnapshot.likes
+              : null,
+            comments: latestSnapshot.comments !== null && baselineSnapshot.comments !== null
+              ? latestSnapshot.comments - baselineSnapshot.comments
+              : null,
+          }
+        : null
+      const hot = latestSnapshot && baselineSnapshot
+        ? evaluateHot(baselineSnapshot, latestSnapshot)
+        : { hot: false, reasons: [] as string[] }
+      return { ...post, latestSnapshot, delta24h: delta, hot: hot.hot, hotReasons: hot.reasons }
+    })
+    json(res, 200, { ok: true, data: { items } })
+  }),
+  route('GET', '/published-posts/:id', async ({ res, params, session, db }) => {
+    const id = requireId(params.id, '帖子 ID')
+    const post = await getPublishedPost(db as never, id, session.userId)
+    if (!post) throw new NotFoundError('帖子不存在')
+    const snapshots = await listSnapshotsSince(db as never, { postId: id, days: 7 })
+    json(res, 200, { ok: true, data: { post, snapshots } })
+  }),
+  route('POST', '/published-posts/:id/refresh', async ({ res, params, session, db }) => {
+    const result = await refreshPublishedPost(db as never, {
+      postId: requireId(params.id, '帖子 ID'),
+      userId: session.userId,
+    })
+    if (!result.ok && result.error === '帖子不存在或不属于当前用户') {
+      throw new NotFoundError('帖子不存在')
+    }
+    json(res, 200, { ok: true, data: result })
+  }),
+  route('POST', '/published-posts/:id/tracking', async ({ req, res, params, session, db }) => {
+    const body = await readJsonBody(req)
+    if (typeof body.trackingEnabled !== 'boolean') {
+      throw new ValidationError('请求参数非法', { trackingEnabled: '必须为布尔值' })
+    }
+    const post = await setPublishedPostTracking(db as never, {
+      id: requireId(params.id, '帖子 ID'),
+      trackingEnabled: body.trackingEnabled,
+      userId: session.userId,
+    })
+    if (!post) throw new NotFoundError('帖子不存在')
+    json(res, 200, { ok: true, data: { post } })
+  }),
+  route('DELETE', '/published-posts/:id', async ({ res, params, session, db }) => {
+    const deleted = await deletePublishedPost(db as never, requireId(params.id, '帖子 ID'), session.userId)
+    if (!deleted) throw new NotFoundError('帖子不存在')
+    json(res, 200, { ok: true, data: { deleted: true } })
   }),
 
   // —— 订阅源（P1-A）——

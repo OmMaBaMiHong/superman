@@ -21,6 +21,7 @@ import { runTrendRadarSync } from '@/core/trendradar/sync'
 import { executeRewriteJob } from '@/core/pipelines/services/rewriteService'
 import { notify, notifyOncePerWindow } from '@/core/notify/service'
 import { getGovernanceStats } from '@/core/governance/repository'
+import { runPublishTrackingTick } from '@/core/publish-tracking/service'
 import { fetchAndIngestFeed } from '@/worker/index'
 import { listEnabledFeedsForFetch } from '@/server/domains/feeds/repositories/feedsRepo'
 import { selectFeedsForRefreshAll } from '@/worker/refreshAll'
@@ -32,6 +33,7 @@ export interface PluginSchedulerConfig {
   trendradarIntervalMs?: number
   feedRefreshIntervalMs?: number
   pipelinePollIntervalMs?: number
+  publishTrackingIntervalMs?: number
 }
 
 export interface SchedulerHandle {
@@ -46,6 +48,7 @@ interface Logger {
 const TRENDRADAR_INTERVAL = 30 * 60_000
 const FEED_TICK_INTERVAL = 60_000
 const PIPELINE_POLL_INTERVAL = 15_000
+const PUBLISH_TRACKING_INTERVAL = 30 * 60_000
 
 /** 每条 tick 最多执行的洗稿任务数（防雪崩）。 */
 const PIPELINE_BATCH_LIMIT = 10
@@ -188,7 +191,19 @@ export function startPluginScheduler(
     }
   })
 
-  logger.log('调度器已启动：trendradar.sync(30m) + feed.fetch(60s) + pipeline.rewrite(15s)')
+  every('publishTracking.tick', config.publishTrackingIntervalMs ?? PUBLISH_TRACKING_INTERVAL, async () => {
+    const users = await listUsers(pool as never)
+    for (const user of users.filter((u) => u.status === 'active')) {
+      const result = await runPublishTrackingTick(pool as never, { userId: user.id })
+      if (result.fetched > 0 || result.failed > 0) {
+        logger.log(
+          `publishTracking.tick: user=${user.id} due=${result.due} fetched=${result.fetched} failed=${result.failed} hot=${result.hot}`,
+        )
+      }
+    }
+  })
+
+  logger.log('调度器已启动：trendradar.sync(30m) + feed.fetch(60s) + pipeline.rewrite(15s) + publishTracking.tick(30m)')
   return {
     stop: () => {
       for (const timer of timers) clearInterval(timer)
