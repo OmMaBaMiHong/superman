@@ -52,12 +52,12 @@
 
 **Files:** 已存在的 `integrations/crawler-service/**`、`.gitignore`
 
-- [ ] **Step 1: 跑测试确认绿**
+- [x] **Step 1: 跑测试确认绿**
 
 Run: `cd integrations/crawler-service && .venv/bin/python -m pytest tests/ -q`
 Expected: `14 passed`
 
-- [ ] **Step 2: 提交**
+- [x] **Step 2: 提交**
 
 ```bash
 cd /Users/wade/work-space/pa-chong-cai-ji/FeedFuse
@@ -78,7 +78,7 @@ git commit -m "feat(crawler-service): P3a-0 独立爬虫服务入库——TikHub
 - Modify: `integrations/crawler-service/tests/test_service.py`
 - Modify: `integrations/crawler-service/README.md`（post-stats 字段说明加 `title?`）
 
-- [ ] **Step 1: 写失败测试（加进 `TestTikhubProvider` 与 `TestBilibiliProvider`）**
+- [x] **Step 1: 写失败测试（加进 `TestTikhubProvider` 与 `TestBilibiliProvider`）**
 
 ```python
     def test_dy_stats_retries_transient_400(self):
@@ -122,12 +122,12 @@ def fake_urlopen_error(status):
 ```
 （`import io`、确保 `import urllib.error` 已在测试文件头部。）
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `.venv/bin/python -m pytest tests/test_service.py -k "retries_transient or stats" -q`
 Expected: 新增 2 个测试 FAIL（`title` KeyError / `ProviderError not raised`），旧测试 PASS。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `tikhub.py` 三处：
 
@@ -166,17 +166,17 @@ Expected: 新增 2 个测试 FAIL（`title` KeyError / `ProviderError not raised
         result["title"] = (payload.get("data") or {}).get("title") or None
 ```
 
-- [ ] **Step 4: 跑全部 Python 测试确认绿**
+- [x] **Step 4: 跑全部 Python 测试确认绿**
 
 Run: `.venv/bin/python -m pytest tests/ -q`
 Expected: `17 passed`（14 + 3：两个新 douyin 测试 + bilibili 断言并入旧测试）
 
-- [ ] **Step 5: 更新 README 端点表**
+- [x] **Step 5: 更新 README 端点表**
 
 `GET /v1/post-stats` 行的归一字段说明改为：
 `{views, likes, comments, shares, favorites, coins, platform, post_id, title?}`
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add integrations/crawler-service
@@ -191,7 +191,7 @@ git commit -m "feat(crawler-service): P3a-1 stats 透传平台 title + 抖音详
 - Create: `src/core/crawlerClient.ts`
 - Test: `src/test/server/domains/crawler/crawlerClient.test.ts`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```typescript
 import { describe, expect, it, vi } from 'vitest';
@@ -251,12 +251,12 @@ describe('createCrawlerClient', () => {
 });
 ```
 
-- [ ] **Step 2: 确认失败**
+- [x] **Step 2: 确认失败**
 
 Run: `pnpm test -- src/test/server/domains/crawler/crawlerClient.test.ts`
 Expected: FAIL（模块不存在）
 
-- [ ] **Step 3: 实现 `src/core/crawlerClient.ts`**
+- [x] **Step 3: 实现 `src/core/crawlerClient.ts`**
 
 ```typescript
 /**
@@ -428,12 +428,12 @@ export function createCrawlerClient(deps: CrawlerClientDeps = {}): CrawlerClient
 }
 ```
 
-- [ ] **Step 4: 确认通过**
+- [x] **Step 4: 确认通过**
 
 Run: `pnpm test -- src/test/server/domains/crawler/crawlerClient.test.ts`
 Expected: PASS（3 个测试）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add src/core/crawlerClient.ts src/test/server/domains/crawler/
@@ -449,7 +449,7 @@ git commit -m "feat(crawler): P3a-2 core/crawlerClient 调用端——统一信�
 - Modify: `src/core/publish-tracking/repository.ts:175`（listDueTrackingPosts 平台过滤）
 - Test: `src/test/server/domains/publish-tracking/platformProvider.test.ts`（扩展）
 
-- [ ] **Step 1: 写失败测试（追加进 platformProvider.test.ts）**
+- [x] **Step 1: 写失败测试（追加进 platformProvider.test.ts）**
 
 ```typescript
 import { createCrawlerServiceMetricsProvider } from '@/core/publish-tracking/metricsProvider';
@@ -492,12 +492,12 @@ describe('createCrawlerServiceMetricsProvider', () => {
 
 （若现有测试直接断言 `getMetricsProvider('douyin')` 返回 stub，按新行为更新：douyin/xhs 现在返回 crawler provider。`getMetricsProvider` 增加可选第二参 `deps` 透传，便于测试注入。）
 
-- [ ] **Step 2: 确认失败**
+- [x] **Step 2: 确认失败**
 
 Run: `pnpm test -- src/test/server/domains/publish-tracking/platformProvider.test.ts`
 Expected: FAIL（createCrawlerServiceMetricsProvider 未导出）
 
-- [ ] **Step 3: 实现 metricsProvider**
+- [x] **Step 3: 实现 metricsProvider**
 
 `metricsProvider.ts` 头部加 import：
 
@@ -582,7 +582,7 @@ export function getMetricsProvider(
 
 （crawler 注释块头部的平台说明同步更新：douyin/xhs 经 TikHub，B站直连已下沉服务。）
 
-- [ ] **Step 4: 到期抓取扩展三平台**
+- [x] **Step 4: 到期抓取扩展三平台**
 
 `src/core/publish-tracking/repository.ts` listDueTrackingPosts 的 SQL 中：
 
@@ -598,12 +598,12 @@ export function getMetricsProvider(
 export const postSelectSql = `
 ```
 
-- [ ] **Step 5: 确认通过 + 全量回归**
+- [x] **Step 5: 确认通过 + 全量回归**
 
 Run: `pnpm test -- src/test/server/domains/publish-tracking` ；再 `pnpm type-check`
 Expected: 全部 PASS；type-check 无错误（service.ts 若有依赖 stub 行为的测试，按新行为修正断言）。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add src/core/publish-tracking/ src/test/server/domains/publish-tracking/
@@ -618,7 +618,7 @@ git commit -m "feat(publish-tracking): P3a-3 表现追踪接 crawler 服务—�
 - Create: `src/server/infra/db/migrations/0058_post_comments.sql`
 - Create: `src/plugin/host/migrations/0006_post_comments.sql`（镜像）
 
-- [ ] **Step 1: 写迁移（主体系）**
+- [x] **Step 1: 写迁移（主体系）**
 
 ```sql
 -- ============================================================
@@ -689,7 +689,7 @@ begin
 end $$;
 ```
 
-- [ ] **Step 2: 写插件镜像**
+- [x] **Step 2: 写插件镜像**
 
 `src/plugin/host/migrations/0006_post_comments.sql`：同内容，头部注释改为（参考 0004 镜像格式）：
 
@@ -699,7 +699,7 @@ end $$;
 -- 两套迁移登记互不影响：主体系 schema_migrations / 插件 plugin_schema_migrations）。
 ```
 
-- [ ] **Step 3: 应用到开发库并验证**
+- [x] **Step 3: 应用到开发库并验证**
 
 按项目现行迁移应用机制执行（服务启动自动应用；或用现成迁移入口手动跑一次）。验证：
 
@@ -709,7 +709,7 @@ docker exec feedfuse-db-1 psql -U feedfuse -d feedfuse -t -c "select conname fro
 ```
 Expected: post_comments 表存在；两个 kind 约束都存在。
 
-- [ ] **Step 4: 提交**
+- [x] **Step 4: 提交**
 
 ```bash
 git add src/server/infra/db/migrations/0058_post_comments.sql src/plugin/host/migrations/0006_post_comments.sql
@@ -725,7 +725,7 @@ git commit -m "feat(db): P3a-4 迁移 0058/0006——post_comments 表 + 评论�
 - Create: `src/core/comment-intel/service.ts`
 - Test: `src/test/server/domains/comment-intel/repository.test.ts`、`service.test.ts`
 
-- [ ] **Step 1: 写失败测试（repository，纯函数部分 + SQL 形状用 mock db 断言）**
+- [x] **Step 1: 写失败测试（repository，纯函数部分 + SQL 形状用 mock db 断言）**
 
 ```typescript
 import { describe, expect, it, vi } from 'vitest';
@@ -754,7 +754,7 @@ describe('upsertPostComments', () => {
 });
 ```
 
-- [ ] **Step 2: 确认失败 → Step 3: 实现 repository**
+- [x] **Step 2: 确认失败 → Step 3: 实现 repository**
 
 ```typescript
 /**
@@ -878,12 +878,12 @@ export async function markCommentIntelAt(db: DbClient, postId: string): Promise<
 }
 ```
 
-- [ ] **Step 4: 确认 repository 测试通过**
+- [x] **Step 4: 确认 repository 测试通过**
 
 Run: `pnpm test -- src/test/server/domains/comment-intel/repository.test.ts`
 Expected: PASS
 
-- [ ] **Step 5: 写失败测试（service）**
+- [x] **Step 5: 写失败测试（service）**
 
 ```typescript
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -974,7 +974,7 @@ describe('runCommentIntelTick', () => {
 
 注意：`PublishedPostRow` 需要补 `commentsSyncedAt`/`commentIntelAt` 两个字段（本任务一并加到 `src/core/publish-tracking/repository.ts` 的接口与 `postSelectSql`/`mapPostRow`——迁移 0058 已加列）。
 
-- [ ] **Step 6: 实现 service**
+- [x] **Step 6: 实现 service**
 
 ```typescript
 /**
@@ -1082,7 +1082,7 @@ export async function runCommentIntelTick(
 
 （`analyzeComments` 入参含 `userId`——AI 配置按用户加载放在 analyze 内部还是 service？**决定：service 层加载一次传入**，避免每帖重复查 settings。上面测试用 analyzeFn 注入隔离了该细节；实现时在 runCommentIntelTick 开头 `const aiConfig = await loadAiConfig(db, scopedUserId)`，把它经 analyzeComments 第二参传入，见 Task 6。）
 
-- [ ] **Step 7: 确认 service 测试通过，提交**
+- [x] **Step 7: 确认 service 测试通过，提交**
 
 Run: `pnpm test -- src/test/server/domains/comment-intel` → PASS
 
@@ -1101,7 +1101,7 @@ git commit -m "feat(comment-intel): P3a-5 评论仓储与同步服务——upser
 - Modify: `src/core/comment-intel/service.ts`（接入 aiConfig 加载，见 Task 5 决定）
 - Test: `src/test/server/domains/comment-intel/analyze.test.ts`、`promote.test.ts`
 
-- [ ] **Step 1: 写失败测试（analyze，纯函数 + 回退路径）**
+- [x] **Step 1: 写失败测试（analyze，纯函数 + 回退路径）**
 
 ```typescript
 import { describe, expect, it } from 'vitest';
@@ -1137,7 +1137,7 @@ describe('buildCommentIntelPrompt', () => {
 });
 ```
 
-- [ ] **Step 2: 实现 analyze.ts**
+- [x] **Step 2: 实现 analyze.ts**
 
 ```typescript
 /**
@@ -1262,7 +1262,7 @@ export async function analyzeComments(input: {
 }
 ```
 
-- [ ] **Step 3: 写失败测试（promote）**
+- [x] **Step 3: 写失败测试（promote）**
 
 ```typescript
 import { describe, expect, it, vi } from 'vitest';
@@ -1310,7 +1310,7 @@ describe('promoteCommentCandidate', () => {
 });
 ```
 
-- [ ] **Step 4: 实现 promote.ts**
+- [x] **Step 4: 实现 promote.ts**
 
 ```typescript
 /**
@@ -1432,11 +1432,11 @@ export async function promoteCommentCandidate(
 }
 ```
 
-- [ ] **Step 5: notify kind 联动**
+- [x] **Step 5: notify kind 联动**
 
 `src/core/notify/repository.ts` 的 `NotificationKind` 联合类型与 `NOTIFICATION_KINDS` 数组各加 `'comment_intel'`。
 
-- [ ] **Step 6: service 接 AI 配置（Task 5 决定的收口）**
+- [x] **Step 6: service 接 AI 配置（Task 5 决定的收口）**
 
 `runCommentIntelTick` 开头加（imports 对齐 rewriteService.ts:130-138）：
 
@@ -1451,7 +1451,7 @@ export async function promoteCommentCandidate(
 ```
 并把 analyze 调用改为 `analyzeFn({ post, comments, aiConfig, userId: scopedUserId })`（分析函数不再自己查 settings；对应更新 Task 5 的 service 测试注入签名）。
 
-- [ ] **Step 7: 全部 comment-intel 测试通过 + 提交**
+- [x] **Step 7: 全部 comment-intel 测试通过 + 提交**
 
 Run: `pnpm test -- src/test/server/domains/comment-intel` → PASS
 
@@ -1469,11 +1469,11 @@ git commit -m "feat(comment-intel): P3a-6 评论粗分析（LLM+启发式回退�
 - Modify: `.env.example`
 - Modify: `integrations/crawler-service/README.md`
 
-- [ ] **Step 1: 写失败测试（scheduler 测试文件若存在则追加；否则在 service 测试中补接线断言）**
+- [x] **Step 1: 写失败测试（scheduler 测试文件若存在则追加；否则在 service 测试中补接线断言）**
 
 在 `src/test/plugin/scheduler.test.ts`（已存在）追加：构造 config 含 `schedulerEnabled: true`，用 fake timers 推进 `commentIntelIntervalMs`，断言 `runCommentIntelTick` 被按用户数调用（mock `@/core/comment-intel/service`）。对齐该文件现有的 publishTracking.tick 用例写法。
 
-- [ ] **Step 2: 实现 scheduler 接线**
+- [x] **Step 2: 实现 scheduler 接线**
 
 `scheduler.ts`：
 
@@ -1497,7 +1497,7 @@ git commit -m "feat(comment-intel): P3a-6 评论粗分析（LLM+启发式回退�
 
 4. 启动日志行更新为含 `commentIntel.tick(6h)`。
 
-- [ ] **Step 3: `.env.example` 追加**
+- [x] **Step 3: `.env.example` 追加**
 
 ```
 # P3a 独立爬虫服务（integrations/crawler-service，FastAPI，默认本机 5510）。
@@ -1507,11 +1507,11 @@ git commit -m "feat(comment-intel): P3a-6 评论粗分析（LLM+启发式回退�
 # CRAWLER_SERVICE_KEY=
 ```
 
-- [ ] **Step 4: README 更新**
+- [x] **Step 4: README 更新**
 
 `integrations/crawler-service/README.md` 「定位」节补一行：主应用经 `src/core/crawlerClient.ts` 调用（`CRAWLER_SERVICE_URL`，评论区反哺与表现追踪共用）。
 
-- [ ] **Step 5: 确认通过 + 提交**
+- [x] **Step 5: 确认通过 + 提交**
 
 Run: `pnpm test -- src/test/plugin` → PASS
 
@@ -1524,14 +1524,14 @@ git commit -m "feat(scheduler): P3a-7 commentIntel.tick 调度接入（6h）+ en
 
 ### Task 8 · 全量验证 + 开发库冒烟 + 交付自查
 
-- [ ] **Step 1: 全量门禁**
+- [x] **Step 1: 全量门禁**
 
 ```bash
 cd integrations/crawler-service && .venv/bin/python -m pytest tests/ -q   # 期望 17 passed
 cd ../.. && pnpm type-check && pnpm test                                   # 期望全绿
 ```
 
-- [ ] **Step 2: 开发库端到端冒烟（事务回滚，不留数据）**
+- [x] **Step 2: 开发库端到端冒烟（事务回滚，不留数据）**
 
 前置：crawler 服务已起（source .env 后 uvicorn :5510）；开发库已应用 0058。
 用 `tsx --tsconfig config/typescript/tsconfig.json -e` 脚本：`pool.connect()` → `BEGIN` →
@@ -1541,7 +1541,7 @@ cd ../.. && pnpm type-check && pnpm test                                   # 期
 `ROLLBACK` → 断言 `published_posts`/`post_comments`/`articles` 无残留。
 Expected: 各断言通过，ROLLBACK 后无残留行。
 
-- [ ] **Step 3: 需求对照自查（写入最终汇报）**
+- [x] **Step 3: 需求对照自查（写入最终汇报）**
 
 | 需求（用户确认范围） | 证据 |
 |---|---|
@@ -1552,9 +1552,9 @@ Expected: 各断言通过，ROLLBACK 后无残留行。
 | 评论反哺选题（自动候选进审批台 + 消息通知） | Task 5/6 测试 + 冒烟 candidate/notify 断言 |
 | key 纪律（PUBLIC 仓库零泄漏） | .env git-ignored 已验证；错误只透 code+摘要 |
 
-- [ ] **Step 4: 若仓库存在 graphify-out/ 则运行 `graphify update .`（无则跳过）**
+- [x] **Step 4: 若仓库存在 graphify-out/ 则运行 `graphify update .`（无则跳过）**
 
-- [ ] **Step 5: 收尾提交（如有勾账/文档改动）**
+- [x] **Step 5: 收尾提交（如有勾账/文档改动）**
 
 ```bash
 git add -A && git commit -m "docs(plans): P3a-8 计划勾账与交付自查"
@@ -1568,3 +1568,12 @@ git add -A && git commit -m "docs(plans): P3a-8 计划勾账与交付自查"
 - 不做子评论下钻、xhs 短链（xhslink）解析、TikHub 搜索——黄雀报告已证伪其必要性或被 402 挡住
 - 不动 wechat 平台（授权中心后续批次）
 - xhs 运行时 402 属预期：等待账户充值，代码不改
+
+---
+
+## 5. 交付记录（2026-09-07）
+
+- 提交链：86253a1(计划) → 3a012e5(P3a-0 基线) → 3958cf9(P3a-1) → b0b054e(P3a-2) → 73e05aa(P3a-3) → 5c8de4a(P3a-4) → de505c4(P3a-5) → ea38d70(P3a-6) → d2e977c(P3a-7) → c3e0ed6(P3a-8 冒烟修正)
+- 门禁：pytest 16 passed；vitest 38 failed / 2089 passed（failed 与基线完全一致＝全为存量 UI 失败，新增 23 测试全绿）；type-check 6 errors（与基线一致，全存量：githubMarkdown×1、githubSubscriptionLifecycleService×5）
+- 开发库冒烟（事务回滚）：登记真 B 站帖 → 标题经 crawler 服务自动补全 → publishTracking tick fetched=1 → commentIntel tick synced=1/analyzed=1/promoted=1 → post_comments 3 条真实评论 → articles 出现 candidate（dedupe_key comment-intel:*）→ notifications 出现 comment_intel → ROLLBACK 零残留
+- 冒烟发现并修正：promote 冷却 SQL 误用 articles.created_at（表无此列）→ 改 fetched_at；开发库 pgvector 缺失告警为预存问题（[knowledge] 索引失败，与本功能无关）
