@@ -1,3 +1,7 @@
+/**
+ * 文章分块（纯函数）：按段落合并为约 2000 字符的块，相邻块重叠 50 字符，
+ * 保留标题作为上下文前缀。原 chunkingService.ts 平移进 core（宿主无关）。
+ */
 const CHUNK_MAX_CHARS = 2000;
 const CHUNK_OVERLAP_CHARS = 50;
 

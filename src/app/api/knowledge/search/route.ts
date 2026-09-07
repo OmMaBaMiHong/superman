@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { requireApiSession } from '@/server/domains/auth/services/session';
 import { ok, fail } from '@/server/infra/http/apiResponse';
-import { hybridSearch } from '@/server/integrations/knowledge/searchService';
+import { hybridSearch } from '@/server/integrations/knowledge';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

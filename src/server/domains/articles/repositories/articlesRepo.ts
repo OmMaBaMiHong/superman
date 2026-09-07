@@ -1,6 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
 import { normalizeUserId } from '@/server/domains/users/userScope';
-import { indexArticle } from '@/server/integrations/knowledge/indexingService';
+import { indexArticle } from '@/server/integrations/knowledge';
 
 export type DbClient = Pool | PoolClient;
 

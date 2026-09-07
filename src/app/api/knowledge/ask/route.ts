@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { getPool } from '@/server/infra/db/pool';
 import { requireApiSession } from '@/server/domains/auth/services/session';
 import { getAppSettings, getAiApiKey } from '@/server/domains/settings/repositories/settingsRepo';
-import { hybridSearch } from '@/server/integrations/knowledge/searchService';
+import { hybridSearch } from '@/server/integrations/knowledge';
 import { createOpenAIClient } from '@/server/integrations/ai/openaiClient';
 import { resolveSharedAiConfig } from '@/server/integrations/ai/runtimeConfig';
 import { getArticleById } from '@/server/domains/articles/repositories/articlesRepo';
