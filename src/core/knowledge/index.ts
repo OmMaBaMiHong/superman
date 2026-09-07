@@ -9,3 +9,4 @@ export {
 } from './embedding';
 export { indexArticle, deleteArticleIndex, type IndexArticleDeps } from './indexer';
 export { hybridSearch, type HybridSearchDeps, type SearchResult } from './search';
+export { backfillKnowledge } from './backfill';
