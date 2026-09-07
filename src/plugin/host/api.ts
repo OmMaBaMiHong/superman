@@ -53,6 +53,10 @@ import {
   type SauCallbackPayload,
 } from '@/core/platform-accounts/sau/sauService'
 import { publishDraftVideoToSau } from '@/core/platform-accounts/sau/sauPublishService'
+import { hybridSearch } from '@/core/knowledge/search'
+import { createOpenAIClient } from '@/server/integrations/ai/openaiClient'
+import { getArticleById } from '@/server/domains/articles/repositories/articlesRepo'
+import { getAppSettings } from '@/server/domains/settings/repositories/settingsRepo'
 import { normalizePersistedSettings } from '@/features/settings/settingsSchema'
 import { getAiApiKey, getUiSettings } from '@/server/domains/settings/repositories/settingsRepo'
 import { isAiRuntimeConfigComplete, resolveSharedAiConfig } from '@/server/integrations/ai/runtimeConfig'
@@ -156,6 +160,37 @@ function requireId(raw: string | undefined, label = 'ID'): string {
 }
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
+
+/** 知识问答三种助手人设（与 src/app/api/knowledge/ask/route.ts 保持字面一致）。 */
+const KNOWLEDGE_SYSTEM_PROMPTS: Record<string, string> = {
+  personal_assistant: `你是 Superman 智能助手，基于用户订阅的 RSS 文章知识库回答问题。
+请根据提供的上下文信息，给出准确、简洁的回答。如果上下文不足以回答问题，请明确说明。
+引用来源时请标注文章标题。回答使用 Markdown 格式。`,
+  content_creation: `你是 Superman 内容创作助手，帮助用户从订阅源中快速检索素材、引用和灵感。
+请根据提供的上下文，提炼关键信息、数据、观点，并以结构化方式呈现。
+提供可引用的原文片段，标注来源文章标题。`,
+  information_filtering: `你是 Superman 信息筛选助手，帮助用户从大量订阅内容中提炼精华。
+请根据问题，从提供的上下文中筛选最相关的信息，生成摘要式的回答。
+按主题归类，突出重点，帮助用户减少信息过载。`,
+}
+
+/** 知识检索的向量化函数：从 settings 解析配置；未配置时靠 core 的 FTS 降级。 */
+function knowledgeEmbeddingFn(userId: string) {
+  return async (question: string): Promise<number[]> => {
+    const { getPool } = await import('@/server/infra/db/pool')
+    const { generateEmbedding } = await import('@/core/knowledge/embedding')
+    const pool = getPool()
+    const [appSettings, aiApiKey] = await Promise.all([
+      getAppSettings(pool),
+      getAiApiKey(pool, userId),
+    ])
+    const config = resolveSharedAiConfig({
+      settings: { ai: { model: appSettings.aiModel, apiBaseUrl: appSettings.aiApiBaseUrl } },
+      aiApiKey,
+    })
+    return generateEmbedding(question, { config })
+  }
+}
 const JOB_KINDS = new Set(['rewrite', 'voiceover', 'video'])
 const JOB_STATUSES = new Set(['queued', 'running', 'succeeded', 'failed'])
 
@@ -940,6 +975,86 @@ const ROUTES: RouteDef[] = [
     }
 
     json(res, 200, { ok: true, data: items })
+  }),
+
+  // —— 知识库检索与问答（P2f-A3；语义对齐 src/app/api/knowledge/*）——
+  route('GET', '/knowledge/search', async ({ res, query, session, db }) => {
+    const q = query.get('q')
+    if (!q || !q.trim()) {
+      json(res, 200, { ok: true, data: { items: [] } })
+      return
+    }
+    const items = await hybridSearch(db as never, q.trim(), 10, {
+      embeddingFn: knowledgeEmbeddingFn(session.userId),
+    })
+    json(res, 200, { ok: true, data: { items } })
+  }),
+
+  route('POST', '/knowledge/ask', async ({ req, res, session, db }) => {
+    const body = await readJsonBody(req)
+    const question = typeof body.question === 'string' ? body.question.trim() : ''
+    if (!question) {
+      throw new ValidationError('请求参数非法', { question: '请输入问题' })
+    }
+    const mode = typeof body.mode === 'string' ? body.mode : 'personal_assistant'
+    const articleId = typeof body.articleId === 'number' ? body.articleId : null
+
+    // 1. 构建上下文：指定 articleId 直读全文，否则混合检索
+    let context: string
+    let sources: { title: string; articleId: number }[]
+    if (articleId !== null) {
+      const article = await getArticleById(db as never, String(articleId), session.userId)
+      if (!article) throw new NotFoundError('文章不存在')
+      const content = article.contentFullHtml || article.contentHtml || article.summary || ''
+      context = `[来源: ${article.title}]\n${content}`
+      sources = [{ title: article.title, articleId: Number(article.id) }]
+    } else {
+      const results = await hybridSearch(db as never, question, 8, {
+        embeddingFn: knowledgeEmbeddingFn(session.userId),
+      })
+      context = results.map((r) => `[来源: ${r.title}]\n${r.chunkText}`).join('\n\n---\n\n')
+      sources = results.map((r) => ({ title: r.title, articleId: r.articleId }))
+    }
+
+    // 2. AI 配置校验（fail fast，与 Next.js 语义一致）
+    const appSettings = await getAppSettings(db as never)
+    const aiApiKey = await getAiApiKey(db as never, session.userId)
+    const config = resolveSharedAiConfig({
+      settings: { ai: { model: appSettings.aiModel, apiBaseUrl: appSettings.aiApiBaseUrl } },
+      aiApiKey,
+    })
+    if (!isAiRuntimeConfigComplete(config)) {
+      throw new ValidationError('未配置 AI（模型/接口地址/API Key），无法回答', { ai: 'not_configured' })
+    }
+    const client = createOpenAIClient({
+      apiBaseUrl: config.apiBaseUrl,
+      apiKey: config.apiKey,
+      source: 'plugin/knowledge',
+      requestLabel: 'knowledge_ask',
+    })
+    const systemPrompt = KNOWLEDGE_SYSTEM_PROMPTS[mode] || KNOWLEDGE_SYSTEM_PROMPTS.personal_assistant
+
+    // 3. SSE 流式回答（data: {content} → data: {done, sources} → data: [DONE]）
+    const stream = await client.chat.completions.create({
+      model: config.model,
+      stream: true,
+      messages: [
+        { role: 'system', content: `${systemPrompt}\n\n当前时间: ${new Date().toISOString()}` },
+        { role: 'user', content: `基于以下知识库内容回答问题：\n\n${context}\n\n---\n\n问题：${question}` },
+      ],
+    })
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    })
+    const payload = (obj: unknown) => res.write(`data: ${JSON.stringify(obj)}\n\n`)
+    for await (const chunk of stream) {
+      const content = chunk.choices?.[0]?.delta?.content || ''
+      if (content) payload({ content })
+    }
+    payload({ done: true, sources })
+    res.end('data: [DONE]\n\n')
   }),
 
   // —— 消息中心（P2a）——
