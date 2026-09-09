@@ -2970,6 +2970,10 @@ export function getSubscriptionWork(id: string, options?: RequestApiOptions): Pr
   return requestApi(`/api/reader/items/${encodeURIComponent(id)}`, undefined, options);
 }
 
+export function getSubscriptionVideoStreamUrl(id: string): string {
+  return toAbsoluteUrl(`/api/reader/items/${encodeURIComponent(id)}/video`);
+}
+
 export function markSubscriptionWorkRead(id: string, options?: RequestApiOptions): Promise<{ updated: true }> {
   return requestApi(`/api/reader/items/${encodeURIComponent(id)}/read`, { method: 'POST' }, options);
 }

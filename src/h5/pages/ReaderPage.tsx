@@ -6,6 +6,7 @@ import { toast } from '@/features/toast/toast';
 import VideoEmbed from '@/components/ui/video-embed';
 import MobileTabBar from '@/features/mobile/components/MobileTabBar';
 import FeedsManagerSheet from '../components/FeedsManagerSheet';
+import SubscriptionVideoPlayer from '../components/SubscriptionVideoPlayer';
 import { cn } from '@/lib/utils';
 
 const buttonClass = 'inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full border border-border px-3 text-xs transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50';
@@ -195,7 +196,6 @@ export default function H5ReaderPage() {
   const feed = feeds.find((entry) => entry.id === selectedFeed);
   const unread = feeds.reduce((sum, entry) => sum + entry.unreadCount, 0);
   const newCount = selectedFeed === 'all' ? Object.values(arrivals).reduce((sum, count) => sum + count, 0) : arrivals[selectedFeed ?? ''] ?? 0;
-  const video = detail?.mediaAttachments.find((entry) => entry.mimeType.startsWith('video/') && httpUrl(entry.url));
 
   return <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background pb-[calc(5rem+env(safe-area-inset-bottom))] text-foreground md:pb-0 md:pl-20">
     <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/60 px-4">
@@ -270,7 +270,7 @@ export default function H5ReaderPage() {
             <h2 className="mt-3 text-xl font-semibold leading-relaxed">{detail.title}</h2>
             <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground"><time>{detail.publishedAt ? new Date(detail.publishedAt).toLocaleString('zh-CN') : '发布日期未知'}</time>{httpUrl(detail.sourceUrl) && <a href={detail.sourceUrl!} target="_blank" rel="noreferrer" className="text-primary">查看原文 ↗</a>}</div>
             {readError && <button className="mt-3 text-xs text-warning underline" onClick={() => void markRead(detail)}>已读状态保存失败，点击重试</button>}
-            {video ? <video controls playsInline preload="metadata" aria-label={`播放：${detail.title}`} src={video.url} poster={httpUrl(detail.previewImage)} className="mt-5 max-h-[60vh] w-full rounded-2xl bg-black" /> : detail.contentType === 'video' ? <VideoEmbed sourceUrl={detail.sourceUrl} previewImage={detail.previewImage} title={detail.title} /> : null}
+            {detail.hasPlayableVideo ? <SubscriptionVideoPlayer key={detail.id} id={detail.id} title={detail.title} poster={httpUrl(detail.previewImage)} /> : detail.contentType === 'video' ? <VideoEmbed sourceUrl={detail.sourceUrl} previewImage={detail.previewImage} title={detail.title} /> : null}
             {detail.content ? <div data-testid="reader-content" className="prose mt-5 max-w-none break-words text-[15px] prose-img:max-w-full prose-video:max-w-full dark:prose-invert" dangerouslySetInnerHTML={{ __html: detail.content }} /> : <p className="mt-5 text-sm leading-relaxed text-muted-foreground">{detail.summary || '暂未获取正文，可通过原文链接查看。'}</p>}
           </article>}
         </div>

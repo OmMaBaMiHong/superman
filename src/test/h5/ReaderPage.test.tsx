@@ -23,7 +23,7 @@ beforeEach(() => {
   window.history.replaceState(null, '', '#/reader');
   vi.mocked(api.listSubscriptionFeeds).mockResolvedValue({ items: structuredClone(feeds) });
   vi.mocked(api.listSubscriptionWorks).mockResolvedValue({ items: [structuredClone(work)], nextCursor: null });
-  vi.mocked(api.getSubscriptionWork).mockResolvedValue({ item: { ...work, content: '<p>作品正文</p>', mediaAttachments: [] } });
+  vi.mocked(api.getSubscriptionWork).mockResolvedValue({ item: { ...work, content: '<p>作品正文</p>', hasPlayableVideo: false, mediaAttachments: [] } });
   vi.mocked(api.markSubscriptionWorkRead).mockResolvedValue({ updated: true });
   vi.mocked(api.addSubscriptionCandidate).mockResolvedValue({ inCandidatePool: true });
 });
@@ -84,11 +84,25 @@ describe('DSH 订阅阅读', () => {
   });
 
   it('shows a direct video attachment in the detail player', async () => {
-    vi.mocked(api.getSubscriptionWork).mockResolvedValue({ item: { ...work, contentType: 'video', content: '视频介绍', mediaAttachments: [{ id: '1', url: 'https://example.com/video.mp4', mimeType: 'video/mp4', durationSeconds: 60 }] } });
+    vi.mocked(api.getSubscriptionWork).mockResolvedValue({ item: { ...work, contentType: 'video', content: '视频介绍', hasPlayableVideo: true, mediaAttachments: [{ id: '1', url: 'https://example.com/video.mp4', mimeType: 'video/mp4', durationSeconds: 60 }] } });
     render(<H5ReaderPage />);
     await openFeed();
     fireEvent.click(screen.getByTestId('reader-article-row'));
-    expect(await screen.findByLabelText('播放：第一篇文章')).toHaveAttribute('src', 'https://example.com/video.mp4');
+    expect(await screen.findByLabelText('播放：第一篇文章')).toHaveAttribute('src', expect.stringContaining('/api/reader/items/11/video'));
+  });
+
+  it('plays Douyin inside the reader and permits retry without opening another page', async () => {
+    vi.mocked(api.getSubscriptionWork).mockResolvedValue({ item: { ...work, contentType: 'video', sourceUrl: 'https://www.douyin.com/video/123', content: '视频介绍', hasPlayableVideo: true, mediaAttachments: [] } });
+    render(<H5ReaderPage />);
+    await openFeed();
+    fireEvent.click(screen.getByTestId('reader-article-row'));
+    const player = await screen.findByLabelText('播放：第一篇文章');
+    expect(player).toHaveAttribute('controls');
+    expect(player).not.toHaveAttribute('autoplay');
+    expect(screen.queryByText('在抖音打开')).not.toBeInTheDocument();
+    fireEvent.error(player);
+    fireEvent.click(await screen.findByRole('button', { name: '重试播放' }));
+    expect(screen.getByLabelText('播放：第一篇文章')).not.toBe(player);
   });
 
   it('announces arrivals without replacing the current list until requested', async () => {

@@ -2,6 +2,7 @@ import type { Pool, PoolClient } from 'pg';
 import { NotFoundError, ValidationError } from '@/server/infra/http/errors';
 import { listArticleMediaAttachments } from '@/server/domains/articles/repositories/articlesRepo';
 import type { SubscriptionFeed, SubscriptionWork, SubscriptionWorkDetail, SubscriptionWorkFilter, SubscriptionWorkPage } from '@/types/subscriptionReader';
+import { extractSubscriptionVideoUrl } from './video';
 
 type Db = Pool | PoolClient;
 
@@ -75,16 +76,30 @@ export async function listSubscriptionWorks(db: Db, input: {
   };
 }
 
-/** Read details without requiring prior governance approval. */
-export async function getSubscriptionWork(db: Db, userId: string, id: string): Promise<SubscriptionWorkDetail> {
-  const { rows } = await db.query<SubscriptionWorkDetail>(`
-    select ${workColumns}, coalesce(nullif(a.content_full_html,''),a.content_html) as content
+async function loadSubscriptionWork(db: Db, userId: string, id: string) {
+  const { rows } = await db.query<SubscriptionWorkDetail & { sourceContent: string | null }>(`
+    select ${workColumns}, coalesce(nullif(a.content_full_html,''),a.content_html) as content,
+      a.content_html as "sourceContent"
     from articles a join feeds f on f.id=a.feed_id and f.user_id=a.user_id
     where a.user_id=$1 and a.id=$2
   `, [userId, id]);
   if (!rows[0]) throw new NotFoundError('作品不存在');
   const mediaAttachments = await listArticleMediaAttachments(db, id, userId);
-  return { ...rows[0], mediaAttachments };
+  const { sourceContent, ...item } = rows[0];
+  const videoUrl = extractSubscriptionVideoUrl({ content: `${sourceContent ?? ''}${item.content ?? ''}`, mediaAttachments });
+  return { item: { ...item, mediaAttachments, hasPlayableVideo: videoUrl !== null }, videoUrl };
+}
+
+/** Read details without requiring prior governance approval. */
+export async function getSubscriptionWork(db: Db, userId: string, id: string): Promise<SubscriptionWorkDetail> {
+  return (await loadSubscriptionWork(db, userId, id)).item;
+}
+
+/** Streaming requests resolve only the signed-in user's stored work, never a caller-supplied URL. */
+export async function getSubscriptionVideoSource(db: Db, userId: string, id: string) {
+  const { item, videoUrl } = await loadSubscriptionWork(db, userId, id);
+  if (!videoUrl) throw new NotFoundError('此作品尚未采集到视频地址');
+  return { videoUrl, sourceUrl: item.sourceUrl };
 }
 
 /** Read state is independent of candidate membership. */

@@ -7,7 +7,8 @@
  * 路由匹配用「模式 → 正则」前缀表，不引框架。
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { addSubscriptionCandidate, getSubscriptionWork, listSubscriptionFeeds, listSubscriptionWorks, markSubscriptionWorkRead } from '@/core/reader/service'
+import { addSubscriptionCandidate, getSubscriptionVideoSource, getSubscriptionWork, listSubscriptionFeeds, listSubscriptionWorks, markSubscriptionWorkRead } from '@/core/reader/service'
+import { streamSubscriptionVideo } from './video.js'
 import { AppError, ConflictError, NotFoundError, UnauthorizedError, ValidationError } from '@/server/infra/http/errors'
 import { isGovernanceStatus, type GovernanceStatus } from '@/core/governance/stateMachine'
 import {
@@ -845,6 +846,10 @@ const ROUTES: RouteDef[] = [
   route('GET', '/reader/items/:id', async ({ res, params, session, db }) => {
     const item = await getSubscriptionWork(db as never, session.userId, requireId(params.id))
     json(res, 200, { ok: true, data: { item } })
+  }),
+  route('GET', '/reader/items/:id/video', async ({ req, res, params, session, db }) => {
+    const source = await getSubscriptionVideoSource(db as never, session.userId, requireId(params.id))
+    await streamSubscriptionVideo(req, res, source)
   }),
   route('POST', '/reader/items/:id/read', async ({ res, params, session, db }) => {
     await markSubscriptionWorkRead(db as never, session.userId, requireId(params.id))

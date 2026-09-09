@@ -116,9 +116,17 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('DSH subscription reader · Post
     expect(detail.status).toBe(200);
     expect(detail.data.item).toMatchObject({ content: '<p>视频介绍</p>', contentType: 'video' });
     expect(detail.data.item.mediaAttachments[0].url).toBe('https://example.com/video.mp4');
+    expect(detail.data.item.hasPlayableVideo).toBe(true);
     expect((await request('/reader/items/12/read', 'POST')).status).toBe(200);
     expect((await request('/reader/feeds')).data.items.find((f: { id: string }) => f.id === '2').unreadCount).toBe(0);
     expect((await db.query('select governance_status from articles where id=12')).rows[0].governance_status).toBe('candidate');
+  });
+
+  it('recognizes legacy Douyin play links without media attachments', async () => {
+    await db.query(`update articles set link='https://www.douyin.com/video/123', content_html='<a href="https://www.douyin.com/aweme/v1/play/?video_id=v123&amp;line=0">视频直链</a>', content_full_html='<p>仅有分析后的正文</p>' where id=11`);
+    expect((await request('/reader/items/11')).data.item.hasPlayableVideo).toBe(true);
+    expect((await request('/reader/items/99/video')).status).toBe(404);
+    expect((await request('/reader/items/11/video', 'GET', {}, false)).status).toBe(401);
   });
 
   it('adds a work to the existing topic pool idempotently, retaining it in reading and preserving used status', async () => {

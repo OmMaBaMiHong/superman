@@ -42,5 +42,6 @@ export interface SubscriptionWorkPage {
 
 export interface SubscriptionWorkDetail extends SubscriptionWork {
   content: string | null;
+  hasPlayableVideo: boolean;
   mediaAttachments: Array<{ id: string; url: string; mimeType: string; durationSeconds: number | null }>;
 }
