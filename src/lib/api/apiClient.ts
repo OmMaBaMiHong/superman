@@ -1,4 +1,5 @@
 import ky from 'ky';
+import type { SubscriptionFeed, SubscriptionWorkDetail, SubscriptionWorkFilter, SubscriptionWorkPage } from '@/types/subscriptionReader';
 import type {
   Article,
   Board,
@@ -2947,4 +2948,32 @@ export async function publishDraftToWechat(
     },
     options,
   );
+}
+
+/** DSH subscription reading uses all captured works rather than the governance queue. */
+export function listSubscriptionFeeds(options?: RequestApiOptions): Promise<{ items: SubscriptionFeed[] }> {
+  return requestApi('/api/reader/feeds', undefined, options);
+}
+
+export function listSubscriptionWorks(input: {
+  feedId?: string; type?: SubscriptionWorkFilter; cursor?: string; limit?: number;
+}, options?: RequestApiOptions): Promise<SubscriptionWorkPage> {
+  const query = new URLSearchParams();
+  if (input.feedId) query.set('feedId', input.feedId);
+  if (input.type) query.set('type', input.type);
+  if (input.cursor) query.set('cursor', input.cursor);
+  if (input.limit) query.set('limit', String(input.limit));
+  return requestApi(`/api/reader/items?${query}`, undefined, options);
+}
+
+export function getSubscriptionWork(id: string, options?: RequestApiOptions): Promise<{ item: SubscriptionWorkDetail }> {
+  return requestApi(`/api/reader/items/${encodeURIComponent(id)}`, undefined, options);
+}
+
+export function markSubscriptionWorkRead(id: string, options?: RequestApiOptions): Promise<{ updated: true }> {
+  return requestApi(`/api/reader/items/${encodeURIComponent(id)}/read`, { method: 'POST' }, options);
+}
+
+export function addSubscriptionCandidate(id: string, options?: RequestApiOptions): Promise<{ inCandidatePool: true }> {
+  return requestApi(`/api/reader/items/${encodeURIComponent(id)}/candidate`, { method: 'POST' }, options);
 }

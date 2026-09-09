@@ -7,6 +7,7 @@
  * 路由匹配用「模式 → 正则」前缀表，不引框架。
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { addSubscriptionCandidate, getSubscriptionWork, listSubscriptionFeeds, listSubscriptionWorks, markSubscriptionWorkRead } from '@/core/reader/service'
 import { AppError, ConflictError, NotFoundError, UnauthorizedError, ValidationError } from '@/server/infra/http/errors'
 import { isGovernanceStatus, type GovernanceStatus } from '@/core/governance/stateMachine'
 import {
@@ -825,6 +826,33 @@ const ROUTES: RouteDef[] = [
       userId: session.userId,
     })
     json(res, 200, { ok: true, data: result })
+  }),
+
+  // 订阅阅读独立于治理队列，所有查询和动作使用登录用户。
+  route('GET', '/reader/feeds', async ({ res, session, db }) => {
+    json(res, 200, { ok: true, data: { items: await listSubscriptionFeeds(db as never, session.userId) } })
+  }),
+  route('GET', '/reader/items', async ({ res, query, session, db }) => {
+    const type = query.get('type') ?? 'all'
+    if (type !== 'all' && type !== 'article' && type !== 'video') throw new ValidationError('作品类型无效', { type: '仅支持 all/article/video' })
+    const result = await listSubscriptionWorks(db as never, {
+      userId: session.userId,
+      feedId: query.has('feedId') ? requireId(query.get('feedId') ?? undefined, '订阅 ID') : undefined,
+      type, cursor: query.get('cursor') ?? undefined, limit: parsePositiveInt(query.get('limit')) ?? 30,
+    })
+    json(res, 200, { ok: true, data: result })
+  }),
+  route('GET', '/reader/items/:id', async ({ res, params, session, db }) => {
+    const item = await getSubscriptionWork(db as never, session.userId, requireId(params.id))
+    json(res, 200, { ok: true, data: { item } })
+  }),
+  route('POST', '/reader/items/:id/read', async ({ res, params, session, db }) => {
+    await markSubscriptionWorkRead(db as never, session.userId, requireId(params.id))
+    json(res, 200, { ok: true, data: { updated: true } })
+  }),
+  route('POST', '/reader/items/:id/candidate', async ({ res, params, session, db }) => {
+    await addSubscriptionCandidate(db as never, session.userId, requireId(params.id))
+    json(res, 200, { ok: true, data: { inCandidatePool: true } })
   }),
 
   // —— 订阅源（P1-A）——

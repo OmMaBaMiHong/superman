@@ -1,342 +1,282 @@
-'use client';
-
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, BookOpen, Rss, Stamp } from 'lucide-react';
-import {
-  getGovernanceItemDetail,
-  getGovernanceQueue,
-  requeueGovernanceItem,
-  type GovernanceItemDetail,
-  type GovernanceQueueItem,
-} from '@/lib/api/apiClient';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ArrowLeft, BookOpen, Check, ExternalLink, Play, Plus, RefreshCw, Rss } from 'lucide-react';
+import { addSubscriptionCandidate, getSubscriptionWork, listSubscriptionFeeds, listSubscriptionWorks, markSubscriptionWorkRead } from '@/lib/api/apiClient';
+import type { SubscriptionFeed, SubscriptionWork, SubscriptionWorkDetail, SubscriptionWorkFilter } from '@/types/subscriptionReader';
 import { toast } from '@/features/toast/toast';
-import FeedsManagerSheet from '../components/FeedsManagerSheet';
-import ContentTypeBadge from '@/components/ui/content-type-badge';
 import VideoEmbed from '@/components/ui/video-embed';
-import QualityScore from '@/features/governance/components/QualityScore';
-import { formatPublishedAt } from '@/features/governance/components/GovernanceQueueCard';
 import MobileTabBar from '@/features/mobile/components/MobileTabBar';
+import FeedsManagerSheet from '../components/FeedsManagerSheet';
 import { cn } from '@/lib/utils';
 
-const PAGE_SIZE = 100;
+const buttonClass = 'inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full border border-border px-3 text-xs transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50';
+const FILTERS: Array<[SubscriptionWorkFilter, string]> = [['all', '全部'], ['article', '文章'], ['video', '视频']];
 
-/**
- * 最小可用阅读器（H5 版）：
- * - 数据复用治理队列 archived 文章 + 详情接口（插件 API 面没有阅读器快照，
- *   K5 前不搬 reader snapshot 链）；
- * - 桌面：左栏源/列表，右栏正文；移动：列表全宽，点开正文全屏 + 返回。
- */
+function httpUrl(url: string | null | undefined): string | undefined {
+  return url && /^https?:\/\//i.test(url) ? url : undefined;
+}
+
+function platform(feed: SubscriptionFeed): string {
+  const url = `${feed.url} ${feed.siteUrl ?? ''}`;
+  if (/douyin|iesdouyin/i.test(url)) return '抖音';
+  if (/bilibili|b23\.tv/i.test(url)) return 'B站';
+  if (/mp\.weixin|wechat/i.test(url)) return '公众号';
+  if (/youtube|youtu\.be/i.test(url)) return 'YouTube';
+  if (/twitter|x\.com/i.test(url)) return 'X';
+  return 'RSS';
+}
+
+function dateLabel(value: string | null): string {
+  if (!value) return '发布日期未知';
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '发布日期未知';
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) return '今天';
+  if (date.toDateString() === yesterday.toDateString()) return '昨天';
+  return date.toLocaleDateString('zh-CN');
+}
+
+function Avatar({ feed }: { feed: SubscriptionFeed }) {
+  const [failed, setFailed] = useState(false);
+  return <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-primary/10 text-sm font-semibold text-primary">
+    {httpUrl(feed.iconUrl) && !failed ? <img src={feed.iconUrl!} alt="" className="h-full w-full object-cover" onError={() => setFailed(true)} /> : feed.title.slice(0, 1)}
+  </span>;
+}
+
+/** Same reader in the narrow DSH panel and the full-width Web app. */
 export default function H5ReaderPage() {
-  const [items, setItems] = useState<GovernanceQueueItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedFeed, setSelectedFeed] = useState<string>('');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [detail, setDetail] = useState<GovernanceItemDetail | null>(null);
+  const initialQuery = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
+  const [feeds, setFeeds] = useState<SubscriptionFeed[]>([]);
+  const [feedsLoading, setFeedsLoading] = useState(true);
+  const [feedsError, setFeedsError] = useState(false);
+  const [selectedFeed, setSelectedFeed] = useState<string | null>(initialQuery.get('feed'));
+  const [type, setType] = useState<SubscriptionWorkFilter>(initialQuery.get('type') === 'video' ? 'video' : initialQuery.get('type') === 'article' ? 'article' : 'all');
+  const [items, setItems] = useState<SubscriptionWork[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [listError, setListError] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(initialQuery.get('item'));
+  const [detail, setDetail] = useState<SubscriptionWorkDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [feedsManagerOpen, setFeedsManagerOpen] = useState(false);
-  const [requeuing, setRequeuing] = useState<Record<string, boolean>>({});
+  const [detailError, setDetailError] = useState(false);
+  const [readError, setReadError] = useState(false);
+  const [adding, setAdding] = useState<Record<string, boolean>>({});
+  const [managerOpen, setManagerOpen] = useState(false);
+  const [arrivals, setArrivals] = useState<Record<string, number>>({});
+  const feedSnapshot = useRef<SubscriptionFeed[] | null>(null);
+  const listVersion = useRef(0);
+  const detailVersion = useRef(0);
+  const listScroll = useRef<HTMLDivElement>(null);
 
-  const loadArticles = useCallback(async () => {
+  const reloadFeeds = useCallback(async () => {
     try {
-      const result = await getGovernanceQueue({ statuses: ['archived'], page: 1, pageSize: PAGE_SIZE });
-      setItems(result.items);
-    } catch {
-      // apiClient 已统一 toast 错误
-    } finally {
-      setLoading(false);
-    }
+      const result = await listSubscriptionFeeds({ notifyOnError: false });
+      if (feedSnapshot.current) {
+        const previous = new Map(feedSnapshot.current.map((feed) => [feed.id, feed]));
+        setArrivals((current) => {
+          const next = { ...current };
+          for (const feed of result.items) {
+            const old = previous.get(feed.id);
+            if (old && old.newestId !== feed.newestId && feed.articleCount > old.articleCount) {
+              next[feed.id] = (next[feed.id] ?? 0) + feed.articleCount - old.articleCount;
+            }
+          }
+          return next;
+        });
+      }
+      feedSnapshot.current = result.items;
+      setFeeds(result.items);
+      setFeedsError(false);
+    } catch { setFeedsError(true); }
+    finally { setFeedsLoading(false); }
   }, []);
 
   useEffect(() => {
-    void loadArticles();
-  }, [loadArticles]);
+    void reloadFeeds();
+    const timer = window.setInterval(() => { if (!document.hidden) void reloadFeeds(); }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [reloadFeeds]);
 
-  /** 送审批：archived → candidate，从阅读列表移除（阅读器只展示归档）。 */
-  const handleRequeue = useCallback((item: GovernanceQueueItem) => {
-    if (requeuing[item.id]) return;
-    setRequeuing((current) => ({ ...current, [item.id]: true }));
-    void requeueGovernanceItem(item.id)
-      .then(() => {
-        toast.success('已送入审批台');
-        setItems((current) => current.filter((entry) => entry.id !== item.id));
-        setSelectedId((current) => (current === item.id ? null : current));
-      })
-      .catch(() => {})
-      .finally(() => setRequeuing((current) => ({ ...current, [item.id]: false })));
-  }, [requeuing]);
+  const loadWorks = useCallback(async () => {
+    if (selectedFeed === null) return;
+    const version = ++listVersion.current;
+    setLoading(true);
+    setListError(false);
+    setItems([]);
+    setCursor(null);
+    setLoadingMore(false);
+    try {
+      const result = await listSubscriptionWorks({ feedId: selectedFeed === 'all' ? undefined : selectedFeed, type }, { notifyOnError: false });
+      if (version !== listVersion.current) return;
+      setItems(result.items);
+      setCursor(result.nextCursor);
+      setArrivals((current) => selectedFeed === 'all' ? {} : { ...current, [selectedFeed]: 0 });
+      if (listScroll.current) listScroll.current.scrollTop = 0;
+    } catch { if (version === listVersion.current) setListError(true); }
+    finally { if (version === listVersion.current) setLoading(false); }
+  }, [selectedFeed, type]);
 
-  const feeds = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const item of items) {
-      counts.set(item.feedTitle, (counts.get(item.feedTitle) ?? 0) + 1);
-    }
-    return Array.from(counts.entries());
-  }, [items]);
+  useEffect(() => { void loadWorks(); return () => { listVersion.current += 1; }; }, [loadWorks]);
 
-  const filteredItems = useMemo(
-    () => (selectedFeed ? items.filter((item) => item.feedTitle === selectedFeed) : items),
-    [items, selectedFeed],
-  );
+  useEffect(() => {
+    const query = new URLSearchParams();
+    if (selectedFeed) query.set('feed', selectedFeed);
+    if (type !== 'all') query.set('type', type);
+    if (selectedId) query.set('item', selectedId);
+    window.history.replaceState(null, '', `#/reader${query.size ? `?${query}` : ''}`);
+  }, [selectedFeed, type, selectedId]);
 
-  const openArticle = useCallback((item: GovernanceQueueItem) => {
-    setSelectedId(item.id);
+  const markRead = useCallback(async (work: SubscriptionWork) => {
+    try {
+      await markSubscriptionWorkRead(work.id, { notifyOnError: false });
+      setReadError(false);
+      setItems((current) => current.map((item) => item.id === work.id ? { ...item, isRead: true } : item));
+      setDetail((current) => current?.id === work.id ? { ...current, isRead: true } : current);
+      void reloadFeeds();
+    } catch { setReadError(true); }
+  }, [reloadFeeds]);
+
+  const loadDetail = useCallback(async () => {
+    if (!selectedId) return;
+    const version = ++detailVersion.current;
     setDetail(null);
     setDetailLoading(true);
-    void getGovernanceItemDetail(item.id, { notifyOnError: false })
-      .then(setDetail)
-      .catch(() => setDetail(null))
-      .finally(() => setDetailLoading(false));
-  }, []);
+    setDetailError(false);
+    setReadError(false);
+    try {
+      const result = await getSubscriptionWork(selectedId, { notifyOnError: false });
+      if (version !== detailVersion.current) return;
+      setDetail(result.item);
+      if (!result.item.isRead) void markRead(result.item);
+    } catch { if (version === detailVersion.current) setDetailError(true); }
+    finally { if (version === detailVersion.current) setDetailLoading(false); }
+  }, [selectedId, markRead]);
 
-  const articleList = (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      {/* 源筛选 chips */}
-      <div className="sticky top-0 z-10 flex gap-1.5 overflow-x-auto bg-background/80 px-3 py-2.5 backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <button
-          type="button"
-          onClick={() => setSelectedFeed('')}
-          className={cn(
-            'flex h-9 shrink-0 items-center rounded-full border px-3.5 text-xs font-medium transition-colors duration-150',
-            selectedFeed === ''
-              ? 'border-primary/40 bg-primary/10 text-primary'
-              : 'border-border text-muted-foreground',
-          )}
-        >
-          全部
-          <span className="ml-1 font-mono text-[10px] tabular-nums opacity-60">{items.length}</span>
+  useEffect(() => { void loadDetail(); return () => { detailVersion.current += 1; }; }, [loadDetail]);
+
+  async function loadMore() {
+    if (!cursor || loadingMore || selectedFeed === null) return;
+    const version = listVersion.current;
+    setLoadingMore(true);
+    try {
+      const result = await listSubscriptionWorks({ feedId: selectedFeed === 'all' ? undefined : selectedFeed, type, cursor }, { notifyOnError: true });
+      if (version !== listVersion.current) return;
+      setItems((current) => [...current, ...result.items.filter((item) => !current.some((old) => old.id === item.id))]);
+      setCursor(result.nextCursor);
+    } catch { /* apiClient displays the error; existing page remains available. */ }
+    finally { if (version === listVersion.current) setLoadingMore(false); }
+  }
+
+  async function addCandidate(work: SubscriptionWork) {
+    if (work.inCandidatePool || adding[work.id]) return;
+    setAdding((current) => ({ ...current, [work.id]: true }));
+    try {
+      await addSubscriptionCandidate(work.id);
+      const update = <T extends SubscriptionWork,>(item: T): T => item.id === work.id ? { ...item, inCandidatePool: true, governanceStatus: 'archived' } : item;
+      setItems((current) => current.map(update));
+      setDetail((current) => current ? update(current) : current);
+      toast.success('已加入候选池，可在创作的选题池中查看');
+    } catch { /* apiClient displays the failure and permits retry. */ }
+    finally { setAdding((current) => ({ ...current, [work.id]: false })); }
+  }
+
+  function candidateButton(work: SubscriptionWork) {
+    const label = work.governanceStatus === 'used' ? '已用于创作' : work.inCandidatePool ? '已加入候选池' : '加入候选池';
+    return <button type="button" aria-label={`${label}：${work.title}`} disabled={work.inCandidatePool || adding[work.id]}
+      className={cn(buttonClass, 'shrink-0 text-primary')} onClick={() => void addCandidate(work)}>
+      {work.inCandidatePool ? <Check className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+      {adding[work.id] ? '加入中…' : label}
+    </button>;
+  }
+
+  function chooseFeed(id: string) { setSelectedId(null); setSelectedFeed(id); setType('all'); }
+  const feed = feeds.find((entry) => entry.id === selectedFeed);
+  const unread = feeds.reduce((sum, entry) => sum + entry.unreadCount, 0);
+  const newCount = selectedFeed === 'all' ? Object.values(arrivals).reduce((sum, count) => sum + count, 0) : arrivals[selectedFeed ?? ''] ?? 0;
+  const video = detail?.mediaAttachments.find((entry) => entry.mimeType.startsWith('video/') && httpUrl(entry.url));
+
+  return <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background pb-[calc(5rem+env(safe-area-inset-bottom))] text-foreground md:pb-0 md:pl-20">
+    <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/60 px-4">
+      <BookOpen className="h-4 w-4 text-primary" /><h1 className="text-sm font-semibold">阅读</h1>
+      <span className="text-xs text-muted-foreground">{feeds.length} 个订阅 · {unread} 条未读</span>
+      <button className={cn(buttonClass, 'ml-auto px-2')} aria-label="刷新阅读列表" onClick={() => { void reloadFeeds(); if (selectedFeed && !selectedId) void loadWorks(); }}><RefreshCw className="h-4 w-4" /></button>
+      <button className={cn(buttonClass, 'px-2')} aria-label="订阅管理" onClick={() => setManagerOpen(true)}><Plus className="h-4 w-4" /><span className="hidden min-[400px]:inline">订阅</span></button>
+    </header>
+    <div className="flex min-h-0 flex-1">
+      <aside aria-label="订阅博主" className={cn('min-h-0 w-full shrink-0 overflow-y-auto border-r border-border/60 p-3 md:block md:w-56 xl:w-72', selectedFeed !== null ? 'hidden' : 'block')}>
+        <button className={cn('mb-3 flex min-h-14 w-full items-center gap-3 rounded-2xl border border-primary/20 bg-primary/5 p-3 text-left', selectedFeed === 'all' && 'ring-1 ring-primary/40')} onClick={() => chooseFeed('all')}>
+          <Rss className="h-5 w-5 text-primary" /><span className="flex-1 text-sm font-medium">全部动态</span><span className="font-mono text-xs text-primary">{unread}</span>
         </button>
-        {feeds.map(([feedTitle, count]) => (
-          <button
-            key={feedTitle}
-            type="button"
-            onClick={() => setSelectedFeed((current) => (current === feedTitle ? '' : feedTitle))}
-            className={cn(
-              'flex h-9 shrink-0 items-center rounded-full border px-3.5 text-xs font-medium transition-colors duration-150',
-              selectedFeed === feedTitle
-                ? 'border-primary/40 bg-primary/10 text-primary'
-                : 'border-border text-muted-foreground',
-            )}
-          >
-            {feedTitle}
-            <span className="ml-1 font-mono text-[10px] tabular-nums opacity-60">{count}</span>
-          </button>
-        ))}
-      </div>
-
-      {loading ? (
-        <div className="space-y-2.5 p-3">
-          {Array.from({ length: 5 }, (_, index) => (
-            <div key={index} className="gov-card h-24 animate-pulse" aria-hidden="true" />
-          ))}
-        </div>
-      ) : filteredItems.length === 0 ? (
-        <div className="mx-3 mt-6 rounded-[1.25rem] border border-dashed border-border px-6 py-14 text-center">
-          <p className="text-sm font-medium text-foreground">没有已归档的文章</p>
-          <p className="mt-2 text-xs text-muted-foreground">去审批台准奏一些内容，归档后就能在这里阅读。</p>
-        </div>
-      ) : (
-        <ul className="space-y-2.5 p-3">
-          {filteredItems.map((item) => (
-            <li key={item.id}>
-              <button
-                type="button"
-                data-testid="reader-article-row"
-                onClick={() => openArticle(item)}
-                className={cn(
-                  'gov-card w-full p-3.5 text-left [--gov-accent:var(--glass-border)]',
-                  'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                  selectedId === item.id && 'gov-card-selected',
-                )}
-              >
-                <div className="flex items-center gap-1.5">
-                  <ContentTypeBadge type={item.contentType} />
-                  <span className="ml-auto flex items-center gap-1">
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      aria-label={`送审批：${item.title}`}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        handleRequeue(item);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.stopPropagation();
-                          handleRequeue(item);
-                        }
-                      }}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors duration-150 hover:bg-warning/10 hover:text-warning"
-                    >
-                      <Stamp aria-hidden="true" className="h-3.5 w-3.5" />
-                    </span>
-                    <QualityScore score={item.qualityScore} />
-                  </span>
-                </div>
-                <h3 className="mt-2 line-clamp-2 text-sm font-semibold leading-snug text-foreground">
-                  {item.title}
-                </h3>
-                <div className="mt-1.5 flex items-center gap-2 text-[11px] text-muted-foreground">
-                  <span className="max-w-[9rem] truncate">{item.feedTitle}</span>
-                  <span aria-hidden="true">·</span>
-                  <time className="font-mono tabular-nums">{formatPublishedAt(item.publishedAt)}</time>
-                </div>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-
-  const readingPane = (
-    <div className="flex h-full min-h-0 flex-col">
-      {/* 移动端正文顶栏（返回） */}
-      <div className="glass-surface-strong flex h-12 shrink-0 items-center gap-2 rounded-none border-x-0 border-t-0 px-3 md:hidden">
-        <button
-          type="button"
-          onClick={() => setSelectedId(null)}
-          aria-label="返回文章列表"
-          className="inline-flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground transition-colors duration-150 hover:text-foreground"
-        >
-          <ArrowLeft aria-hidden="true" className="h-4 w-4" />
-        </button>
-        <span className="truncate text-sm font-medium text-foreground">阅读</span>
-      </div>
-
-      <div className="flex h-12 shrink-0 items-center justify-end gap-1 border-b border-border/60 px-3">
-        {selectedId && detail ? (
-          <button
-            type="button"
-            onClick={() => handleRequeue(detail)}
-            disabled={requeuing[detail.id]}
-            className="inline-flex h-9 items-center gap-1.5 rounded-full border border-warning/40 bg-warning/10 px-3 text-xs font-medium text-warning transition-colors duration-150 hover:bg-warning/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-warning disabled:opacity-50"
-          >
-            <Stamp aria-hidden="true" className="h-3.5 w-3.5" />
-            {requeuing[detail.id] ? '送审中…' : '送审批'}
-          </button>
-        ) : null}
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {!selectedId ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
-            <BookOpen aria-hidden="true" className="h-8 w-8 text-muted-foreground/50" />
-            <p className="text-sm text-muted-foreground">从列表选择一篇文章开始阅读</p>
-          </div>
-        ) : detailLoading || !detail ? (
-          <div className="mx-auto max-w-2xl space-y-3 p-6" aria-busy="true">
-            <div className="h-8 w-3/4 animate-pulse rounded-lg bg-muted" />
-            <div className="h-4 w-1/3 animate-pulse rounded bg-muted" />
-            <div className="h-64 animate-pulse rounded-2xl bg-muted" />
-          </div>
-        ) : (
-          <article className="mx-auto max-w-2xl px-5 pb-16 pt-6 sm:px-8">
-            <div className="flex items-center gap-1.5">
-              <ContentTypeBadge type={detail.contentType} />
-              <QualityScore score={detail.qualityScore} />
-            </div>
-            <h1 className="mt-3 text-xl font-semibold leading-snug text-foreground sm:text-2xl">
-              {detail.title}
-            </h1>
-            <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-muted-foreground">
-              <span>{detail.feedTitle}</span>
-              {detail.author ? (
-                <>
-                  <span aria-hidden="true">·</span>
-                  <span>{detail.author}</span>
-                </>
-              ) : null}
-              <span aria-hidden="true">·</span>
-              <time className="font-mono tabular-nums">{formatPublishedAt(detail.publishedAt)}</time>
-              {detail.sourceUrl ? (
-                <a
-                  href={detail.sourceUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-primary transition-colors duration-150 hover:opacity-80"
-                >
-                  原文链接 ↗
-                </a>
-              ) : null}
-            </div>
-            {detail.contentType === 'video' ? (
-              <VideoEmbed sourceUrl={detail.sourceUrl} previewImage={detail.previewImage} title={detail.title} />
-            ) : null}
-            {detail.previewImage && detail.contentType !== 'video' ? (
-              <img
-                src={detail.previewImage}
-                alt=""
-                loading="lazy"
-                className="mt-4 max-h-72 w-full rounded-2xl border border-border/60 object-cover"
-              />
-            ) : null}
-            {detail.content ? (
-              <div
-                data-testid="reader-content"
-                className="prose mt-5 max-w-none text-[15px] prose-headings:text-foreground prose-p:leading-relaxed prose-p:text-foreground/85 prose-a:text-primary prose-img:rounded-2xl dark:prose-invert"
-                dangerouslySetInnerHTML={{ __html: detail.content }}
-              />
-            ) : (
-              <p className="mt-5 text-sm leading-relaxed text-secondary-foreground">
-                {detail.summary ?? '暂无正文，可打开原文链接查看。'}
-              </p>
-            )}
-          </article>
-        )}
-      </div>
-    </div>
-  );
-
-  return (
-    <div className="flex h-screen flex-col bg-background text-foreground">
-      {/* 移动端：列表 ↔ 正文全屏切换；桌面：左右分栏 */}
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-        <div
-          className={cn(
-            'flex min-h-0 flex-col md:w-[400px] md:shrink-0 md:border-r md:border-border',
-            selectedId ? 'hidden md:flex' : 'flex-1',
-          )}
-        >
-          <div className="flex h-12 shrink-0 items-center gap-2 px-4 pt-1">
-            <BookOpen aria-hidden="true" className="h-4 w-4 text-primary" />
-            <h1 className="text-sm font-semibold text-foreground">阅读</h1>
-            <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
-              {filteredItems.length} 篇
+        {feedsLoading && <p role="status" className="p-4 text-sm text-muted-foreground">正在加载订阅…</p>}
+        {feedsError && <div role="alert" className="mb-3 rounded-xl bg-warning/10 p-3 text-xs">订阅加载失败 <button className="underline" onClick={() => void reloadFeeds()}>重试</button></div>}
+        {!feedsLoading && !feedsError && feeds.length === 0 && <p className="p-4 text-sm text-muted-foreground">还没有订阅，点击右上角添加博主或 RSS。</p>}
+        <ul className="space-y-2">{feeds.map((entry) => {
+          const failed = Boolean(entry.lastFetchError) || (entry.lastFetchStatus !== null && entry.lastFetchStatus >= 400);
+          return <li key={entry.id}><button aria-label={`打开博主：${entry.title}`} onClick={() => chooseFeed(entry.id)} className={cn('flex w-full gap-3 rounded-2xl border p-3 text-left transition-colors hover:bg-secondary', selectedFeed === entry.id ? 'border-primary/40 bg-primary/5' : 'border-border/50 bg-card/60')}>
+            <Avatar feed={entry} />
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-1"><span className="truncate text-sm font-semibold">{entry.title}</span>{entry.unreadCount > 0 && <span className="ml-auto rounded-full bg-primary/10 px-1.5 font-mono text-[10px] text-primary">{entry.unreadCount}</span>}</span>
+              <span className="mt-0.5 block text-[10px] text-muted-foreground">{platform(entry)} · {entry.articleCount} 个作品</span>
+              <span className="mt-1 block truncate text-xs text-muted-foreground">{entry.latestTitle ?? '暂无作品更新'}</span>
+              {entry.latestPublishedAt && <span className="mt-1 block text-[10px] text-muted-foreground">{dateLabel(entry.latestPublishedAt)}</span>}
+              {failed && <span className="mt-1 block line-clamp-2 text-[11px] text-warning">{entry.lastFetchError || `采集失败（${entry.lastFetchStatus}）`}</span>}
+              {!entry.enabled && <span className="block text-[11px] text-muted-foreground">已暂停采集</span>}
+              {entry.enabled && !entry.lastFetchedAt && !failed && <span className="block text-[11px] text-muted-foreground">等待首次采集</span>}
             </span>
-            <button
-              type="button"
-              onClick={() => setFeedsManagerOpen(true)}
-              aria-label="订阅管理"
-              className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-full border border-border px-3 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            >
-              <Rss aria-hidden="true" className="h-3.5 w-3.5" />
-              订阅管理
-            </button>
-          </div>
-          {articleList}
-        </div>
-
-        <div
-          className={cn(
-            'min-w-0 flex-1',
-            selectedId ? 'fixed inset-0 z-30 bg-background md:static md:z-auto' : 'hidden md:block',
-          )}
-        >
-          {selectedId ? readingPane : (
-            <div className="hidden h-full items-center justify-center md:flex">
-              <p className="text-sm text-muted-foreground">从列表选择一篇文章开始阅读</p>
+          </button></li>;
+        })}</ul>
+      </aside>
+      <section aria-label="博主作品" className={cn('min-h-0 min-w-0 flex-1 flex-col border-r border-border/60 md:flex', selectedFeed === null || selectedId ? 'hidden' : 'flex', selectedId && 'md:max-w-[360px]')}>
+        {selectedFeed === null ? <div className="flex h-full items-center justify-center p-8 text-center text-sm text-muted-foreground">选择一位博主，查看他的文章和视频</div> : <>
+          <div className="shrink-0 border-b border-border/60 p-3">
+            <div className="flex items-center gap-2">
+              <button className={cn(buttonClass, 'px-2 md:hidden')} aria-label="返回博主列表" onClick={() => setSelectedFeed(null)}><ArrowLeft className="h-4 w-4" /></button>
+              <div className="min-w-0 flex-1"><h2 className="truncate text-sm font-semibold">{feed?.title ?? '全部动态'}</h2>{feed && <p className="mt-1 text-[11px] text-muted-foreground">{platform(feed)} · {feed.articleCount} 个作品 · {feed.unreadCount} 条未读</p>}</div>
+              {httpUrl(feed?.siteUrl) && <a className={buttonClass} href={feed!.siteUrl!} target="_blank" rel="noreferrer">主页<ExternalLink className="h-3 w-3" /></a>}
             </div>
-          )}
+            {feed?.lastFetchedAt && <p className="mt-2 text-[10px] text-muted-foreground">上次采集：{new Date(feed.lastFetchedAt).toLocaleString('zh-CN')}</p>}
+            <div className="mt-3 flex gap-2">{FILTERS.map(([value, label]) => <button key={value} aria-pressed={type === value} className={cn(buttonClass, type === value && 'border-primary/40 bg-primary/10 text-primary')} onClick={() => { setSelectedId(null); setType(value); }}>{label}</button>)}</div>
+          </div>
+          {newCount > 0 && <button className="shrink-0 bg-primary/10 p-3 text-xs text-primary" onClick={() => void loadWorks()}>有 {newCount} 条新作品，点击更新</button>}
+          <div ref={listScroll} className="min-h-0 flex-1 overflow-y-auto p-3">
+            {loading && <p role="status" className="p-6 text-center text-sm text-muted-foreground">正在加载作品…</p>}
+            {listError && <div role="alert" className="p-6 text-center text-sm">作品列表加载失败<button className={cn(buttonClass, 'mt-3')} onClick={() => void loadWorks()}>重新加载列表</button></div>}
+            {!loading && !listError && items.length === 0 && <p className="p-6 text-center text-sm text-muted-foreground">{feed?.lastFetchStatus && feed.lastFetchStatus >= 400 ? '暂未采集到作品，请查看博主的采集错误。' : '暂无符合条件的作品'}</p>}
+            <ul className="space-y-3">{items.map((item, index) => <li key={item.id}>
+              {(index === 0 || dateLabel(items[index - 1].publishedAt) !== dateLabel(item.publishedAt)) && <h3 className="mb-2 mt-3 text-xs font-medium text-muted-foreground">{dateLabel(item.publishedAt)}</h3>}
+              <div className={cn('gov-card overflow-hidden p-3', selectedId === item.id && 'gov-card-selected')}>
+                <button data-testid="reader-article-row" className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setSelectedId(item.id)}>
+                  {httpUrl(item.previewImage) && <div className="relative mb-3"><img src={item.previewImage!} alt="" loading="lazy" className="max-h-40 w-full rounded-xl object-cover" />{item.contentType === 'video' && <Play className="absolute bottom-2 right-2 h-8 w-8 rounded-full bg-black/60 p-2 text-white" />}</div>}
+                  <span className="flex items-center gap-2 text-[10px] text-muted-foreground"><span>{item.contentType === 'video' ? '视频' : '文章'}</span><span className="truncate">{item.feedTitle}</span>{!item.isRead && <span className="ml-auto shrink-0 text-primary">未读</span>}</span>
+                  <h4 className={cn('mt-2 line-clamp-3 text-sm leading-relaxed', item.isRead ? 'font-medium' : 'font-semibold')}>{item.title}</h4>
+                  {item.summary && <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{item.summary}</p>}
+                </button>
+                <div className="mt-3 flex justify-end">{candidateButton(item)}</div>
+              </div>
+            </li>)}</ul>
+            {cursor && <button className={cn(buttonClass, 'mt-4 w-full')} disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? '加载中…' : '加载更多作品'}</button>}
+          </div>
+        </>}
+      </section>
+      {selectedId && <section aria-label="作品详情" className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+        <div className="flex shrink-0 items-center gap-2 border-b border-border/60 p-3"><button className={buttonClass} aria-label="返回作品列表" onClick={() => setSelectedId(null)}><ArrowLeft className="h-4 w-4" />返回</button><span className="ml-auto">{detail && candidateButton(detail)}</span></div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-8 pt-5">
+          {detailLoading && <p role="status" className="p-6 text-sm text-muted-foreground">正在加载作品…</p>}
+          {detailError && <div role="alert" className="space-y-3 text-center"><p>作品加载失败</p><button className={buttonClass} onClick={() => void loadDetail()}>重新加载作品</button></div>}
+          {detail && <article className="mx-auto max-w-2xl">
+            <p className="text-xs text-muted-foreground">{detail.feedTitle}{detail.author ? ` · ${detail.author}` : ''}</p>
+            <h2 className="mt-3 text-xl font-semibold leading-relaxed">{detail.title}</h2>
+            <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground"><time>{detail.publishedAt ? new Date(detail.publishedAt).toLocaleString('zh-CN') : '发布日期未知'}</time>{httpUrl(detail.sourceUrl) && <a href={detail.sourceUrl!} target="_blank" rel="noreferrer" className="text-primary">查看原文 ↗</a>}</div>
+            {readError && <button className="mt-3 text-xs text-warning underline" onClick={() => void markRead(detail)}>已读状态保存失败，点击重试</button>}
+            {video ? <video controls playsInline preload="metadata" aria-label={`播放：${detail.title}`} src={video.url} poster={httpUrl(detail.previewImage)} className="mt-5 max-h-[60vh] w-full rounded-2xl bg-black" /> : detail.contentType === 'video' ? <VideoEmbed sourceUrl={detail.sourceUrl} previewImage={detail.previewImage} title={detail.title} /> : null}
+            {detail.content ? <div data-testid="reader-content" className="prose mt-5 max-w-none break-words text-[15px] prose-img:max-w-full prose-video:max-w-full dark:prose-invert" dangerouslySetInnerHTML={{ __html: detail.content }} /> : <p className="mt-5 text-sm leading-relaxed text-muted-foreground">{detail.summary || '暂未获取正文，可通过原文链接查看。'}</p>}
+          </article>}
         </div>
-      </div>
-
-      <FeedsManagerSheet
-        open={feedsManagerOpen}
-        onClose={() => setFeedsManagerOpen(false)}
-        onChanged={() => void loadArticles()}
-      />
-
-      {!selectedId ? <MobileTabBar /> : null}
+      </section>}
     </div>
-  );
+    <FeedsManagerSheet open={managerOpen} onClose={() => setManagerOpen(false)} onChanged={() => { void reloadFeeds(); }} />
+    <MobileTabBar />
+  </div>;
 }

@@ -1,91 +1,110 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getGovernanceItemDetail, getGovernanceQueue, getGovernanceStats } from '@/lib/api/apiClient';
+import * as api from '@/lib/api/apiClient';
 import H5ReaderPage from '../../h5/pages/ReaderPage';
 
-// H5 组件经 vite alias 使用 shim；测试里显式 mock 到同一 shim
-vi.mock('next/link', () => import('../../h5/shims/next-link'));
-vi.mock('next/navigation', () => import('../../h5/shims/next-navigation'));
+vi.mock('@/features/mobile/components/MobileTabBar', () => ({ default: () => <nav>底部导航</nav> }));
+vi.mock('@/h5/components/FeedsManagerSheet', () => ({ default: () => null }));
+vi.mock('@/lib/api/apiClient', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/api/apiClient')>(),
+  getGovernanceQueue: vi.fn(async () => ({ items: [], total: 0 })),
+  listSubscriptionFeeds: vi.fn(), listSubscriptionWorks: vi.fn(), getSubscriptionWork: vi.fn(),
+  markSubscriptionWorkRead: vi.fn(), addSubscriptionCandidate: vi.fn(),
+}));
 
-vi.mock('@/lib/api/apiClient', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@/lib/api/apiClient')>();
-  return {
-    ...original,
-    getGovernanceQueue: vi.fn(),
-    getGovernanceItemDetail: vi.fn(),
-    getGovernanceStats: vi.fn(),
-  };
-});
-
-const mockedQueue = vi.mocked(getGovernanceQueue);
-const mockedDetail = vi.mocked(getGovernanceItemDetail);
-const mockedStats = vi.mocked(getGovernanceStats);
-
-const ARTICLES = [
-  {
-    id: '1', title: '第一篇归档文章', summary: '摘要一', aiReason: null, qualityScore: 80,
-    feedId: 'f1', feedTitle: '华尔街日报', categoryId: null, categoryTitle: '新闻',
-    publishedAt: '2026-09-05T08:00:00Z', sourceUrl: 'https://example.com/1',
-    governanceStatus: 'archived' as const, redraftCount: 0, contentType: 'image' as const,
-  },
-  {
-    id: '2', title: '第二篇归档文章', summary: null, aiReason: null, qualityScore: null,
-    feedId: 'f2', feedTitle: '微信 · 24h热文榜', categoryId: null, categoryTitle: null,
-    publishedAt: null, sourceUrl: null,
-    governanceStatus: 'archived' as const, redraftCount: 0, contentType: 'text' as const,
-  },
+const feeds = [
+  { id: '1', title: '博主甲', url: 'https://example.com/rss', siteUrl: 'https://example.com', iconUrl: null, enabled: true, articleCount: 2, unreadCount: 2, newestId: '12', latestTitle: '第一篇文章', latestPublishedAt: '2026-09-09T08:00:00Z', lastFetchStatus: 200, lastFetchError: null, lastFetchedAt: null },
+  { id: '2', title: '零作品博主', url: 'https://empty.example/rss', siteUrl: null, iconUrl: null, enabled: true, articleCount: 0, unreadCount: 0, newestId: null, latestTitle: null, latestPublishedAt: null, lastFetchStatus: 503, lastFetchError: '订阅源暂时不可用', lastFetchedAt: null },
 ];
+const work = { id: '11', feedId: '1', feedTitle: '博主甲', title: '第一篇文章', summary: '文章摘要', sourceUrl: 'https://example.com/11', publishedAt: '2026-09-09T08:00:00Z', previewImage: null, author: '作者甲', isRead: false, governanceStatus: 'candidate', inCandidatePool: false, contentType: 'text' as const };
 
 beforeEach(() => {
-  window.location.hash = '#/reader';
-  mockedQueue.mockResolvedValue({ items: ARTICLES, total: 2 });
-  mockedStats.mockResolvedValue({
-    todayPending: 0, todayArchived: 0, todayFetchSucceeded: 0, todayFetchFailed: 0, queueSize: 0,
-  });
-  mockedDetail.mockResolvedValue({
-    ...ARTICLES[0],
-    titleOriginal: null,
-    author: '作者甲',
-    content: '<p>正文内容段落。</p>',
-    previewImage: null,
-  });
+  vi.clearAllMocks();
+  window.history.replaceState(null, '', '#/reader');
+  vi.mocked(api.listSubscriptionFeeds).mockResolvedValue({ items: structuredClone(feeds) });
+  vi.mocked(api.listSubscriptionWorks).mockResolvedValue({ items: [structuredClone(work)], nextCursor: null });
+  vi.mocked(api.getSubscriptionWork).mockResolvedValue({ item: { ...work, content: '<p>作品正文</p>', mediaAttachments: [] } });
+  vi.mocked(api.markSubscriptionWorkRead).mockResolvedValue({ updated: true });
+  vi.mocked(api.addSubscriptionCandidate).mockResolvedValue({ inCandidatePool: true });
 });
 
-describe('H5 最小阅读器', () => {
-  it('渲染源 chips 与文章列表，点开文章渲染正文', async () => {
+async function openFeed() {
+  fireEvent.click(await screen.findByRole('button', { name: /打开博主：博主甲/ }));
+  await screen.findByTestId('reader-article-row');
+}
+
+describe('DSH 订阅阅读', () => {
+  it('shows subscribed bloggers without works, and explains fetch failures', async () => {
     render(<H5ReaderPage />);
-
-    expect(await screen.findByText('第一篇归档文章')).toBeInTheDocument();
-    expect(screen.getByText('第二篇归档文章')).toBeInTheDocument();
-    // 源 chips：全部 + 两个源
-    expect(screen.getByRole('button', { name: /全部/ })).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /华尔街日报/ })[0]).toBeInTheDocument();
-    expect(mockedQueue).toHaveBeenCalledWith(expect.objectContaining({ statuses: ['archived'] }));
-
-    // 打开正文
-    fireEvent.click(screen.getAllByTestId('reader-article-row')[0]);
-    expect(await screen.findByText('正文内容段落。')).toBeInTheDocument();
-    expect(mockedDetail).toHaveBeenCalledWith('1', expect.anything());
+    expect(await screen.findByText('零作品博主')).toBeInTheDocument();
+    expect(screen.getByText('订阅源暂时不可用')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /打开博主：博主甲/ })).toHaveTextContent('2');
   });
 
-  it('源筛选：点 chip 后只显示该源文章', async () => {
+  it('opens blogger works by id, then content, marks read, and returns without losing the list', async () => {
     render(<H5ReaderPage />);
-    await screen.findByText('第一篇归档文章');
-
-    fireEvent.click(screen.getAllByRole('button', { name: /微信 · 24h热文榜/ })[0]);
-    expect(screen.queryByText('第一篇归档文章')).not.toBeInTheDocument();
-    expect(screen.getByText('第二篇归档文章')).toBeInTheDocument();
+    await openFeed();
+    expect(api.listSubscriptionWorks).toHaveBeenCalledWith(expect.objectContaining({ feedId: '1', type: 'all' }), expect.anything());
+    fireEvent.click(screen.getByTestId('reader-article-row'));
+    expect(await screen.findByText('作品正文')).toBeInTheDocument();
+    await waitFor(() => expect(api.markSubscriptionWorkRead).toHaveBeenCalledWith('11', expect.anything()));
+    fireEvent.click(screen.getByRole('button', { name: '返回作品列表' }));
+    expect(screen.getByTestId('reader-article-row')).toBeInTheDocument();
   });
 
-  it('正文打开后返回列表', async () => {
+  it('keeps a work in reading after manual selection and prevents duplicate additions', async () => {
     render(<H5ReaderPage />);
-    await screen.findByText('第一篇归档文章');
-    fireEvent.click(screen.getAllByTestId('reader-article-row')[0]);
-    await screen.findByText('正文内容段落。');
+    await openFeed();
+    fireEvent.click(screen.getByRole('button', { name: '加入候选池：第一篇文章' }));
+    expect(await screen.findByRole('button', { name: '已加入候选池：第一篇文章' })).toBeDisabled();
+    expect(screen.getByTestId('reader-article-row')).toBeInTheDocument();
+    expect(api.addSubscriptionCandidate).toHaveBeenCalledTimes(1);
+  });
 
-    fireEvent.click(screen.getByRole('button', { name: '返回文章列表' }));
-    await waitFor(() => {
-      expect(screen.getAllByTestId('reader-article-row').length).toBeGreaterThan(0);
-    });
+  it('loads further pages and applies video filters on the server', async () => {
+    vi.mocked(api.listSubscriptionWorks).mockResolvedValueOnce({ items: [work], nextCursor: 'page2' })
+      .mockResolvedValueOnce({ items: [{ ...work, id: '12', title: '下一页作品' }], nextCursor: null });
+    render(<H5ReaderPage />);
+    await openFeed();
+    fireEvent.click(screen.getByRole('button', { name: '加载更多作品' }));
+    expect(await screen.findByText('下一页作品')).toBeInTheDocument();
+    expect(api.listSubscriptionWorks).toHaveBeenCalledWith(expect.objectContaining({ cursor: 'page2' }), expect.anything());
+    fireEvent.click(screen.getByRole('button', { name: '视频' }));
+    await waitFor(() => expect(api.listSubscriptionWorks).toHaveBeenCalledWith(expect.objectContaining({ type: 'video' }), expect.anything()));
+  });
+
+  it('renders an error and retry instead of an endless detail skeleton', async () => {
+    vi.mocked(api.getSubscriptionWork).mockRejectedValueOnce(new Error('网络异常'));
+    render(<H5ReaderPage />);
+    await openFeed();
+    fireEvent.click(screen.getByTestId('reader-article-row'));
+    expect(await screen.findByText('作品加载失败')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '重新加载作品' }));
+    expect(await screen.findByText('作品正文')).toBeInTheDocument();
+  });
+
+  it('shows a direct video attachment in the detail player', async () => {
+    vi.mocked(api.getSubscriptionWork).mockResolvedValue({ item: { ...work, contentType: 'video', content: '视频介绍', mediaAttachments: [{ id: '1', url: 'https://example.com/video.mp4', mimeType: 'video/mp4', durationSeconds: 60 }] } });
+    render(<H5ReaderPage />);
+    await openFeed();
+    fireEvent.click(screen.getByTestId('reader-article-row'));
+    expect(await screen.findByLabelText('播放：第一篇文章')).toHaveAttribute('src', 'https://example.com/video.mp4');
+  });
+
+  it('announces arrivals without replacing the current list until requested', async () => {
+    render(<H5ReaderPage />);
+    await openFeed();
+    fireEvent.click(screen.getByTestId('reader-article-row'));
+    await screen.findByText('作品正文');
+    await waitFor(() => expect(api.markSubscriptionWorkRead).toHaveBeenCalled());
+    vi.mocked(api.listSubscriptionFeeds).mockResolvedValue({ items: [{ ...feeds[0], articleCount: 3, newestId: '13' }, feeds[1]] });
+    fireEvent.click(screen.getByRole('button', { name: '刷新阅读列表' }));
+    expect(await screen.findByRole('button', { name: '有 1 条新作品，点击更新' })).toBeInTheDocument();
+    expect(api.listSubscriptionWorks).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('作品正文')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '返回作品列表' }));
+    fireEvent.click(screen.getByRole('button', { name: '有 1 条新作品，点击更新' }));
+    await waitFor(() => expect(api.listSubscriptionWorks).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole('button', { name: '有 1 条新作品，点击更新' })).not.toBeInTheDocument());
   });
 });
