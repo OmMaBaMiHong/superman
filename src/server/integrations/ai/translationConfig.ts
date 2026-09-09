@@ -1,11 +1,8 @@
-import { isAiRuntimeConfigComplete, type AiRuntimeConfig } from '@/server/integrations/ai/runtimeConfig';
+import { isAiRuntimeConfigComplete, resolveSharedAiConfig, type AiRuntimeConfig, type SharedAiConfigInput } from '@/server/integrations/ai/runtimeConfig';
 
 export interface TranslationConfigInput {
   settings: {
-    ai: {
-      model: string;
-      apiBaseUrl: string;
-      deepThinkingEnabled?: boolean;
+    ai: SharedAiConfigInput['settings']['ai'] & {
       translation: {
         useSharedAi: boolean;
         model: string;
@@ -29,12 +26,7 @@ export function resolveTranslationConfig(
   const useShared = input.settings.ai.translation.useSharedAi;
 
   if (useShared) {
-    return {
-      model: trim(input.settings.ai.model),
-      apiBaseUrl: trim(input.settings.ai.apiBaseUrl),
-      apiKey: trim(input.aiApiKey),
-      deepThinkingEnabled: Boolean(input.settings.ai.deepThinkingEnabled),
-    };
+    return resolveSharedAiConfig(input);
   }
 
   return {

@@ -28,6 +28,16 @@ vi.mock('@/server/infra/logging/systemLogger', () => ({
 }));
 
 describe('openaiClient', () => {
+  it('does not retry anonymous free requests or silently switch to paid models', async () => {
+    const { createOpenAIClient } = await import('@/server/integrations/ai/openaiClient');
+    createCompletionMock.mockRejectedValueOnce(Object.assign(new Error('Rate limited'), { status: 429 }));
+    const client = createOpenAIClient({ apiBaseUrl: 'https://api.kilo.ai/api/openrouter', apiKey: 'anonymous' });
+    await expect(client.chat.completions.create({ model: 'openrouter/free', messages: [] })).rejects.toThrow(/限流/);
+    expect(openAIConstructorMock).toHaveBeenCalledWith(expect.objectContaining({ maxRetries: 0, timeout: 60_000 }));
+    expect(createCompletionMock).toHaveBeenCalledTimes(1);
+    await expect(client.chat.completions.create({ model: 'paid/model', messages: [] })).rejects.toThrow(/免费/);
+    expect(createCompletionMock).toHaveBeenCalledTimes(1);
+  });
   beforeEach(() => {
     createCompletionMock.mockReset();
     openAIConstructorMock.mockReset();

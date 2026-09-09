@@ -610,20 +610,19 @@ async function main() {
         job: { articleId, articleFilter, feed, ...(userId ? { userId } : {}) },
         judgeAi: async ({ prompt, articleText }) => {
           const uiSettings = normalizePersistedSettings(await getUiSettings(pool, userId ?? undefined));
-          const apiKey = (await getAiApiKey(pool, userId ?? undefined)).trim();
+          const config = resolveSharedAiConfig({
+            settings: { ai: { ...uiSettings.ai, model: uiSettings.ai.model.trim() || DEFAULT_TRANSLATION_MODEL, apiBaseUrl: uiSettings.ai.apiBaseUrl.trim() || DEFAULT_TRANSLATION_API_BASE_URL } },
+            aiApiKey: await getAiApiKey(pool, userId ?? undefined),
+          });
+          const { apiKey } = config;
           if (!apiKey) {
             return { ok: false, matched: false, errorMessage: 'Missing AI API key' };
           }
 
-          const model = uiSettings.ai.model.trim() || DEFAULT_TRANSLATION_MODEL;
-          const apiBaseUrl = uiSettings.ai.apiBaseUrl.trim() || DEFAULT_TRANSLATION_API_BASE_URL;
           return articleFilterJudge({
-            apiBaseUrl,
-            apiKey,
-            model,
+            ...config,
             prompt,
             articleText,
-            deepThinkingEnabled: uiSettings.ai.deepThinkingEnabled,
           });
         },
       });

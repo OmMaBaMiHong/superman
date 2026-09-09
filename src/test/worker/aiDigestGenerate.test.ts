@@ -152,7 +152,7 @@ describe('runAiDigestGenerate', () => {
     );
   });
 
-  it('persists selected source article ids with deterministic positions on success', async () => {
+  it.each([false, true])('persists source articles with free mode %s', async (free) => {
     writeUserOperationStartedLogMock.mockReset();
     writeUserOperationSucceededLogMock.mockReset();
     writeUserOperationFailedLogMock.mockReset();
@@ -210,8 +210,8 @@ describe('runAiDigestGenerate', () => {
         ]),
         updateAiDigestRun: vi.fn().mockResolvedValue(undefined),
         updateAiDigestConfigLastWindowEndAt: vi.fn().mockResolvedValue(undefined),
-        getAiApiKey: vi.fn().mockResolvedValue('k'),
-        getUiSettings: vi.fn().mockResolvedValue({ rss: { maxStoredArticlesPerFeed: 1000 } }),
+        getAiApiKey: vi.fn().mockResolvedValue(free ? '' : 'k'),
+        getUiSettings: vi.fn().mockResolvedValue({ ai: { providerMode: free ? 'kilo-free' : 'configured' }, rss: { maxStoredArticlesPerFeed: 1000 } }),
         aiDigestRerank: vi.fn().mockResolvedValue(['candidate-1', 'candidate-2']),
         aiDigestCompose: vi.fn().mockResolvedValue({ title: 'Digest', html: '<p>digest</p>' }),
         sanitizeContent: vi.fn().mockReturnValue('<p>digest</p>'),
@@ -557,6 +557,7 @@ describe('runAiDigestGenerate', () => {
           updateAiDigestRun: updateAiDigestRunMock,
           updateAiDigestConfigLastWindowEndAt: vi.fn().mockResolvedValue(undefined),
           getAiApiKey: vi.fn().mockResolvedValue(''),
+          getUiSettings: vi.fn().mockResolvedValue({}),
         },
       }),
     ).rejects.toThrow('Missing AI API key');

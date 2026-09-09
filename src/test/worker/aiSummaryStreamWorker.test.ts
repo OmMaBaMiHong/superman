@@ -6,7 +6,7 @@ const challengeContentHtml =
   '<div><h2>环境异常</h2><p>当前环境异常，完成验证后即可继续访问。</p><p><a>去验证</a></p></div>';
 
 describe('aiSummaryStreamWorker', () => {
-  it('persists draft updates and finalizes article ai summary on completion', async () => {
+  it.each([false, true])('persists draft updates with free mode %s', async (free) => {
     const updateSessionDraftMock = vi.fn().mockResolvedValue(undefined);
     const insertEventMock = vi.fn().mockResolvedValue(undefined);
     const completeSessionMock = vi.fn().mockResolvedValue(undefined);
@@ -71,17 +71,19 @@ describe('aiSummaryStreamWorker', () => {
             createdAt: '2026-03-09T00:00:00.000Z',
             updatedAt: '2026-03-09T00:00:00.000Z',
           }) as never,
-        getAiApiKey: async () => 'sk-test',
+        getAiApiKey: async () => free ? '' : 'sk-test',
         getUiSettings: async () =>
           ({
             ai: {
+              providerMode: free ? 'kilo-free' : 'configured',
               model: 'gpt-4o-mini',
               apiBaseUrl: 'https://ai.example.com/v1',
             },
           }) as never,
         getFeedFullTextOnOpenEnabled: async () => false,
         runArticleTaskWithStatus: runArticleTaskWithStatusMock,
-        streamSummarizeText: async function* () {
+        streamSummarizeText: async function* (config) {
+          if (free) expect(config).toMatchObject({ model: 'openrouter/free', apiKey: 'anonymous' });
           yield 'TL;DR';
           yield '\n- 第一条';
         },

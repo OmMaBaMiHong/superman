@@ -46,8 +46,9 @@ describe('runAiDigestTick', () => {
     expect(listDueAiDigestConfigFeedIdsMock).not.toHaveBeenCalled();
   });
 
-  it('enqueues ai.digest_generate for due configs', async () => {
-    getAiApiKeyMock.mockResolvedValue('sk-test');
+  it.each([false, true])('enqueues ai.digest_generate with free mode %s', async (free) => {
+    getAiApiKeyMock.mockResolvedValue(free ? '' : 'sk-test');
+    getUiSettingsMock.mockResolvedValue({ ai: { providerMode: free ? 'kilo-free' : 'configured' } });
     listDueAiDigestConfigFeedIdsMock.mockResolvedValue(['feed-1']);
     getAiDigestConfigByFeedIdMock.mockResolvedValue({
       feedId: 'feed-1',

@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { normalizePersistedSettings } from '@/features/settings/settingsSchema';
+import { resolveSharedAiConfig } from './runtimeConfig';
 
 export interface AiConfigFingerprints {
   shared: string;
@@ -44,10 +45,7 @@ export function resolveAiConfigFingerprints(
 ): AiConfigFingerprints {
   const settings = normalizePersistedSettings(input.settings);
   const sharedConfig = {
-    model: trim(settings.ai.model),
-    apiBaseUrl: trim(settings.ai.apiBaseUrl),
-    apiKey: trim(input.aiApiKey),
-    deepThinkingEnabled: Boolean(settings.ai.deepThinkingEnabled),
+    ...resolveSharedAiConfig({ settings, aiApiKey: input.aiApiKey }),
     summaryPrompt: trim(settings.ai.summaryPrompt),
   };
 

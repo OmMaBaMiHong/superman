@@ -1,6 +1,8 @@
 import OpenAI from 'openai';
 import { getPool } from '@/server/infra/db/pool';
 import { writeSystemLog } from '@/server/infra/logging/systemLogger';
+import { FREE_MODEL_BASE_URL, isFreeModelId } from '@/lib/ai/freeModelConfig';
+import { AppError } from '@/server/infra/http/errors';
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 
@@ -58,6 +60,7 @@ function buildOpenAIClient(apiBaseUrl: string, apiKey: string): OpenAI {
     apiKey,
     baseURL: apiBaseUrl,
     dangerouslyAllowBrowser: true,
+    ...(apiBaseUrl === FREE_MODEL_BASE_URL && apiKey === 'anonymous' ? { maxRetries: 0, timeout: 60_000 } : {}),
   });
 }
 
@@ -114,6 +117,7 @@ export function createOpenAIClient(
   input: { apiBaseUrl: string; apiKey: string } & OpenAIClientLoggingInput,
 ) {
   const apiBaseUrl = normalizeBaseUrl(input.apiBaseUrl);
+  const anonymousFree = apiBaseUrl === FREE_MODEL_BASE_URL && input.apiKey === 'anonymous';
   const fallbackApiBaseUrl = getDockerFallbackBaseUrl(apiBaseUrl);
   const client = buildOpenAIClient(apiBaseUrl, input.apiKey);
   const logging = input.source && input.requestLabel ? {
@@ -124,6 +128,9 @@ export function createOpenAIClient(
   const originalCreate = client.chat.completions.create.bind(client.chat.completions);
 
   client.chat.completions.create = (async (payload, requestOptions) => {
+    if (anonymousFree && !isFreeModelId(getCompletionModel(payload) ?? '')) {
+      throw new AppError('免费模式只能使用免费模型', 'free_model_required', 400);
+    }
     const startedAt = Date.now();
     let requestApiBaseUrl = apiBaseUrl;
 
@@ -164,6 +171,11 @@ export function createOpenAIClient(
           failed: true,
           details: stringifyExternalError(err),
         });
+      }
+      if (anonymousFree) {
+        const status = (err as { status?: number } | null)?.status;
+        throw new AppError(status === 429 ? '免费模型已限流，请稍后重试' : '免费模型暂不可用，请重试或更换免费模型',
+          status === 429 ? 'free_model_rate_limited' : 'free_model_unavailable', status === 429 ? 429 : 502);
       }
       throw err;
     }

@@ -274,7 +274,7 @@ export async function runAiSummaryStreamWorker(
           deps.getUiSettings(input.pool, article.userId),
         ]);
         const normalizedSettings = normalizePersistedSettings(uiSettings);
-        if (!aiApiKey.trim()) throw new Error('Missing AI API key');
+        if (!aiApiKey.trim() && normalizedSettings.ai.providerMode !== 'kilo-free') throw new Error('Missing AI API key');
         await ensureSharedConfigCurrent();
 
         const sourceText = getSummarySource(article);

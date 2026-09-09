@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import { normalizePersistedSettings } from '@/features/settings/settingsSchema';
+import { resolveSharedAiConfig } from '@/server/integrations/ai/runtimeConfig';
 import { resolveArticleBriefContent } from '@/lib/reader/articleSummary';
 import { aiDigestCompose, type AiDigestComposeArticle } from '@/server/integrations/ai/aiDigestCompose';
 import { aiDigestRerank, type AiDigestRerankItem } from '@/server/integrations/ai/aiDigestRerank';
@@ -528,22 +529,21 @@ async function executeAiDigestRun(input: {
   }
 
   const aiApiKey = await input.deps.getAiApiKey(input.pool, input.run.userId);
-  if (!aiApiKey.trim()) {
-    throw new Error('Missing AI API key');
-  }
   await input.ensureSharedConfigCurrent();
 
   const rawSettings = await input.deps.getUiSettings(input.pool, input.run.userId);
   const settings = normalizePersistedSettings(rawSettings);
-  const model = settings.ai.model.trim() || DEFAULT_DIGEST_MODEL;
-  const apiBaseUrl = settings.ai.apiBaseUrl.trim() || DEFAULT_DIGEST_API_BASE_URL;
+  const { model, apiBaseUrl, apiKey, deepThinkingEnabled } = resolveSharedAiConfig({
+    settings: { ai: { ...settings.ai, model: settings.ai.model.trim() || DEFAULT_DIGEST_MODEL, apiBaseUrl: settings.ai.apiBaseUrl.trim() || DEFAULT_DIGEST_API_BASE_URL } },
+    aiApiKey,
+  });
+  if (!apiKey) throw new Error('Missing AI API key');
   const maxStoredArticlesPerFeed = settings.rss.maxStoredArticlesPerFeed;
-  const deepThinkingEnabled = settings.ai.deepThinkingEnabled;
 
   const selected = await selectRelevantArticles({
     deps: input.deps,
     apiBaseUrl,
-    apiKey: aiApiKey,
+    apiKey,
     model,
     prompt: config.prompt,
     candidates,
@@ -569,7 +569,7 @@ async function executeAiDigestRun(input: {
 
   const composed = await input.deps.aiDigestCompose({
     apiBaseUrl,
-    apiKey: aiApiKey,
+    apiKey,
     model,
     prompt: config.prompt,
     articles: toComposeArticles(clusteredSelected),

@@ -1,4 +1,5 @@
 import ky from 'ky';
+import type { FreeModelOption, FreeModelSettings } from '@/lib/ai/freeModelConfig';
 import type { SubscriptionFeed, SubscriptionWorkDetail, SubscriptionWorkFilter, SubscriptionWorkPage } from '@/types/subscriptionReader';
 import type {
   Article,
@@ -2972,6 +2973,22 @@ export function getSubscriptionWork(id: string, options?: RequestApiOptions): Pr
 
 export function getSubscriptionVideoStreamUrl(id: string): string {
   return toAbsoluteUrl(`/api/reader/items/${encodeURIComponent(id)}/video`);
+}
+
+export function getAiModelSettings(): Promise<FreeModelSettings> {
+  return requestApi('/api/ai/settings');
+}
+
+export function saveAiModelSettings(settings: FreeModelSettings): Promise<FreeModelSettings> {
+  return requestApi('/api/ai/settings', { method: 'PUT', body: JSON.stringify(settings) });
+}
+
+export function listFreeModels(): Promise<{ items: FreeModelOption[] }> {
+  return requestApi('/api/ai/free-models');
+}
+
+export function testFreeModel(freeModel: string): Promise<{ text: string; model: string }> {
+  return requestApi('/api/ai/free-models/test', { method: 'POST', body: JSON.stringify({ freeModel }) });
 }
 
 export function markSubscriptionWorkRead(id: string, options?: RequestApiOptions): Promise<{ updated: true }> {

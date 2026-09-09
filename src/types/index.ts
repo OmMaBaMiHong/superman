@@ -129,6 +129,8 @@ export interface GeneralSettings {
 }
 
 export interface AIPersistedSettings {
+  providerMode?: 'configured' | 'kilo-free';
+  freeModel?: string;
   summaryEnabled: boolean;
   translateEnabled: boolean;
   autoSummarize: boolean;

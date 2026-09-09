@@ -31,6 +31,8 @@ const defaultGeneralSettings: GeneralSettings = {
 };
 
 const defaultAISettings: AIPersistedSettings = {
+  providerMode: 'configured',
+  freeModel: 'openrouter/free',
   summaryEnabled: false,
   translateEnabled: false,
   autoSummarize: false,
@@ -136,6 +138,8 @@ function normalizeAISettings(input: Record<string, unknown>): AIPersistedSetting
   const translationInput = isRecord(aiInput.translation) ? aiInput.translation : {};
 
   return {
+    providerMode: readEnum(aiInput.providerMode, ['configured', 'kilo-free'] as const, 'configured'),
+    freeModel: readString(aiInput.freeModel, 'openrouter/free'),
     summaryEnabled: readBoolean(aiInput.summaryEnabled, defaultAISettings.summaryEnabled),
     translateEnabled: readBoolean(aiInput.translateEnabled, defaultAISettings.translateEnabled),
     autoSummarize: readBoolean(aiInput.autoSummarize, defaultAISettings.autoSummarize),

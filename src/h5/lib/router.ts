@@ -22,9 +22,10 @@ export function navigateTo(path: string): void {
   window.location.hash = path.startsWith('/') ? `#${path}` : path;
 }
 
-/** Next 路径 → H5 hash 路径（'/' 映射到 '#/reader'；query 丢弃）。 */
+/** Next 路径 → H5 hash 路径；阅读器的设置抽屉链接映射到插件设置页。 */
 export function toHashHref(href: string): string {
-  const [path] = href.split('?');
+  const [path, query] = href.split('?');
+  if ((path === '' || path === '/') && new URLSearchParams(query).get('settings') === 'open') return '#/settings';
   if (path === '' || path === '/') return '#/reader';
   return `#${path}`;
 }

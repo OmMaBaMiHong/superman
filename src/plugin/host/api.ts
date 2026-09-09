@@ -101,6 +101,7 @@ import {
 import type { Auth, Session } from './auth.js'
 import type { Queryable } from './db.js'
 import { json, readJsonBody } from './routes.js'
+import { getAiModelSettings, listFreeModels, saveAiModelSettings, testFreeModel } from '@/core/ai/freeModels'
 
 export interface ApiDeps {
   auth: Auth
@@ -202,6 +203,19 @@ function escapeFrontmatter(value: string): string {
 
 /** 路由表：与 src/app/api/ 对应路由的行为保持一致（校验规则/错误语义/返回形状）。 */
 const ROUTES: RouteDef[] = [
+  route('GET', '/ai/settings', async ({ res, session, db }) => {
+    json(res, 200, { ok: true, data: await getAiModelSettings(db as never, session.userId) })
+  }),
+  route('PUT', '/ai/settings', async ({ req, res, session, db }) => {
+    json(res, 200, { ok: true, data: await saveAiModelSettings(db as never, session.userId, await readJsonBody(req)) })
+  }),
+  route('GET', '/ai/free-models', async ({ res }) => {
+    json(res, 200, { ok: true, data: { items: await listFreeModels() } })
+  }),
+  route('POST', '/ai/free-models/test', async ({ req, res }) => {
+    const body = await readJsonBody(req)
+    json(res, 200, { ok: true, data: await testFreeModel(body.freeModel) })
+  }),
   // —— 治理 ——
   route('GET', '/governance/queue', async ({ res, query, session, db }) => {
     const statusParam = query.get('status')
@@ -1049,11 +1063,12 @@ const ROUTES: RouteDef[] = [
       sources = results.map((r) => ({ title: r.title, articleId: r.articleId }))
     }
 
-    // 2. AI 配置校验（fail fast，与 Next.js 语义一致）
+    // 2. 采用用户选择的免费模式；原配置继续兼容 app_settings。
     const appSettings = await getAppSettings(db as never)
+    const userAi = normalizePersistedSettings(await getUiSettings(db as never, session.userId)).ai
     const aiApiKey = await getAiApiKey(db as never, session.userId)
     const config = resolveSharedAiConfig({
-      settings: { ai: { model: appSettings.aiModel, apiBaseUrl: appSettings.aiApiBaseUrl } },
+      settings: { ai: { providerMode: userAi.providerMode, freeModel: userAi.freeModel, model: appSettings.aiModel, apiBaseUrl: appSettings.aiApiBaseUrl } },
       aiApiKey,
     })
     if (!isAiRuntimeConfigComplete(config)) {

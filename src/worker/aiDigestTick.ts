@@ -1,4 +1,5 @@
 import { resolveAiConfigFingerprints } from '@/server/integrations/ai/configFingerprints';
+import { normalizePersistedSettings } from '@/features/settings/settingsSchema';
 import { getAiApiKey, getUiSettings } from '@/server/domains/settings/repositories/settingsRepo';
 import {
   createAiDigestRun,
@@ -30,7 +31,7 @@ export async function runAiDigestTick(deps: {
     getAiApiKey(deps.pool as never, deps.userId),
     getUiSettings(deps.pool as never, deps.userId),
   ]);
-  if (!aiApiKey.trim()) {
+  if (!aiApiKey.trim() && normalizePersistedSettings(uiSettings).ai.providerMode !== 'kilo-free') {
     return;
   }
   const { shared: sharedConfigFingerprint } = resolveAiConfigFingerprints({
