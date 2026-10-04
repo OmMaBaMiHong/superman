@@ -161,18 +161,17 @@ export function startPluginScheduler(
     }
   })
 
-  // 服务 keeper（P2e-5）：探活外部进程（TrendRadar/SAU 执行器），死亡自动拉起。
+  // 服务 keeper（P2e-5，SAU 专用）：探活 SAU 执行器，不可用自动拉起。
   // 子开关每轮从 DB 读（设置页热切换，免重启）；spawn 逻辑在 plugin/host/servicesKeeper。
+  // TrendRadar 不走 keeper（一次性进程，拉起逻辑见宿主的 trendradar.schedule tick）。
   every('services.keeper', config.keeperIntervalMs ?? KEEPER_TICK_INTERVAL, async () => {
     const { getServicesConfig } = await import('@/core/services/serviceConfig')
     const { runKeeperTick } = await import('../servicesKeeper.js')
     const services = await getServicesConfig(pool as never)
     const result = await runKeeperTick({
       projectRoot: config.projectRoot ?? process.cwd(),
-      trendRadarKeeper: services.trendRadarKeeper,
       sauKeeper: services.sauKeeper,
     })
-    if (result.trendRadar.restarted) logger.log('keeper: TrendRadar 已死亡，自动拉起')
     if (result.sau.restarted) logger.log('keeper: SAU 执行器不可用，自动拉起')
   })
 

@@ -59,7 +59,14 @@ import {
 } from '@/core/platform-accounts/sau/sauService'
 import { publishDraftVideoToSau } from '@/core/platform-accounts/sau/sauPublishService'
 import { runTrendRadarSync } from '@/core/trendradar/sync'
-import { getServicesConfig, saveServicesConfig } from '@/core/services/serviceConfig'
+import {
+  getServicesConfig,
+  getTrendRadarRunState,
+  markTrendRadarRunDate,
+  normalizeServicesConfig,
+  saveServicesConfig,
+  todayLocalDateString,
+} from '@/core/services/serviceConfig'
 import {
   isSauExecutorAlive,
   isTrendRadarAlive,
@@ -943,6 +950,7 @@ const ROUTES: RouteDef[] = [
   route('GET', '/services/status', async ({ res }) => {
     const deps = currentDeps
     const config = deps?.db ? await getServicesConfig(deps.db as never) : null
+    const runState = deps?.db ? await getTrendRadarRunState(deps.db as never) : null
     const trendRadar = isTrendRadarAlive()
     const sauOnline = await isSauExecutorAlive()
     json(res, 200, {
@@ -950,7 +958,9 @@ const ROUTES: RouteDef[] = [
       data: {
         scheduler: { enabled: config?.schedulerEnabled ?? false, running: deps?.schedulerControl?.isRunning() ?? false },
         trendRadar: {
-          keeperEnabled: config?.trendRadarKeeper ?? true,
+          runMode: config?.trendRadarRunMode ?? 'off',
+          runTime: config?.trendRadarRunTime ?? '09:00',
+          lastRunDate: runState?.lastRunDate ?? null,
           alive: trendRadar.alive,
           pid: trendRadar.pid,
         },
@@ -965,26 +975,35 @@ const ROUTES: RouteDef[] = [
   route('POST', '/services/config', async ({ req, res, db }) => {
     const body = await readJsonBody(req)
     const current = db ? await getServicesConfig(db as never) : (await import('@/core/services/serviceConfig')).DEFAULT_SERVICES_CONFIG
-    const next = {
+    // 归一化兜底（runMode 非法值 / runTime 非 HH:mm 一律回落当前值或默认值）
+    const next = normalizeServicesConfig({
       schedulerEnabled:
         typeof body.schedulerEnabled === 'boolean' ? body.schedulerEnabled : current.schedulerEnabled,
-      trendRadarKeeper:
-        typeof body.trendRadarKeeper === 'boolean' ? body.trendRadarKeeper : current.trendRadarKeeper,
+      trendRadarRunMode:
+        body.trendRadarRunMode === 'daily' || body.trendRadarRunMode === 'off'
+          ? body.trendRadarRunMode
+          : current.trendRadarRunMode,
+      trendRadarRunTime:
+        typeof body.trendRadarRunTime === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(body.trendRadarRunTime.trim())
+          ? body.trendRadarRunTime.trim()
+          : current.trendRadarRunTime,
       sauKeeper: typeof body.sauKeeper === 'boolean' ? body.sauKeeper : current.sauKeeper,
-    }
+    })
     if (db) await saveServicesConfig(db as never, next)
-    // 调度器热切换：立即生效，免重启（keeper 子开关由 keeper tick 每轮读 DB）
+    // 调度器热切换：立即生效，免重启（trendradar 定时 tick 独立于它，每轮读 DB）
     if (typeof body.schedulerEnabled === 'boolean') currentDeps?.schedulerControl?.setRunning(next.schedulerEnabled)
     json(res, 200, { ok: true, data: next })
   }),
 
-  route('POST', '/services/trendradar/restart', async ({ res }) => {
-    // 杀旧 pid（若在）再拉新：重启即开启新一轮抓取周期
+  route('POST', '/services/trendradar/restart', async ({ res, db }) => {
+    // 杀旧 pid（若在）再拉新：一次性抓取程序，重启 = 立即手动跑一轮。
+    // 记 lastRunDate：当天已手动跑过就不再重复定时拉起，跑后同步也随之跟进。
     const before = isTrendRadarAlive()
     if (before.alive && before.pid) {
       try { process.kill(before.pid); } catch { /* 已退出 */ }
     }
     const spawned = spawnTrendRadar()
+    if (spawned && db) await markTrendRadarRunDate(db as never, todayLocalDateString())
     json(res, 200, {
       ok: spawned,
       data: { restarted: spawned, alive: isTrendRadarAlive().alive },

@@ -3047,7 +3047,13 @@ export function listSubscriptionFeeds(options?: RequestApiOptions): Promise<{ it
 
 export interface ServicesStatus {
   scheduler: { enabled: boolean; running: boolean };
-  trendRadar: { keeperEnabled: boolean; alive: boolean; pid: number | null };
+  trendRadar: {
+    runMode: 'off' | 'daily';
+    runTime: string;
+    lastRunDate: string | null;
+    alive: boolean;
+    pid: number | null;
+  };
   sau: { keeperEnabled: boolean; online: boolean };
 }
 
@@ -3056,9 +3062,19 @@ export function getServicesStatus(options?: RequestApiOptions): Promise<Services
 }
 
 export function saveServicesConfig(
-  input: { schedulerEnabled?: boolean; trendRadarKeeper?: boolean; sauKeeper?: boolean },
+  input: {
+    schedulerEnabled?: boolean;
+    trendRadarRunMode?: 'off' | 'daily';
+    trendRadarRunTime?: string;
+    sauKeeper?: boolean;
+  },
   options?: RequestApiOptions,
-): Promise<{ schedulerEnabled: boolean; trendRadarKeeper: boolean; sauKeeper: boolean }> {
+): Promise<{
+  schedulerEnabled: boolean;
+  trendRadarRunMode: 'off' | 'daily';
+  trendRadarRunTime: string;
+  sauKeeper: boolean;
+}> {
   return requestApi('/api/services/config', { method: 'POST', body: JSON.stringify(input) }, options);
 }
 
