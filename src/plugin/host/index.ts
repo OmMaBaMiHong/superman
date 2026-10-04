@@ -21,7 +21,10 @@ import { loadMigrations, runMigrations, startHeartbeat } from './scheduler.js'
 import { registerTools } from './tools.js'
 import { startPluginScheduler, fetchDueFeedsOnce, type PluginSchedulerConfig } from './jobs/scheduler.js'
 import { registerSkills } from './skills.js'
+import { registerHostIdentityBridge, getHostIdentity } from './hostIdentity.js'
+import { findServicesConfig, saveServicesConfig, getServicesConfig } from '@/core/services/serviceConfig'
 import { getAuthSettings } from '@/server/domains/settings/repositories/settingsRepo'
+import { registerDshLlm } from '@/server/integrations/ai/dshLlmBridge'
 
 export const name = 'superman'
 // webServer/tools 均为 scoped inject（见各模块），headless profile 下不会空等。
@@ -44,10 +47,25 @@ interface PluginContext {
 }
 
 const HERE = dirname(fileURLToPath(import.meta.url))
+/** 项目根（dist/plugin/host 上跳三级）：keeper 拉起 SAU 启动脚本用。 */
+const PROJECT_ROOT = join(HERE, '..', '..', '..')
 
 export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
   const log = (msg: string) => ctx.logger?.info?.(`[superman] ${msg}`)
   const warn = (msg: unknown) => ctx.logger?.warn?.(msg)
+
+  // 接入 DSH 宿主模型服务（ctx.llm）：插件复用 DSH 模型配置，不另设 AI 配置。
+  // 用 scoped inject：服务不可用时回调不执行，插件其余部分照常挂载。
+  if (typeof ctx.inject === 'function') {
+    ctx.inject(['llm', 'agentDefaultModel'], ((scope: { llm?: unknown; agentDefaultModel?: unknown }) => {
+      registerDshLlm({ llm: scope.llm, agentDefaultModel: scope.agentDefaultModel })
+      log('已接入 DSH 模型服务（ctx.llm），AI 能力走宿主模型')
+    }) as never)
+  }
+
+  // 宿主身份直通（免登录）：桌面 profile 挂了 deepseekAccount 服务即可用，
+  // headless/web profile 下 inject 不命中、整条通道静默降级，口令登录不受影响。
+  const stopHostIdentity = registerHostIdentityBridge(ctx, { log, warn, getDb: () => db })
 
   // 静态产物与迁移目录：编译后位于 dist/plugin/host，资源在 dist/plugin 下。
   const staticRoot = join(HERE, '..', 'public', 'app')
@@ -56,8 +74,10 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
   // 鉴权：db 就绪前为 dev 兜底模式；就绪后切换到 users 表 + 共享签名密钥。
   let auth: Auth = createAuth({ db: null, secret: '' })
   let db: PgPoolLike | null = null
+  let internalToken = ''
   let heartbeat: { stop(): void } | null = null
   let scheduler: { stop(): void } | null = null
+  let schedulerRunning = false
 
   const databaseUrl = resolveDatabaseUrl(config)
   // core/infra 里的 pg-boss（pipeline 入队）等读 DATABASE_URL；与插件连接串对齐。
@@ -75,6 +95,7 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
         warn('[superman] app_settings.auth_session_secret 为空：请先用 Next.js 版登录一次以初始化密钥')
       }
       auth = createAuth({ db: pool, secret: authSessionSecret })
+      internalToken = authSessionSecret
       log('鉴权已接入 users 表（session cookie: superman_session）')
 
       if (intervalMs > 0) {
@@ -82,7 +103,20 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
         log(`心跳调度器已启动（间隔 ${intervalMs}ms → plugin_heartbeats）`)
       }
 
-      scheduler = startPluginScheduler(pool, config, { log, warn })
+      // 调度器开关优先级（P2e-5）：cordis config 显式值 > DB（设置页热切换）> env 兜底。
+      // projectRoot 传给 keeper（SAU 启动脚本在 scripts/ 下）。
+      const dbServices = await findServicesConfig(pool as never)
+      const schedulerEnabled =
+        typeof config.schedulerEnabled === 'boolean'
+          ? config.schedulerEnabled
+          : (dbServices?.schedulerEnabled ?? process.env.SUPERMAN_SCHEDULER_ENABLED === 'true')
+      scheduler = startPluginScheduler(
+        pool,
+        { ...config, schedulerEnabled, projectRoot: PROJECT_ROOT },
+        { log, warn },
+      )
+      schedulerRunning = schedulerEnabled
+      log(schedulerEnabled ? '插件调度器已开启（采集/热点同步/评论/洗稿/追踪 + 服务 keeper）' : '插件调度器未开启（设置页可热切换）')
     })
     .catch((error: unknown) => {
       const redacted = databaseUrl.replace(/\/\/[^/@]*@/, '//***@')
@@ -90,6 +124,7 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
     })
 
   const dispose = () => {
+    stopHostIdentity()
     scheduler?.stop()
     heartbeat?.stop()
     void dbReady.finally(() => db?.end().catch(() => {}))
@@ -105,8 +140,30 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
     get db() {
       return db
     },
+    get internalToken() {
+      return internalToken
+    },
+    hostIdentity: () => getHostIdentity(),
+    schedulerControl: {
+      isRunning: () => schedulerRunning,
+      /** 热切换（P2e-5）：设置页开关即时生效，免重启。 */
+      setRunning: (enabled: boolean) => {
+        if (!db) return // 数据库未连接时无从调度（面板状态灯会如实显示）
+        scheduler?.stop()
+        scheduler = enabled
+          ? startPluginScheduler(
+              db,
+              { ...config, schedulerEnabled: true, projectRoot: PROJECT_ROOT },
+              { log, warn },
+            )
+          : { stop: () => {} }
+        schedulerRunning = enabled
+        log(`调度器已${enabled ? '开启' : '关闭'}（设置页热切换）`)
+      },
+    },
     staticRoot,
     apiList: BUSINESS_API_LIST,
+    projectRoot: PROJECT_ROOT,
   }
   registerRoutes(ctx, deps)
   registerTools(ctx, {

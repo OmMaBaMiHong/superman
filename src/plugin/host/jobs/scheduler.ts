@@ -25,6 +25,10 @@ import { getGovernanceStats } from '@/core/governance/repository'
 import { runPublishTrackingTick } from '@/core/publish-tracking/service'
 import { runCommentIntelTick } from '@/core/comment-intel/service'
 import { backfillKnowledge } from '@/core/knowledge/backfill'
+import {
+  resolveProductPlanAiConfig,
+  scanProductPlanCandidates,
+} from '@/core/product-plans/service'
 import { getAppSettings, getAiApiKey } from '@/server/domains/settings/repositories/settingsRepo'
 import { isAiRuntimeConfigComplete, resolveSharedAiConfig } from '@/server/integrations/ai/runtimeConfig'
 import { fetchAndIngestFeed } from '@/worker/index'
@@ -41,6 +45,10 @@ export interface PluginSchedulerConfig {
   publishTrackingIntervalMs?: number
   commentIntelIntervalMs?: number
   knowledgeBackfillIntervalMs?: number
+  productPlanScanIntervalMs?: number
+  keeperIntervalMs?: number
+  /** 项目根（keeper 拉起 SAU 脚本用；缺省 process.cwd()）。 */
+  projectRoot?: string
 }
 
 export interface SchedulerHandle {
@@ -58,6 +66,11 @@ const PIPELINE_POLL_INTERVAL = 15_000
 const PUBLISH_TRACKING_INTERVAL = 30 * 60_000
 const COMMENT_INTEL_INTERVAL = 6 * 3600_000
 const KNOWLEDGE_BACKFILL_INTERVAL = 30 * 60_000
+const PRODUCT_PLAN_SCAN_INTERVAL = 12 * 3600_000
+const KEEPER_TICK_INTERVAL = 60_000
+
+/** 每轮产品计划扫描最多生成的计划数（防雪崩）。 */
+const PRODUCT_PLAN_SCAN_BATCH_LIMIT = 5
 
 /** 每条 tick 最多执行的洗稿任务数（防雪崩）。 */
 const PIPELINE_BATCH_LIMIT = 10
@@ -146,6 +159,21 @@ export function startPluginScheduler(
         logger.log(`trendradar.sync: user=${user.id} upserted=${result.upserted} platforms=${result.platforms}`)
       }
     }
+  })
+
+  // 服务 keeper（P2e-5）：探活外部进程（TrendRadar/SAU 执行器），死亡自动拉起。
+  // 子开关每轮从 DB 读（设置页热切换，免重启）；spawn 逻辑在 plugin/host/servicesKeeper。
+  every('services.keeper', config.keeperIntervalMs ?? KEEPER_TICK_INTERVAL, async () => {
+    const { getServicesConfig } = await import('@/core/services/serviceConfig')
+    const { runKeeperTick } = await import('../servicesKeeper.js')
+    const services = await getServicesConfig(pool as never)
+    const result = await runKeeperTick({
+      projectRoot: config.projectRoot ?? process.cwd(),
+      trendRadarKeeper: services.trendRadarKeeper,
+      sauKeeper: services.sauKeeper,
+    })
+    if (result.trendRadar.restarted) logger.log('keeper: TrendRadar 已死亡，自动拉起')
+    if (result.sau.restarted) logger.log('keeper: SAU 执行器不可用，自动拉起')
   })
 
   every('feed.fetch', config.feedRefreshIntervalMs ?? FEED_TICK_INTERVAL, async () => {
@@ -247,7 +275,30 @@ export function startPluginScheduler(
     }
   })
 
-  logger.log('调度器已启动：trendradar.sync(30m) + feed.fetch(60s) + pipeline.rewrite(15s) + publishTracking.tick(30m) + commentIntel.tick(6h) + knowledge.backfill(30m)')
+  every('productPlan.scan', config.productPlanScanIntervalMs ?? PRODUCT_PLAN_SCAN_INTERVAL, async () => {
+    const users = await listUsers(pool as never)
+    for (const user of users.filter((u) => u.status === 'active')) {
+      const aiConfig = await resolveProductPlanAiConfig(pool as never, user.id)
+      const result = await scanProductPlanCandidates(pool as never, {
+        userId: user.id,
+        limit: PRODUCT_PLAN_SCAN_BATCH_LIMIT,
+        aiConfig,
+      })
+      if (result.created > 0) {
+        logger.log(`productPlan.scan: user=${user.id} scanned=${result.scanned} created=${result.created}`)
+        // P2a 事件：扫描发现产品机会 → 消息中心（静默失败）
+        await notify(pool as never, {
+          userId: user.id,
+          kind: 'product_plan',
+          title: `从「搞钱」内容发现 ${result.created} 个产品机会`,
+          body: '已生成产品计划草稿，去创作台的产品计划区查看。',
+          link: '/studio?tab=plans',
+        }).catch(() => {})
+      }
+    }
+  })
+
+  logger.log('调度器已启动：trendradar.sync(30m) + feed.fetch(60s) + pipeline.rewrite(15s) + publishTracking.tick(30m) + commentIntel.tick(6h) + knowledge.backfill(30m) + productPlan.scan(12h)')
   return {
     stop: () => {
       for (const timer of timers) clearInterval(timer)

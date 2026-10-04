@@ -7,6 +7,7 @@
  * 路由匹配用「模式 → 正则」前缀表，不引框架。
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { existsSync } from 'node:fs'
 import { addSubscriptionCandidate, getSubscriptionVideoSource, getSubscriptionWork, listSubscriptionFeeds, listSubscriptionWorks, markSubscriptionWorkRead } from '@/core/reader/service'
 import { streamSubscriptionVideo } from './video.js'
 import { AppError, ConflictError, NotFoundError, UnauthorizedError, ValidationError } from '@/server/infra/http/errors'
@@ -45,6 +46,8 @@ import {
 import { WechatMpError } from '@/core/platform-accounts/wechat/mpClient'
 import {
   getSauLoginSession,
+  isSauPlatform,
+  sauPlatformFromType,
   startSauLoginSession,
   type SauPlatform,
 } from '@/core/platform-accounts/sau/sauProvider'
@@ -55,9 +58,16 @@ import {
   type SauCallbackPayload,
 } from '@/core/platform-accounts/sau/sauService'
 import { publishDraftVideoToSau } from '@/core/platform-accounts/sau/sauPublishService'
+import { runTrendRadarSync } from '@/core/trendradar/sync'
+import { getServicesConfig, saveServicesConfig } from '@/core/services/serviceConfig'
+import {
+  isSauExecutorAlive,
+  isTrendRadarAlive,
+  spawnTrendRadar,
+} from './servicesKeeper.js'
 import { hybridSearch } from '@/core/knowledge/search'
 import { createOpenAIClient } from '@/server/integrations/ai/openaiClient'
-import { getArticleById } from '@/server/domains/articles/repositories/articlesRepo'
+import { getArticleById, updateArticleUserNote } from '@/server/domains/articles/repositories/articlesRepo'
 import { getAppSettings } from '@/server/domains/settings/repositories/settingsRepo'
 import { normalizePersistedSettings } from '@/features/settings/settingsSchema'
 import { getAiApiKey, getUiSettings } from '@/server/domains/settings/repositories/settingsRepo'
@@ -76,6 +86,12 @@ import {
 } from '@/core/governance/services/governanceActionsService'
 import { isSafeExternalUrl } from '@/server/integrations/rss/ssrfGuard'
 import { isRssHubUrl } from '@/lib/rsshub/url'
+import {
+  clearRssHubCookie,
+  isProvider as isRssHubCookieProvider,
+  listRssHubCookieViews,
+  saveRssHubCookie,
+} from '@/server/domains/rsshubCookie/services/rssHubCookieService'
 import { createFeedWithCategoryResolution } from '@/server/domains/feeds/services/feedCategoryLifecycleService'
 import {
   FALLBACK_RECOMMENDED_FEEDS,
@@ -102,10 +118,33 @@ import type { Auth, Session } from './auth.js'
 import type { Queryable } from './db.js'
 import { json, readJsonBody } from './routes.js'
 import { getAiModelSettings, listFreeModels, saveAiModelSettings, testFreeModel } from '@/core/ai/freeModels'
+import {
+  createManualProductPlan,
+  createProductPlanFromArticle,
+  resolveProductPlanAiConfig,
+  runProductPlanPipeline,
+  scanProductPlanCandidates,
+} from '@/core/product-plans/service'
+import {
+  deleteProductPlan,
+  getProductPlan,
+  getProductPlanStats,
+  isProductPlanSourceType,
+  isProductPlanStatus,
+  listProductPlans,
+  updateProductPlan,
+  type ProductPlanSourceType,
+  type ProductPlanStatus,
+  type UpdateProductPlanPatch,
+} from '@/core/product-plans/repository'
 
 export interface ApiDeps {
   auth: Auth
   db: Queryable | null
+  /** P2e-5 服务面板：调度器热切换句柄（index.ts 注入）。 */
+  schedulerControl?: { isRunning(): boolean; setRunning(enabled: boolean): void }
+  /** P2e-5 服务面板：项目根（keeper 重启脚本路径解析）。 */
+  projectRoot?: string
 }
 
 interface RouteContext {
@@ -129,12 +168,16 @@ interface RouteDef {
   authMode?: 'session' | 'sauToken'
 }
 
-/** '/governance/items/:id/approve' → 正则 + 参数名表。 */
+/** '/governance/items/:id/approve' → 正则 + 参数名表。'*' 作为通配符保留。 */
 function compile(pattern: string): { re: RegExp; keys: string[] } {
   const keys: string[] = []
   const source = pattern
     .split('/')
     .map((seg) => {
+      if (seg === '*') {
+        keys.push('*')
+        return '(.*)'
+      }
       if (seg.startsWith(':')) {
         keys.push(seg.slice(1))
         return '([^/]+)'
@@ -160,6 +203,61 @@ function requireId(raw: string | undefined, label = 'ID'): string {
     throw new ValidationError(`${label}非法`, { id: '必须为正整数' })
   }
   return raw
+}
+
+const VIDEO_MIME_MAP: Record<string, string> = {
+  mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm',
+  mov: 'video/quicktime', avi: 'video/x-msvideo', mkv: 'video/x-matroska',
+}
+
+/** 流式返回本地视频文件，支持 HTTP Range（<video> 拖动进度必需）。 */
+async function streamLocalVideo(
+  req: IncomingMessage,
+  res: ServerResponse,
+  filePath: string,
+  fileName: string | null,
+): Promise<void> {
+  const { createReadStream, statSync } = await import('node:fs')
+  const nodePath = await import('node:path')
+  const { pipeline } = await import('node:stream/promises')
+
+  const total = statSync(filePath).size
+  const ext = nodePath.extname(fileName || filePath).slice(1).toLowerCase()
+  const mime = VIDEO_MIME_MAP[ext] ?? 'video/mp4'
+  const range = req.headers.range
+
+  try {
+    if (range) {
+      const match = /bytes=(\d*)-(\d*)/.exec(range)
+      const start = match?.[1] ? Number(match[1]) : 0
+      const end = match?.[2] ? Number(match[2]) : total - 1
+      if (!Number.isFinite(start) || start >= total) {
+        res.writeHead(416, { 'content-range': `bytes */${total}`, 'accept-ranges': 'bytes' })
+        res.end()
+        return
+      }
+      const chunkEnd = Math.min(end, total - 1)
+      res.writeHead(206, {
+        'content-type': mime,
+        'content-range': `bytes ${start}-${chunkEnd}/${total}`,
+        'accept-ranges': 'bytes',
+        'content-length': String(chunkEnd - start + 1),
+        'cache-control': 'private, no-store',
+      })
+      await pipeline(createReadStream(filePath, { start, end: chunkEnd }), res)
+    } else {
+      res.writeHead(200, {
+        'content-type': mime,
+        'accept-ranges': 'bytes',
+        'content-length': String(total),
+        'cache-control': 'private, no-store',
+      })
+      await pipeline(createReadStream(filePath), res)
+    }
+  } catch (error) {
+    if (res.headersSent || res.destroyed) res.destroy()
+    else throw error
+  }
 }
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
@@ -643,22 +741,27 @@ const ROUTES: RouteDef[] = [
   // —— 平台授权中心（P2e-1）——
   route('GET', '/platform-accounts', async ({ res, query, session, db }) => {
     const platform = query.get('platform')?.trim() || undefined
+    const purposeParam = query.get('purpose')?.trim() || undefined
     const items = await listPlatformAccounts(db as never, {
       userId: session.userId,
-      platform: platform as 'wechat' | 'douyin' | 'xhs' | 'bilibili' | 'channels' | undefined,
+      platform: platform as never,
+      purpose: purposeParam as never,
     })
     json(res, 200, { ok: true, data: { items } })
   }),
   route('POST', '/platform-accounts', async ({ req, res, session, db }) => {
     const body = await readJsonBody(req)
     const platform = typeof body.platform === 'string' ? body.platform.trim() : ''
-    if (!['wechat', 'douyin', 'xhs', 'bilibili', 'channels'].includes(platform)) {
-      throw new ValidationError('请求参数非法', { platform: '仅支持 wechat/douyin/xhs/bilibili/channels' })
+    if (!['wechat', 'douyin', 'xhs', 'bilibili', 'channels', 'kuaishou', 'weibo'].includes(platform)) {
+      throw new ValidationError('请求参数非法', { platform: '仅支持 wechat/douyin/xhs/bilibili/channels/kuaishou/weibo' })
     }
     const credKind = typeof body.credKind === 'string' ? body.credKind.trim() : ''
     if (!['app_secret', 'cookie', 'oauth'].includes(credKind)) {
       throw new ValidationError('请求参数非法', { credKind: '仅支持 app_secret/cookie/oauth' })
     }
+    const purpose = typeof body.purpose === 'string' && ['publish', 'collect', 'oauth'].includes(body.purpose)
+      ? (body.purpose as 'publish' | 'collect' | 'oauth')
+      : 'publish'
     const credential = typeof body.credential === 'object' && body.credential !== null
       ? body.credential as Record<string, unknown>
       : null
@@ -677,6 +780,7 @@ const ROUTES: RouteDef[] = [
         platform: platform as 'wechat',
         accountName: typeof body.accountName === 'string' ? body.accountName.trim() : '',
         credKind: credKind as 'app_secret',
+        purpose,
         // 明文只在加密封装内存在，落库即密文。
         credentialPlaintext: JSON.stringify(credential),
         metaJson: typeof body.metaJson === 'object' && body.metaJson !== null
@@ -701,8 +805,8 @@ const ROUTES: RouteDef[] = [
     const account = await getPlatformAccount(db as never, requireId(params.id, '账号 ID'), session.userId)
     if (!account) throw new NotFoundError('平台账号不存在')
 
-    // SAU cookie 账号（抖音/小红书）：执行器对账验证（P2e-2/P2e-3）
-    if ((account.platform === 'douyin' || account.platform === 'xhs') && account.credKind === 'cookie') {
+    // SAU cookie 账号（抖音/小红书/视频号/快手）：执行器对账验证（P2e-2/3/4）
+    if (isSauPlatform(account.platform) && account.credKind === 'cookie') {
       const result = await verifySauAccount(account.platform, account)
       await markAccountVerified(db as never, {
         id: account.id,
@@ -734,8 +838,8 @@ const ROUTES: RouteDef[] = [
     }
   }),
 
-  // —— SAU 扫码授权流（P2e-2 抖音 / P2e-3 小红书）——
-  ...(['douyin', 'xhs'] as const).flatMap((platform: SauPlatform) => [
+  // —— SAU 扫码授权流（P2e-2 抖音 / P2e-3 小红书 / P2e-4 视频号+快手）——
+  ...(['douyin', 'xhs', 'channels', 'kuaishou'] as const).flatMap((platform: SauPlatform) => [
     route('POST', `/platform-accounts/${platform}/login-session`, async ({ req, res, session }) => {
       const body = await readJsonBody(req)
       const accountName = typeof body.accountName === 'string' ? body.accountName.trim() : ''
@@ -782,8 +886,8 @@ const ROUTES: RouteDef[] = [
           ? (body.storageState as Record<string, unknown>)
           : {},
     }
-    if (![1, 3].includes(payload.type) || !payload.userName || !payload.filePath) {
-      throw new ValidationError('回调报文非法', { payload: 'type/userName/filePath 缺失或不支持' })
+    if (!payload.userName || !payload.filePath || sauPlatformFromType(payload.type) === null) {
+      throw new ValidationError('回调报文非法', { payload: 'type/userName/filePath 缺失或平台不支持' })
     }
     const result = await handleSauLoginCallback(db as never, payload)
     json(res, 200, { ok: true, data: result })
@@ -806,6 +910,97 @@ const ROUTES: RouteDef[] = [
     const result = await handleSauLoginCallback(db as never, payload)
     json(res, 200, { ok: true, data: result })
   }, 'sauToken'),
+
+  // —— 手动同步（「立即抓取/立即同步」按钮）：与调度器 tick 同一实现，不等周期 ——
+
+  route('POST', '/feeds/refresh-now', async ({ res, db }) => {
+    if (!db) return json(res, 503, { ok: false, error: { code: 'service_unavailable', message: '数据库未连接' } })
+    // 动态 import：scheduler 的传递依赖会破坏测试的模块 mock（懒加载到调用时）
+    const { fetchDueFeedsOnce } = await import('./jobs/scheduler.js')
+    const result = await fetchDueFeedsOnce(db as never, {
+      log: (msg: string) => console.log(`[superman:feeds-now] ${msg}`),
+      warn: (msg: unknown) => console.warn(`[superman:feeds-now] ${msg}`),
+    })
+    json(res, 200, { ok: true, data: result })
+  }),
+
+  route('POST', '/trendradar/sync-now', async ({ res, session, db }) => {
+    if (!db) return json(res, 503, { ok: false, error: { code: 'service_unavailable', message: '数据库未连接' } })
+    try {
+      const result = await runTrendRadarSync({ pool: db as never, userId: session.userId })
+      json(res, 200, { ok: true, data: result })
+    } catch (err) {
+      // TrendRadar 当日 SQLite 不存在等场景：明确告诉用户源头没数据
+      json(res, 200, {
+        ok: false,
+        error: { code: 'sync_failed', message: err instanceof Error ? err.message : String(err) },
+      })
+    }
+  }),
+
+  // —— 服务面板（P2e-5）：状态/开关/重启 ———
+
+  route('GET', '/services/status', async ({ res }) => {
+    const deps = currentDeps
+    const config = deps?.db ? await getServicesConfig(deps.db as never) : null
+    const trendRadar = isTrendRadarAlive()
+    const sauOnline = await isSauExecutorAlive()
+    json(res, 200, {
+      ok: true,
+      data: {
+        scheduler: { enabled: config?.schedulerEnabled ?? false, running: deps?.schedulerControl?.isRunning() ?? false },
+        trendRadar: {
+          keeperEnabled: config?.trendRadarKeeper ?? true,
+          alive: trendRadar.alive,
+          pid: trendRadar.pid,
+        },
+        sau: {
+          keeperEnabled: config?.sauKeeper ?? true,
+          online: sauOnline,
+        },
+      },
+    })
+  }),
+
+  route('POST', '/services/config', async ({ req, res, db }) => {
+    const body = await readJsonBody(req)
+    const current = db ? await getServicesConfig(db as never) : (await import('@/core/services/serviceConfig')).DEFAULT_SERVICES_CONFIG
+    const next = {
+      schedulerEnabled:
+        typeof body.schedulerEnabled === 'boolean' ? body.schedulerEnabled : current.schedulerEnabled,
+      trendRadarKeeper:
+        typeof body.trendRadarKeeper === 'boolean' ? body.trendRadarKeeper : current.trendRadarKeeper,
+      sauKeeper: typeof body.sauKeeper === 'boolean' ? body.sauKeeper : current.sauKeeper,
+    }
+    if (db) await saveServicesConfig(db as never, next)
+    // 调度器热切换：立即生效，免重启（keeper 子开关由 keeper tick 每轮读 DB）
+    if (typeof body.schedulerEnabled === 'boolean') currentDeps?.schedulerControl?.setRunning(next.schedulerEnabled)
+    json(res, 200, { ok: true, data: next })
+  }),
+
+  route('POST', '/services/trendradar/restart', async ({ res }) => {
+    // 杀旧 pid（若在）再拉新：重启即开启新一轮抓取周期
+    const before = isTrendRadarAlive()
+    if (before.alive && before.pid) {
+      try { process.kill(before.pid); } catch { /* 已退出 */ }
+    }
+    const spawned = spawnTrendRadar()
+    json(res, 200, {
+      ok: spawned,
+      data: { restarted: spawned, alive: isTrendRadarAlive().alive },
+      ...(spawned ? {} : { error: { code: 'spawn_failed', message: '拉起失败：请确认 TrendRadar .venv 已部署' } }),
+    })
+  }),
+
+  route('POST', '/services/sau/restart', async ({ res }) => {
+    const root = currentDeps?.projectRoot ?? process.cwd()
+    // 统一走脚本 stop → start（start 幂等；在线重启 = 开新一轮会话）
+    const { spawn } = await import('node:child_process')
+    const child = spawn('bash', ['-c', `bash '${root}/scripts/sau-executor.sh' stop >/dev/null 2>&1; sleep 1; bash '${root}/scripts/sau-executor.sh' start`], { stdio: 'ignore' })
+    child.on('error', () => {})
+    child.unref()
+    json(res, 200, { ok: true, data: { restarting: true } })
+  }),
 
   route('POST', '/drafts/:id/publish', async ({ req, res, params, session, db }) => {
     const body = await readJsonBody(req)
@@ -875,6 +1070,44 @@ const ROUTES: RouteDef[] = [
   }),
 
   // —— 订阅源（P1-A）——
+  route('GET', '/rsshub/resolve', async ({ res, query }) => {
+    const url = query.get('url') ?? ''
+    const { resolveRssHubSourceUrl } = await import('@/server/integrations/rsshub/sourceResolver')
+    const result = await resolveRssHubSourceUrl(url)
+    json(res, 200, { ok: true, data: result })
+  }),
+  // —— 平台采集 Cookie（RSSHub 抓取 + yt-dlp 文案提取）——
+  route('GET', '/rsshub/cookies', async ({ res, session, db }) => {
+    json(res, 200, { ok: true, data: await listRssHubCookieViews(db as never, session.userId) })
+  }),
+  route('PUT', '/rsshub/cookies/:provider', async ({ req, res, params, session, db }) => {
+    const provider = params.provider ?? ''
+    if (!isRssHubCookieProvider(provider)) {
+      throw new ValidationError('不支持的平台', { provider: '仅支持 douyin/xiaohongshu/weibo' })
+    }
+    const body = await readJsonBody(req)
+    const cookie = typeof body.cookie === 'string' ? body.cookie : ''
+    if (cookie.length > 8192) throw new ValidationError('请求参数非法', { cookie: '最长 8192 字符' })
+    const remark = typeof body.remark === 'string' ? body.remark.slice(0, 64) : undefined
+    const view = await saveRssHubCookie(db as never, session.userId, {
+      provider,
+      cookie,
+      ...(remark === undefined ? {} : { remark }),
+    })
+    json(res, 200, { ok: true, data: view })
+  }),
+  route('DELETE', '/rsshub/cookies/:provider', async ({ res, params, session, db }) => {
+    const provider = params.provider ?? ''
+    if (!isRssHubCookieProvider(provider)) {
+      throw new ValidationError('不支持的平台', { provider: '仅支持 douyin/xiaohongshu/weibo' })
+    }
+    json(res, 200, { ok: true, data: await clearRssHubCookie(db as never, session.userId, provider) })
+  }),
+  // —— 授权与凭证中心（按平台聚合发布授权 + 采集 Cookie）——
+  route('GET', '/credential-center', async ({ res, session, db }) => {
+    const { listCredentialCenter } = await import('@/core/credentials/center')
+    json(res, 200, { ok: true, data: await listCredentialCenter(db as never, session.userId) })
+  }),
   route('GET', '/feeds', async ({ res, session, db }) => {
     const { rows } = await db.query(
       `
@@ -1133,6 +1366,681 @@ const ROUTES: RouteDef[] = [
     const result = await markAllNotificationsRead(db as never, session.userId)
     json(res, 200, { ok: true, data: result })
   }),
+
+  // —— 剪贴板快速收藏 ——
+  route('POST', '/clips', async ({ req, res, session, db }) => {
+    const body = await readJsonBody(req);
+    const { createClip } = await import('@/core/clips/service');
+    const result = await createClip(db as never, {
+      userId: session.userId,
+      title: typeof body.title === 'string' ? body.title : undefined,
+      contentText: typeof body.contentText === 'string' ? body.contentText : '',
+      contentHtml: typeof body.contentHtml === 'string' ? body.contentHtml : undefined,
+      sourceUrl: typeof body.sourceUrl === 'string' ? body.sourceUrl : null,
+      sourceTitle: typeof body.sourceTitle === 'string' ? body.sourceTitle : null,
+      imageUrls: Array.isArray(body.imageUrls) ? body.imageUrls : undefined,
+      note: typeof body.note === 'string' ? body.note : null,
+    });
+    json(res, 200, { ok: true, data: result });
+  }),
+  route('GET', '/clips', async ({ res, query, session, db }) => {
+    const { listClips } = await import('@/core/clips/repository');
+    const limit = parsePositiveInt(query.get('limit')) ?? 20;
+    const offset = parsePositiveInt(query.get('offset')) ?? 0;
+    const result = await listClips(db as never, session.userId, { limit, offset });
+    json(res, 200, { ok: true, data: result });
+  }),
+
+  // —— 内容详情：文章 + 收藏快照 + 视频素材/文案（收藏/选题池点进去看）——
+  route('GET', '/contents/:id', async ({ res, params, session, db }) => {
+    const id = requireId(params.id, '内容 ID');
+    interface DetailRow {
+      id: string; title: string | null; summary: string | null; sourceUrl: string | null;
+      origin: string | null; publishedAt: string | null; previewImageUrl: string | null;
+      directionKey: string | null; directionReason: string | null; qualityScore: number | null;
+      governanceStatus: string | null; contentHtml: string | null;
+      clipRawContent: string | null; clipNote: string | null; clipImageUrls: string[] | null;
+      videoUrl: string | null; videoTitle: string | null; videoProvider: string | null;
+      transcriptText: string | null; transcriptSource: string | null; transcriptLanguage: string | null;
+      transcriptExtractedAt: string | null; transcriptStatus: string | null; transcriptError: string | null;
+      videoFilePath: string | null; videoFileName: string | null; videoFileSize: number | null;
+    }
+    const { rows } = await db.query(
+      `select
+         a.id::text as "id",
+         a.title,
+         a.summary,
+         a.link as "sourceUrl",
+         a.origin,
+         a.published_at as "publishedAt",
+         a.preview_image_url as "previewImageUrl",
+         a.direction_key as "directionKey",
+         a.direction_reason as "directionReason",
+         a.quality_score as "qualityScore",
+         a.governance_status as "governanceStatus",
+         a.content_html as "contentHtml",
+         c.raw_content as "clipRawContent",
+         c.note as "clipNote",
+         c.image_urls as "clipImageUrls",
+         vm.video_url as "videoUrl",
+         vm.video_title as "videoTitle",
+         vm.provider as "videoProvider",
+         vm.transcript_text as "transcriptText",
+         vm.transcript_source as "transcriptSource",
+         vm.transcript_language as "transcriptLanguage",
+         vm.transcript_extracted_at as "transcriptExtractedAt",
+         vm.transcript_status as "transcriptStatus",
+         vm.transcript_error as "transcriptError",
+         vm.video_file_path as "videoFilePath",
+         vm.video_file_name as "videoFileName",
+         vm.video_file_size as "videoFileSize"
+       from articles a
+       left join clips c on c.article_id = a.id and c.user_id = a.user_id
+       left join video_materials vm on vm.article_id = a.id and vm.user_id = a.user_id
+       where a.id = $1 and a.user_id = $2`,
+      [id, session.userId],
+    );
+    const row = rows[0] as unknown as DetailRow | undefined;
+    if (!row) throw new NotFoundError('内容不存在');
+    const hasClip = row.clipRawContent !== null || row.clipNote !== null || row.clipImageUrls !== null;
+
+    type VideoBlock = {
+      videoUrl: string | null; videoTitle: string | null; provider: string | null;
+      transcriptText: string | null; transcriptSource: string | null; transcriptLanguage: string | null;
+      transcriptExtractedAt: string | null; transcriptStatus: string; transcriptError: string | null;
+      videoFilePath: string | null; videoFileName: string | null; videoFileSize: number | null;
+    };
+    let video: VideoBlock | null = null;
+    if (row.videoUrl !== null || row.transcriptText !== null || row.transcriptStatus !== null) {
+      video = {
+        videoUrl: row.videoUrl ?? null,
+        videoTitle: row.videoTitle ?? null,
+        provider: row.videoProvider ?? null,
+        transcriptText: row.transcriptText ?? null,
+        transcriptSource: row.transcriptSource ?? null,
+        transcriptLanguage: row.transcriptLanguage ?? null,
+        transcriptExtractedAt: row.transcriptExtractedAt ?? null,
+        transcriptStatus: row.transcriptStatus ?? 'none',
+        transcriptError: row.transcriptError ?? null,
+        videoFilePath: row.videoFilePath ?? null,
+        videoFileName: row.videoFileName ?? null,
+        videoFileSize: row.videoFileSize ?? null,
+      };
+    } else if (typeof row.sourceUrl === 'string' && /douyin\.com|iesdouyin\.com/i.test(row.sourceUrl)) {
+      // 无素材行，但来源是抖音链接 → 解析作品 ID，合成 video 对象供「提取文案」
+      const { resolveVideoIdFromShareUrl } = await import('@/server/integrations/rsshub/douyinAuthorResolver');
+      const videoId = await resolveVideoIdFromShareUrl(row.sourceUrl).catch(() => null);
+      if (videoId) {
+        video = {
+          videoUrl: `https://www.douyin.com/video/${videoId}`,
+          videoTitle: row.title ?? null,
+          provider: 'douyin',
+          transcriptText: null, transcriptSource: null, transcriptLanguage: null,
+          transcriptExtractedAt: null, transcriptStatus: 'none', transcriptError: null,
+          videoFilePath: null, videoFileName: null, videoFileSize: null,
+        };
+      }
+    }
+
+    json(res, 200, {
+      ok: true,
+      data: {
+        id: row.id,
+        title: row.title,
+        summary: row.summary,
+        sourceUrl: row.sourceUrl,
+        origin: row.origin,
+        publishedAt: row.publishedAt,
+        previewImageUrl: row.previewImageUrl,
+        directionKey: row.directionKey,
+        directionReason: row.directionReason,
+        qualityScore: row.qualityScore,
+        governanceStatus: row.governanceStatus,
+        contentHtml: row.contentHtml,
+        clip: hasClip
+          ? { rawContent: row.clipRawContent ?? '', note: row.clipNote ?? null, imageUrls: row.clipImageUrls ?? [] }
+          : null,
+        video,
+      },
+    });
+  }),
+
+  // —— 我的页统计 ——
+  route('GET', '/me/stats', async ({ res, session, db }) => {
+    const userId = session.userId;
+    // 收藏 = ⭐标记 或 剪贴板收藏（origin='clipboard'）
+    const favoritedRes = await db.query(
+      "select count(*)::int as count from articles where user_id = $1 and (is_favorited = true or origin = 'clipboard')",
+      [userId],
+    );
+    const worksRes = await db.query(
+      "select count(*)::int as count from drafts where user_id = $1",
+      [userId],
+    );
+    const publishedRes = await db.query(
+      "select count(*)::int as count from published_posts where user_id = $1",
+      [userId],
+    );
+    json(res, 200, {
+      ok: true,
+      data: {
+        favorites: favoritedRes.rows[0]?.count ?? 0,
+        works: worksRes.rows[0]?.count ?? 0,
+        published: publishedRes.rows[0]?.count ?? 0,
+      },
+    });
+  }),
+
+  // —— 我的页 · 收藏列表（⭐标记 或 剪贴板收藏）——
+  route('GET', '/me/favorites', async ({ res, query, session, db }) => {
+    const limit = Math.min(parsePositiveInt(query.get('limit')) ?? 50, 100);
+    const offset = parsePositiveInt(query.get('offset')) ?? 0;
+    const { rows } = await db.query(
+      `select
+         id::text as "id",
+         title,
+         link as "sourceUrl",
+         origin,
+         is_favorited as "isFavorited",
+         preview_image_url as "previewImageUrl",
+         summary,
+         user_note as "userNote",
+         direction_key as "directionKey",
+         direction_reason as "directionReason",
+         fetched_at as "createdAt"
+       from articles
+       where user_id = $1 and (origin = 'clipboard' or is_favorited = true)
+       order by fetched_at desc, id desc
+       limit $2 offset $3`,
+      [session.userId, limit, offset],
+    );
+    const totalRes = await db.query(
+      "select count(*)::int as count from articles where user_id = $1 and (origin = 'clipboard' or is_favorited = true)",
+      [session.userId],
+    );
+    json(res, 200, { ok: true, data: { items: rows, total: totalRes.rows[0]?.count ?? 0 } });
+  }),
+
+  // —— 收藏备注 / 想法（可编辑；参与「生成稿件」提示词）——
+  route('PUT', '/articles/:id/note', async ({ req, res, params, session, db }) => {
+    const body = await readJsonBody(req)
+    const note = typeof body.note === 'string' ? body.note : undefined
+    const title = typeof body.title === 'string' ? body.title : undefined
+    if (note === undefined && title === undefined) {
+      throw new ValidationError('请求参数非法', { note: '至少提供 note 或 title' })
+    }
+    const updated = await updateArticleUserNote(db as never, {
+      id: requireId(params.id, '收藏 ID'),
+      userId: session.userId,
+      note,
+      title,
+    })
+    if (!updated) throw new NotFoundError('收藏不存在或不属于当前用户')
+    json(res, 200, { ok: true, data: { updated: true } })
+  }),
+
+  // —— 剪贴板收藏（图片/视频文件上传）——
+  route('POST', '/clipboard/image', async ({ req, res, session, db }) => {
+    const { saveUploads } = await import('@/server/infra/storage/localFileStore');
+    const { createClip } = await import('@/core/clips/service');
+    const busboy = (await import('busboy')).default;
+
+    const bb = busboy({ headers: req.headers, limits: { fileSize: 50 * 1024 * 1024, files: 10 } });
+    const files: File[] = [];
+    let sourceUrl = '';
+
+    bb.on('file', (_name: string, stream: NodeJS.ReadableStream, info: { filename: string; mimeType: string }) => {
+      const chunks: Buffer[] = [];
+      stream.on('data', (d: Buffer) => chunks.push(d));
+      stream.on('end', () => {
+        const buf = Buffer.concat(chunks);
+        files.push(new File([buf], info.filename, { type: info.mimeType }));
+      });
+    });
+    bb.on('field', (name: string, val: string) => {
+      if (name === 'sourceUrl') sourceUrl = val;
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      bb.on('close', () => resolve());
+      bb.on('error', (err: Error) => reject(err));
+      req.pipe(bb);
+    });
+
+    if (files.length === 0) throw new ValidationError('请选择图片', { images: '至少选择一张图片' });
+
+    const savedFiles = await saveUploads(files);
+    const imageUrls = savedFiles.map((f) => f.url);
+
+    const result = await createClip(db as never, {
+      userId: session.userId,
+      title: `${files.length} 张图片收藏`,
+      contentText: `从外部收藏的 ${files.length} 张图片素材`,
+      contentHtml: imageUrls.map((u) => `<img src="${u}" />`).join('\n'),
+      sourceUrl: sourceUrl || null,
+      sourceTitle: `${files.length} 张图片收藏`,
+      imageUrls,
+    });
+
+    json(res, 200, { ok: true, data: { articleId: result.articleId, imageUrls, alreadyExists: result.alreadyExists } });
+  }),
+
+  route('POST', '/clipboard/video', async ({ req, res, session, db }) => {
+    const { saveUpload } = await import('@/server/infra/storage/localFileStore');
+    const { createClip } = await import('@/core/clips/service');
+    const busboy = (await import('busboy')).default;
+
+    const bb = busboy({ headers: req.headers, limits: { fileSize: 500 * 1024 * 1024, files: 1 } });
+    const holder: { videoFile: File | null; sourceUrl: string } = { videoFile: null, sourceUrl: '' };
+
+    bb.on('file', (_name: string, stream: NodeJS.ReadableStream, info: { filename: string; mimeType: string }) => {
+      const chunks: Buffer[] = [];
+      stream.on('data', (d: Buffer) => chunks.push(d));
+      stream.on('end', () => {
+        const buf = Buffer.concat(chunks);
+        holder.videoFile = new File([buf], info.filename, { type: info.mimeType });
+      });
+    });
+    bb.on('field', (name: string, val: string) => {
+      if (name === 'sourceUrl') holder.sourceUrl = val;
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      bb.on('close', () => resolve());
+      bb.on('error', (err: Error) => reject(err));
+      req.pipe(bb);
+    });
+
+    const videoFile = holder.videoFile as File | null;
+    if (!videoFile) throw new ValidationError('请选择视频', { video: '请选择一个视频文件' });
+
+    const saved = await saveUpload(videoFile);
+
+    // 存 video_materials 表
+    const videoResult = await db.query(
+      `insert into video_materials (article_id, user_id, video_url, video_title, provider, video_file_path, video_file_name, video_file_size)
+       values (0, $1, $2, $3, 'clipboard', $4, $5, $6) returning id`,
+      [session.userId, saved.url, videoFile.name, saved.filePath, saved.fileName, saved.fileSize],
+    );
+    const videoMaterialId = videoResult.rows[0]?.id as number | undefined;
+
+    const result = await createClip(db as never, {
+      userId: session.userId,
+      title: videoFile.name.replace(/\.[^.]+$/, '').slice(0, 28),
+      contentText: `视频素材：${videoFile.name}`,
+      contentHtml: `<video src="${saved.url}" controls preload="metadata"></video>`,
+      sourceUrl: holder.sourceUrl || null,
+      sourceTitle: videoFile.name,
+    });
+
+    if (videoMaterialId) {
+      await db.query('update video_materials set article_id = $1 where id = $2', [result.articleId, videoMaterialId]);
+    }
+
+    json(res, 200, { ok: true, data: { articleId: result.articleId, videoUrl: saved.url, fileName: saved.fileName, alreadyExists: result.alreadyExists } });
+  }),
+
+  route('POST', '/clipboard/url', async ({ req, res, session, db }) => {
+    const { createClip } = await import('@/core/clips/service');
+    const { extract } = await import('@extractus/article-extractor');
+
+    const body = await readJsonBody(req);
+    const url = typeof body.url === 'string' ? body.url.trim() : '';
+    if (!url) throw new ValidationError('请输入链接', { url: '链接不能为空' });
+
+    const article = await extract(url);
+    if (!article?.content) throw new ValidationError('抓取失败', { url: '无法提取页面内容' });
+
+    const result = await createClip(db as never, {
+      userId: session.userId,
+      title: (article.title || '').slice(0, 80),
+      contentText: article.content.replace(/<[^>]+>/g, '').trim(),
+      contentHtml: article.content,
+      sourceUrl: url,
+      sourceTitle: article.title || null,
+    });
+
+    json(res, 200, { ok: true, data: { articleId: result.articleId, title: (article.title || '').slice(0, 80), summary: result.summary, alreadyExists: result.alreadyExists } });
+  }),
+
+  // —— 智能收藏：从杂乱分享文本提取链接 → 收藏作品 + 识别博主 ——
+  route('POST', '/clipboard/smart', async ({ req, res, session, db }) => {
+    const body = await readJsonBody(req);
+    const rawText = typeof body.text === 'string' ? body.text
+      : typeof body.url === 'string' ? body.url : '';
+
+    const { extractFirstUrl } = await import('@/lib/url/extractUrl');
+    const url = extractFirstUrl(rawText) ?? (typeof body.url === 'string' ? body.url.trim() : '');
+    if (!url) throw new ValidationError('未找到链接', { text: '请粘贴包含链接的内容' });
+
+    const { createClip } = await import('@/core/clips/service');
+    const { resolveVideoIdFromShareUrl, resolveDouyinVideo } = await import('@/server/integrations/rsshub/douyinAuthorResolver');
+    const { enrichArticleWithTranscript } = await import('@/server/services/video/enrich');
+
+    // 1) 抖音作品 → 浏览器解析作品元数据 + 作者
+    const videoId = await resolveVideoIdFromShareUrl(url);
+    if (videoId) {
+      const info = await resolveDouyinVideo(videoId);
+      if (info.success) {
+        const title = (info.desc || `抖音作品 ${videoId}`).replace(/\s+/g, ' ').trim().slice(0, 80);
+        const clip = await createClip(db as never, {
+          userId: session.userId,
+          title,
+          contentText: info.desc || title,
+          contentHtml: info.cover ? `<img src="${info.cover}" alt="" />` : undefined,
+          sourceUrl: url,
+          sourceTitle: title,
+          imageUrls: info.cover ? [info.cover] : [],
+        });
+
+        // 后台提取视频文案 → 回填文章内容（供二创流水线使用），不阻塞响应
+        if (!clip.alreadyExists) {
+          void enrichArticleWithTranscript(db as never, {
+            articleId: clip.articleId,
+            userId: session.userId,
+            videoUrl: `https://www.douyin.com/video/${videoId}`,
+            videoTitle: title,
+            provider: 'douyin',
+          }).catch((err) => console.error('[clipboard/smart] 视频文案提取失败:', err));
+        }
+
+        json(res, 200, {
+          ok: true,
+          data: {
+            articleId: clip.articleId,
+            title,
+            kind: 'douyin-video',
+            cover: info.cover ?? null,
+            transcriptPending: !clip.alreadyExists,
+            alreadyExists: clip.alreadyExists,
+            creator: info.secUid
+              ? { rssHubUrl: `rsshub://douyin/user/${info.secUid}`, nickname: info.nickname ?? null, secUid: info.secUid }
+              : null,
+          },
+        });
+        return;
+      }
+      // 浏览器解析失败：继续走下面的通用流程（可能还能识别为订阅源）
+    }
+
+    // 2) 识别为订阅源（博主主页等）→ 返回 creator
+    const { resolveRssHubSourceUrl } = await import('@/server/integrations/rsshub/sourceResolver');
+    let resolved: Awaited<ReturnType<typeof resolveRssHubSourceUrl>> = { resolved: false, inputUrl: url };
+    try {
+      resolved = await resolveRssHubSourceUrl(url);
+    } catch {
+      // 忽略
+    }
+    const creator = resolved.resolved && resolved.rssHubUrl
+      ? { rssHubUrl: resolved.rssHubUrl, nickname: resolved.title ?? null, secUid: null }
+      : null;
+
+    // 3) 抓网页正文
+    let article: { title?: string; content?: string } | null = null;
+    try {
+      const { extract } = await import('@extractus/article-extractor');
+      article = await extract(url);
+    } catch {
+      // 抓取失败，退回只存链接
+    }
+
+    if (article?.content) {
+      const title = (article.title || resolved.title || url).slice(0, 80);
+      const clip = await createClip(db as never, {
+        userId: session.userId,
+        title,
+        contentText: article.content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
+        contentHtml: article.content,
+        sourceUrl: url,
+        sourceTitle: article.title || null,
+      });
+      json(res, 200, { ok: true, data: { articleId: clip.articleId, title, kind: 'article', alreadyExists: clip.alreadyExists, creator } });
+      return;
+    }
+
+    // 4) 博主主页等「无正文」链接：只返回 creator 供关注，不建空收藏
+    if (creator) {
+      json(res, 200, {
+        ok: true,
+        data: { articleId: null, title: creator.nickname ?? '订阅源', kind: 'creator', creator },
+      });
+      return;
+    }
+
+    // 5) 兜底：只存链接 + 文本
+    const fallbackTitle = (resolved.title || rawText.trim() || url).replace(/\s+/g, ' ').slice(0, 80);
+    const clip = await createClip(db as never, {
+      userId: session.userId,
+      title: fallbackTitle,
+      contentText: rawText.trim() || url,
+      sourceUrl: url,
+      sourceTitle: resolved.title || null,
+    });
+    json(res, 200, { ok: true, data: { articleId: clip.articleId, title: fallbackTitle, kind: 'link', alreadyExists: clip.alreadyExists, creator } });
+  }),
+
+  // —— 视频文案提取（手动触发/重试；后台跑，立即返回）——
+  route('POST', '/video/transcript', async ({ req, res, session, db }) => {
+    const body = await readJsonBody(req);
+    const articleId = typeof body.articleId === 'number' ? String(body.articleId)
+      : typeof body.articleId === 'string' ? body.articleId : '';
+    const videoUrl = typeof body.url === 'string' ? body.url.trim() : '';
+    if (!articleId || !videoUrl) {
+      throw new ValidationError('缺少参数', { articleId: 'articleId 与 url 必填' });
+    }
+
+    const { enrichArticleWithTranscript } = await import('@/server/services/video/enrich');
+    void enrichArticleWithTranscript(db as never, {
+      articleId,
+      userId: session.userId,
+      videoUrl,
+      videoTitle: typeof body.videoTitle === 'string' ? body.videoTitle : undefined,
+      provider: typeof body.provider === 'string' ? body.provider : undefined,
+    }).catch((err) => console.error('[video/transcript] 文案提取失败:', err));
+
+    json(res, 200, { ok: true, data: { started: true } });
+  }),
+
+  // —— 视频下载（yt-dlp → 存到 video_materials，供站内播放/剪辑）——
+  route('POST', '/video/download', async ({ req, res, session, db }) => {
+    const body = await readJsonBody(req);
+    const url = typeof body.url === 'string' ? body.url.trim() : '';
+    const articleId = typeof body.articleId === 'number' ? String(body.articleId)
+      : typeof body.articleId === 'string' ? body.articleId : '';
+    if (!url) throw new ValidationError('缺少参数', { url: '必须提供有效的视频 URL' });
+
+    const { downloadVideo } = await import('@/server/services/video/download');
+    try {
+      const result = await downloadVideo(url, articleId ? Number(articleId) : undefined, Number(session.userId));
+      json(res, 200, {
+        ok: true,
+        data: {
+          fileName: result.fileName,
+          fileSize: result.fileSize,
+          articleId: articleId || null,
+        },
+      });
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err);
+      if (/Fresh cookies|403|Forbidden/i.test(raw)) {
+        throw new ValidationError('抖音 Cookie 已失效', { url: '请到「设置 → 授权与凭证」重新授权后再试' });
+      }
+      throw err;
+    }
+  }),
+
+  // —— 站内播放本地已下载视频（支持 Range，供 <video> 拖动进度）——
+  route('GET', '/video/serve/:articleId', async ({ req, res, params, session, db }) => {
+    const id = requireId(params.articleId, '内容 ID');
+    const { rows } = await db.query(
+      `select video_file_path, video_file_name from video_materials where article_id = $1 and user_id = $2 limit 1`,
+      [id, session.userId],
+    );
+    const row = rows[0] as unknown as { video_file_path: string | null; video_file_name: string | null } | undefined;
+    const filePath = row?.video_file_path ?? null;
+    if (!filePath || !existsSync(filePath)) throw new NotFoundError('视频文件不存在，请先下载');
+    await streamLocalVideo(req, res, filePath, row?.video_file_name ?? null);
+  }),
+
+  // —— 产品计划（商业决策 MVP 规划）——
+  // 注意：/product-plans/stats|scan|generate 须先于 /product-plans/:id 注册（:id 会命中单段路径）。
+  route('GET', '/product-plans', async ({ res, query, session, db }) => {
+    const statusParam = query.get('status')?.trim() || undefined
+    if (statusParam && !isProductPlanStatus(statusParam)) {
+      throw new ValidationError('status 取值非法', { status: '仅支持 idea/validating/building/launched/archived' })
+    }
+    const sourceParam = query.get('source')?.trim() || undefined
+    if (sourceParam && !isProductPlanSourceType(sourceParam)) {
+      throw new ValidationError('source 取值非法', { source: '仅支持 manual/ai_inferred' })
+    }
+    const offsetRaw = Number(query.get('offset') ?? 0)
+    const result = await listProductPlans(db as never, {
+      userId: session.userId,
+      status: statusParam as ProductPlanStatus | undefined,
+      sourceType: sourceParam as ProductPlanSourceType | undefined,
+      keyword: query.get('keyword')?.trim() || undefined,
+      limit: parsePositiveInt(query.get('limit')) ?? 50,
+      offset: Number.isFinite(offsetRaw) && offsetRaw > 0 ? Math.floor(offsetRaw) : 0,
+    })
+    json(res, 200, { ok: true, data: result })
+  }),
+  route('GET', '/product-plans/stats', async ({ res, session, db }) => {
+    json(res, 200, { ok: true, data: await getProductPlanStats(db as never, session.userId) })
+  }),
+  route('POST', '/product-plans', async ({ req, res, session, db }) => {
+    const body = await readJsonBody(req)
+    const rawIdea = typeof body.rawIdea === 'string' ? body.rawIdea.trim() : ''
+    if (!rawIdea) throw new ValidationError('请求参数非法', { rawIdea: '想法内容不能为空' })
+    if (rawIdea.length > 20000) throw new ValidationError('请求参数非法', { rawIdea: '最长 20000 字符' })
+    const aiConfig = await resolveProductPlanAiConfig(db as never, session.userId)
+    const result = await createManualProductPlan(db as never, {
+      userId: session.userId,
+      rawIdea,
+      note: typeof body.note === 'string' ? body.note : null,
+      aiConfig,
+    })
+    json(res, 200, { ok: true, data: result })
+  }),
+  route('POST', '/product-plans/scan', async ({ req, res, session, db }) => {
+    const body = await readJsonBody(req)
+    const limit = typeof body.limit === 'number' && Number.isFinite(body.limit) ? Math.floor(body.limit) : 10
+    const aiConfig = await resolveProductPlanAiConfig(db as never, session.userId)
+    const result = await scanProductPlanCandidates(db as never, {
+      userId: session.userId,
+      limit,
+      aiConfig,
+    })
+    json(res, 200, { ok: true, data: result })
+  }),
+  route('POST', '/product-plans/generate', async ({ req, res, session, db }) => {
+    const body = await readJsonBody(req)
+    const articleId = typeof body.articleId === 'string' || typeof body.articleId === 'number'
+      ? String(body.articleId)
+      : ''
+    if (!/^\d+$/.test(articleId)) {
+      throw new ValidationError('请求参数非法', { articleId: '必须为正整数' })
+    }
+    const aiConfig = await resolveProductPlanAiConfig(db as never, session.userId)
+    const result = await createProductPlanFromArticle(db as never, {
+      userId: session.userId,
+      articleId,
+      aiConfig,
+    })
+    if (!result) throw new NotFoundError('文章不存在或不属于当前用户')
+    json(res, 200, { ok: true, data: result })
+  }),
+  // 补齐/重跑流水线（source→transcript→analysis→remix）；body.force=true 全部重跑
+  route('POST', '/product-plans/:id/run', async ({ req, res, params, session, db }) => {
+    const body = await readJsonBody(req)
+    const aiConfig = await resolveProductPlanAiConfig(db as never, session.userId)
+    const result = await runProductPlanPipeline(db as never, {
+      userId: session.userId,
+      planId: requireId(params.id, '产品计划 ID'),
+      aiConfig,
+      force: body.force === true,
+    })
+    if (!result) throw new NotFoundError('产品计划不存在')
+    json(res, 200, { ok: true, data: result })
+  }),
+  route('GET', '/product-plans/:id', async ({ res, params, session, db }) => {
+    const plan = await getProductPlan(db as never, requireId(params.id, '产品计划 ID'), session.userId)
+    if (!plan) throw new NotFoundError('产品计划不存在')
+    json(res, 200, { ok: true, data: { plan } })
+  }),
+  route('PUT', '/product-plans/:id', async ({ req, res, params, session, db }) => {
+    const id = requireId(params.id, '产品计划 ID')
+    const body = await readJsonBody(req)
+    const patch: UpdateProductPlanPatch = {}
+    const textFields = [
+      'title', 'oneLiner', 'productDesc', 'targetUsers', 'approach',
+      'businessModel', 'risks', 'competitors', 'pricing', 'milestones', 'validationPlan',
+      'direction', 'remixIdeas',
+    ] as const
+    for (const field of textFields) {
+      const value = body[field]
+      if (typeof value === 'string') patch[field] = value
+    }
+    if (typeof body.status === 'string') {
+      if (!isProductPlanStatus(body.status)) {
+        throw new ValidationError('status 取值非法', { status: '仅支持 idea/validating/building/launched/archived' })
+      }
+      patch.status = body.status
+    }
+    const plan = await updateProductPlan(db as never, id, patch, session.userId)
+    if (!plan) throw new NotFoundError('产品计划不存在')
+    json(res, 200, { ok: true, data: { plan } })
+  }),
+  route('DELETE', '/product-plans/:id', async ({ res, params, session, db }) => {
+    const deleted = await deleteProductPlan(db as never, requireId(params.id, '产品计划 ID'), session.userId)
+    if (!deleted) throw new NotFoundError('产品计划不存在')
+    json(res, 200, { ok: true, data: { deleted: true } })
+  }),
+
+  // —— 媒体文件服务（上传的图片/视频）——
+  route('GET', '/media/*', async ({ res, params }) => {
+    const { resolveMediaPath } = await import('@/server/infra/storage/localFileStore');
+    const { createReadStream, stat } = await import('node:fs');
+    const { promisify } = await import('node:util');
+
+    const relPath = params['*'] ?? '';
+    if (!relPath || relPath.includes('..')) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: { code: 'not_found', message: '文件不存在' } }));
+      return;
+    }
+
+    const filePath = resolveMediaPath(`/s/app/media/${relPath}`);
+    if (!filePath) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: { code: 'not_found', message: '文件不存在' } }));
+      return;
+    }
+
+    try {
+      const stats = await promisify(stat)(filePath);
+      if (!stats.isFile()) throw new Error('not a file');
+
+      const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
+      const mimeMap: Record<string, string> = {
+        jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif',
+        webp: 'image/webp', svg: 'image/svg+xml',
+        mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
+      };
+      const contentType = mimeMap[ext] || 'application/octet-stream';
+
+      res.writeHead(200, {
+        'Content-Type': contentType,
+        'Content-Length': stats.size,
+        'Cache-Control': 'public, max-age=86400',
+      });
+      const stream = createReadStream(filePath);
+      stream.pipe(res);
+      stream.on('error', () => { res.destroy(); });
+    } catch {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: { code: 'not_found', message: '文件不存在' } }));
+    }
+  }),
 ]
 
 /** 错误 → 响应（镜像 Next.js 版 fail() 的信封与状态码）。 */
@@ -1153,7 +2061,11 @@ export function sendError(res: ServerResponse, err: unknown): void {
  * /s/api 业务路由总入口。返回 true 表示已处理；未命中返回 false（交给调用方 404）。
  * 所有业务路由要求 session + 数据库；鉴权失败 401、库未连接 503。
  */
+/** 模块级 deps 快照：handleBusinessApi 每次调用刷新，供服务面板路由读取注入项。 */
+let currentDeps: ApiDeps | null = null
+
 export async function handleBusinessApi(req: IncomingMessage, res: ServerResponse, deps: ApiDeps): Promise<boolean> {
+  currentDeps = deps
   const url = new URL(req.url ?? '/', 'http://localhost')
   const sub = url.pathname.replace(/^\/s\/api/, '') || '/'
   const method = ['GET', 'POST', 'PUT', 'DELETE'].includes(req.method ?? '')

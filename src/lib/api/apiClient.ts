@@ -63,10 +63,31 @@ export interface RequestApiOptions {
   redirectOnUnauthorized?: boolean;
 }
 
+/* ── 会话请求头注入（K4）──
+   DSH 桌面客户端把界面装在 `dsh-app://app` 下，主进程转发本地请求时会删掉页面自带的
+   cookie、并剥掉响应里的 set-cookie，所以插件自己的 cookie 会话在那种壳里立不住；
+   令牌只能走请求头（请求头原样透传）。这里开一个注入口，由宿主决定要不要带：
+   H5 宿主（src/h5/main.tsx）注入 `Authorization: Bearer <token>`；
+   Next.js 版不注入，行为完全不变。挂在 ky 实例上，一处覆盖全部数据请求。 */
+let authHeadersProvider: (() => Record<string, string> | null) | null = null;
+
+export function configureApiClientAuth(provider: (() => Record<string, string> | null) | null): void {
+  authHeadersProvider = provider;
+}
+
 const api = ky.create({
   timeout: 15_000,
   retry: 0,
   throwHttpErrors: false,
+  hooks: {
+    beforeRequest: [
+      (request) => {
+        const extra = authHeadersProvider?.();
+        if (!extra) return;
+        for (const [name, value] of Object.entries(extra)) request.headers.set(name, value);
+      },
+    ],
+  },
 });
 
 /* ── 宿主路径配置（K3：同一 apiClient 同时伺服 Next 版与 DSH 插件 H5 版）──
@@ -520,7 +541,8 @@ export async function resolveRssHubSourceUrl(url: string): Promise<RssHubSourceR
     const res = await api(endpoint.toString(), {
       method: 'GET',
       headers: { accept: 'application/json' },
-      timeout: 12_000,
+      // 抖音作品链接需用浏览器反推作者，耗时 5-10s，放宽到 30s
+      timeout: 30_000,
     });
 
     const json: unknown = await res.json().catch(() => null);
@@ -2248,6 +2270,63 @@ export async function getGovernanceStats(
   return requestApi('/api/governance/stats', undefined, options);
 }
 
+/** 视频素材 + 文案提取状态（内容详情用）。 */
+export interface ContentVideoDetail {
+  videoUrl: string | null;
+  videoTitle: string | null;
+  provider: string | null;
+  transcriptText: string | null;
+  transcriptSource: 'subtitle' | 'whisper' | null;
+  transcriptLanguage: string | null;
+  transcriptExtractedAt: string | null;
+  transcriptStatus: 'none' | 'extracting' | 'done' | 'failed';
+  transcriptError: string | null;
+  videoFilePath: string | null;
+  videoFileName: string | null;
+  videoFileSize: number | null;
+}
+
+/** 收藏/选题池条目详情：文章 + 收藏快照 + 视频素材。 */
+export interface ContentDetail {
+  id: string;
+  title: string | null;
+  summary: string | null;
+  sourceUrl: string | null;
+  origin: string | null;
+  publishedAt: string | null;
+  previewImageUrl: string | null;
+  directionKey: string | null;
+  directionReason: string | null;
+  qualityScore: number | null;
+  governanceStatus: string | null;
+  contentHtml: string | null;
+  clip: { rawContent: string; note: string | null; imageUrls: string[] } | null;
+  video: ContentVideoDetail | null;
+}
+
+export async function getContentDetail(
+  id: string,
+  options?: RequestApiOptions,
+): Promise<ContentDetail> {
+  return requestApi<ContentDetail>(`/api/contents/${encodeURIComponent(id)}`, undefined, options);
+}
+
+/** 触发/重试视频文案提取（后台跑，立即返回）。 */
+export async function requestVideoTranscript(
+  input: { articleId: string; url: string; videoTitle?: string; provider?: string },
+  options?: RequestApiOptions,
+): Promise<{ started: boolean }> {
+  return requestApi(
+    '/api/video/transcript',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    },
+    options,
+  );
+}
+
 export async function approveGovernanceItem(
   id: string,
   options?: RequestApiOptions,
@@ -2585,7 +2664,8 @@ export type NotificationKind =
   | 'pending_backlog'
   | 'pipeline_done'
   | 'redraft_done'
-  | 'system';
+  | 'system'
+  | 'product_plan';
 
 export interface NotificationItem {
   id: string;
@@ -2657,7 +2737,7 @@ export async function listDirections(
 
 /* ── 发布后表现追踪（P2d）── */
 
-export type PublishPlatform = 'bilibili' | 'douyin' | 'xhs' | 'wechat' | 'other';
+export type PublishPlatform = 'bilibili' | 'douyin' | 'xhs' | 'wechat' | 'channels' | 'kuaishou' | 'other';
 
 export interface PostMetricsSnapshot {
   id: string;
@@ -2775,9 +2855,10 @@ export async function deletePublishedPost(
 
 /* ── 平台授权中心（P2e-1b）── */
 
-export type AccountPlatform = 'wechat' | 'douyin' | 'xhs' | 'bilibili' | 'channels';
+export type AccountPlatform = 'wechat' | 'douyin' | 'xhs' | 'bilibili' | 'channels' | 'kuaishou' | 'weibo';
 export type AccountCredKind = 'app_secret' | 'cookie' | 'oauth';
 export type AccountStatus = 'active' | 'expired' | 'error';
+export type AccountPurpose = 'publish' | 'collect' | 'oauth';
 
 export interface PlatformAccount {
   id: string;
@@ -2785,9 +2866,11 @@ export interface PlatformAccount {
   platform: AccountPlatform;
   accountName: string;
   credKind: AccountCredKind;
+  purpose: AccountPurpose;
   /** 已脱敏凭据（形如 wxab****12ab），永不回显明文。 */
   credentialMasked: string;
   status: AccountStatus;
+  remark: string;
   expiresAt: string | null;
   lastVerifiedAt: string | null;
   metaJson: Record<string, unknown> | null;
@@ -2796,10 +2879,13 @@ export interface PlatformAccount {
 }
 
 export async function listPlatformAccounts(
-  input?: { platform?: AccountPlatform },
+  input?: { platform?: AccountPlatform; purpose?: AccountPurpose },
   options?: RequestApiOptions,
 ): Promise<{ items: PlatformAccount[] }> {
-  const suffix = input?.platform ? `?platform=${encodeURIComponent(input.platform)}` : '';
+  const params = new URLSearchParams();
+  if (input?.platform) params.set('platform', input.platform);
+  if (input?.purpose) params.set('purpose', input.purpose);
+  const suffix = params.size > 0 ? `?${params.toString()}` : '';
   return requestApi(`/api/platform-accounts${suffix}`, undefined, options);
 }
 
@@ -2808,6 +2894,7 @@ export async function createPlatformAccount(
     platform: AccountPlatform;
     accountName: string;
     credKind: AccountCredKind;
+    purpose?: AccountPurpose;
     credential: Record<string, unknown>;
     metaJson?: Record<string, unknown>;
   },
@@ -2850,7 +2937,7 @@ export async function verifyPlatformAccount(
 
 export type DouyinLoginSessionStatus = 'pending' | 'scanned' | 'confirmed' | 'expired';
 export type SauLoginSessionStatus = DouyinLoginSessionStatus;
-export type SauQrPlatform = 'douyin' | 'xhs';
+export type SauQrPlatform = 'douyin' | 'xhs' | 'channels' | 'kuaishou';
 
 export async function createSauLoginSession(
   platform: SauQrPlatform,
@@ -2956,6 +3043,45 @@ export function listSubscriptionFeeds(options?: RequestApiOptions): Promise<{ it
   return requestApi('/api/reader/feeds', undefined, options);
 }
 
+/* ── 服务面板（P2e-5）：调度器/外部进程状态与开关 ── */
+
+export interface ServicesStatus {
+  scheduler: { enabled: boolean; running: boolean };
+  trendRadar: { keeperEnabled: boolean; alive: boolean; pid: number | null };
+  sau: { keeperEnabled: boolean; online: boolean };
+}
+
+export function getServicesStatus(options?: RequestApiOptions): Promise<ServicesStatus> {
+  return requestApi('/api/services/status', undefined, options);
+}
+
+export function saveServicesConfig(
+  input: { schedulerEnabled?: boolean; trendRadarKeeper?: boolean; sauKeeper?: boolean },
+  options?: RequestApiOptions,
+): Promise<{ schedulerEnabled: boolean; trendRadarKeeper: boolean; sauKeeper: boolean }> {
+  return requestApi('/api/services/config', { method: 'POST', body: JSON.stringify(input) }, options);
+}
+
+export function restartTrendRadar(options?: RequestApiOptions): Promise<{ restarted: boolean; alive: boolean }> {
+  return requestApi('/api/services/trendradar/restart', { method: 'POST' }, options);
+}
+
+export function restartSauExecutor(options?: RequestApiOptions): Promise<{ restarting: boolean }> {
+  return requestApi('/api/services/sau/restart', { method: 'POST' }, options);
+}
+
+/** 手动触发一轮到期订阅源抓取（与调度器 tick 同一实现，不等周期）。 */
+export function refreshFeedsNow(options?: RequestApiOptions): Promise<{ feeds: number; inserted: number }> {
+  return requestApi('/api/feeds/refresh-now', { method: 'POST' }, options);
+}
+
+/** 手动同步 TrendRadar 当日热榜 SQLite（源头需 TrendRadar 本体已跑出当天数据）。 */
+export function syncTrendRadarNow(
+  options?: RequestApiOptions,
+): Promise<{ status: 'ok' | 'skipped_no_db'; dbPath: string; upserted: number; platforms: number }> {
+  return requestApi('/api/trendradar/sync-now', { method: 'POST' }, options);
+}
+
 export function listSubscriptionWorks(input: {
   feedId?: string; type?: SubscriptionWorkFilter; cursor?: string; limit?: number;
 }, options?: RequestApiOptions): Promise<SubscriptionWorkPage> {
@@ -2997,4 +3123,237 @@ export function markSubscriptionWorkRead(id: string, options?: RequestApiOptions
 
 export function addSubscriptionCandidate(id: string, options?: RequestApiOptions): Promise<{ inCandidatePool: true }> {
   return requestApi(`/api/reader/items/${encodeURIComponent(id)}/candidate`, { method: 'POST' }, options);
+}
+
+/* ── 产品计划（商业决策 MVP 规划）── */
+
+export type ProductPlanStatus = 'idea' | 'validating' | 'building' | 'launched' | 'archived';
+export type ProductPlanSourceType = 'manual' | 'ai_inferred';
+
+export type ProductPlanStepKey = 'source' | 'transcript' | 'analysis' | 'remix';
+export type ProductPlanStepStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+
+export interface ProductPlanStep {
+  status: ProductPlanStepStatus;
+  at?: string;
+  note?: string;
+}
+
+export type ProductPlanPipeline = Record<ProductPlanStepKey, ProductPlanStep>;
+
+export interface ProductPlanItem {
+  id: string;
+  userId: string;
+  title: string;
+  oneLiner: string;
+  productDesc: string;
+  targetUsers: string;
+  approach: string;
+  businessModel: string;
+  risks: string;
+  competitors: string;
+  pricing: string;
+  milestones: string;
+  validationPlan: string;
+  direction: string;
+  remixIdeas: string;
+  pipeline: ProductPlanPipeline;
+  status: ProductPlanStatus;
+  sourceType: ProductPlanSourceType;
+  sourceArticleId: string | null;
+  sourceUrl: string | null;
+  sourceNote: string | null;
+  aiGenerated: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProductPlanStats {
+  total: number;
+  byStatus: Record<ProductPlanStatus, number>;
+  manual: number;
+  aiInferred: number;
+}
+
+export type ProductPlanPatch = Partial<
+  Pick<
+    ProductPlanItem,
+    | 'title'
+    | 'oneLiner'
+    | 'productDesc'
+    | 'targetUsers'
+    | 'approach'
+    | 'businessModel'
+    | 'risks'
+    | 'competitors'
+    | 'pricing'
+    | 'milestones'
+    | 'validationPlan'
+    | 'direction'
+    | 'remixIdeas'
+    | 'status'
+  >
+>;
+
+export async function listProductPlans(
+  input?: { status?: ProductPlanStatus; source?: ProductPlanSourceType; keyword?: string; limit?: number; offset?: number },
+  options?: RequestApiOptions,
+): Promise<{ items: ProductPlanItem[]; total: number }> {
+  const params = new URLSearchParams();
+  if (input?.status) params.set('status', input.status);
+  if (input?.source) params.set('source', input.source);
+  if (input?.keyword) params.set('keyword', input.keyword);
+  if (typeof input?.limit === 'number') params.set('limit', String(input.limit));
+  if (typeof input?.offset === 'number') params.set('offset', String(input.offset));
+  const suffix = params.size > 0 ? `?${params.toString()}` : '';
+  return requestApi(`/api/product-plans${suffix}`, undefined, options);
+}
+
+export async function getProductPlanStats(options?: RequestApiOptions): Promise<ProductPlanStats> {
+  return requestApi('/api/product-plans/stats', undefined, options);
+}
+
+/** 人工口述想法 → 产品计划（AI 整理成 MVP 规划）。想法含已收录链接时自动挂真相源。 */
+export async function createProductPlan(
+  input: { rawIdea: string; note?: string | null },
+  options?: RequestApiOptions,
+): Promise<{ plan: ProductPlanItem; usedFallback: boolean; alreadyExists: boolean }> {
+  return requestApi(
+    '/api/product-plans',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    },
+    options,
+  );
+}
+
+export async function getProductPlan(
+  id: string,
+  options?: RequestApiOptions,
+): Promise<{ plan: ProductPlanItem }> {
+  return requestApi(`/api/product-plans/${encodeURIComponent(id)}`, undefined, options);
+}
+
+export async function updateProductPlan(
+  id: string,
+  patch: ProductPlanPatch,
+  options?: RequestApiOptions,
+): Promise<{ plan: ProductPlanItem }> {
+  return requestApi(
+    `/api/product-plans/${encodeURIComponent(id)}`,
+    {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch),
+    },
+    options,
+  );
+}
+
+export async function deleteProductPlan(
+  id: string,
+  options?: RequestApiOptions,
+): Promise<{ deleted: boolean }> {
+  return requestApi(`/api/product-plans/${encodeURIComponent(id)}`, { method: 'DELETE' }, options);
+}
+
+/** 从一篇文章（采集内容）推理产品计划；幂等。 */
+export async function generateProductPlanFromArticle(
+  articleId: string,
+  options?: RequestApiOptions,
+): Promise<{ plan: ProductPlanItem; usedFallback: boolean; alreadyExists: boolean }> {
+  return requestApi(
+    '/api/product-plans/generate',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ articleId }),
+    },
+    options,
+  );
+}
+
+/** 批量扫描「搞钱」方向内容，生成产品计划。 */
+export async function scanProductPlans(
+  input?: { limit?: number },
+  options?: RequestApiOptions,
+): Promise<{ scanned: number; created: number; usedFallback: number }> {
+  return requestApi(
+    '/api/product-plans/scan',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input ?? {}),
+    },
+    options,
+  );
+}
+
+/** 补齐 / 重跑产品计划流水线（source→transcript→analysis→remix）。 */
+export async function runProductPlanPipeline(
+  id: string,
+  input?: { force?: boolean },
+  options?: RequestApiOptions,
+): Promise<{ plan: ProductPlanItem; pipeline: ProductPlanPipeline }> {
+  return requestApi(
+    `/api/product-plans/${encodeURIComponent(id)}/run`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input ?? {}),
+    },
+    options,
+  );
+}
+
+/* ── 授权与凭证中心（按平台聚合发布授权 + 采集 Cookie）── */
+
+export type CredentialPurpose = 'publish' | 'collect' | 'oauth';
+
+export interface CredentialSlot {
+  purpose: CredentialPurpose;
+  label: string;
+  credKind: 'app_secret' | 'cookie' | 'oauth';
+  capabilities: string[];
+  configured: boolean;
+  masked: string;
+  status: 'active' | 'expired' | 'error';
+  accountName: string;
+  updatedAt: string | null;
+}
+
+export interface CredentialPlatformView {
+  platform: AccountPlatform;
+  name: string;
+  icon: string;
+  slots: CredentialSlot[];
+}
+
+export interface CredentialCenter {
+  platforms: CredentialPlatformView[];
+  totalConfigured: number;
+}
+
+export async function getCredentialCenter(options?: RequestApiOptions): Promise<CredentialCenter> {
+  return requestApi('/api/credential-center', undefined, options);
+}
+
+/* ── 收藏备注 / 想法（可编辑，参与生成稿件提示词）── */
+
+export async function updateArticleNote(
+  id: string,
+  input: { note?: string; title?: string },
+  options?: RequestApiOptions,
+): Promise<{ updated: boolean }> {
+  return requestApi(
+    `/api/articles/${encodeURIComponent(id)}/note`,
+    {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    },
+    options,
+  );
 }
