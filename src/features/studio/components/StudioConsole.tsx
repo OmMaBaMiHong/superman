@@ -51,6 +51,7 @@ const SECTIONS: Array<{ id: StudioSection; name: string }> = [
 ];
 
 const TOPIC_PAGE_SIZE = 24;
+const REVIEW_PAGE_SIZE = 30;
 const JOB_POLL_MS = 5_000;
 const SEARCH_DEBOUNCE_MS = 400;
 
@@ -94,6 +95,23 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
     } catch {
       // 忽略
     }
+  }, []);
+
+  // ── 审批列（看板第一列）：治理队列 candidate/pending ──
+  const [reviewItems, setReviewItems] = useState<GovernanceQueueItem[]>([]);
+  const [reviewTotal, setReviewTotal] = useState(0);
+  const [reviewPage, setReviewPage] = useState(1);
+  const [reviewLoadingMore, setReviewLoadingMore] = useState(false);
+
+  const loadReview = useCallback(async (page: number, append: boolean) => {
+    const result = await getGovernanceQueue({
+      statuses: ['candidate', 'pending'],
+      page,
+      pageSize: REVIEW_PAGE_SIZE,
+    });
+    setReviewTotal(result.total);
+    setReviewItems((current) => (append ? [...current, ...result.items] : result.items));
+    setReviewPage(page);
   }, []);
 
   // ── 流水线任务 ──
@@ -162,6 +180,11 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
     };
   }, [debouncedKeyword, loadTopics]);
 
+  // 审批列首屏加载
+  useEffect(() => {
+    void loadReview(1, false).catch(() => {});
+  }, [loadReview]);
+
   const loadJobs = useCallback(async (silent = true) => {
     if (!silent) setJobsLoading(true);
     try {
@@ -212,6 +235,18 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
       map.set(job.articleId, list);
     }
     return map;
+  }, [jobs]);
+
+  // 有失败任务且当前无活跃任务的选题（看板卡片标红提醒重试）
+  const failedArticleIds = useMemo(() => {
+    const failed = new Set<string>();
+    for (const job of jobs) {
+      if (job.status === 'failed') failed.add(job.articleId);
+    }
+    for (const job of jobs) {
+      if (job.status === 'queued' || job.status === 'running') failed.delete(job.articleId);
+    }
+    return failed;
   }, [jobs]);
 
   const handleConfirmPlatforms = useCallback(
@@ -416,7 +451,7 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
                   <div key={index} className="gov-card h-44 animate-pulse" aria-hidden="true" />
                 ))}
               </div>
-            ) : topics.length === 0 ? (
+            ) : topics.length === 0 && reviewItems.length === 0 ? (
               <div className="rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center">
                 <p className="text-sm font-medium text-foreground">
                   {debouncedKeyword ? '没有匹配的选题' : '选题池是空的'}
@@ -427,8 +462,28 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
               </div>
             ) : topicsView === 'kanban' ? (
               <TopicKanbanBoard
+                reviewItems={reviewItems}
+                reviewTotal={reviewTotal}
+                reviewLoadingMore={reviewLoadingMore}
+                hasMoreReview={reviewItems.length < reviewTotal}
+                onLoadMoreReview={() => {
+                  setReviewLoadingMore(true);
+                  void loadReview(reviewPage + 1, true)
+                    .catch(() => {})
+                    .finally(() => setReviewLoadingMore(false));
+                }}
                 topics={topics}
+                topicsTotal={topicsTotal}
+                topicsLoadingMore={topicsLoadingMore}
+                hasMoreTopics={hasMoreTopics}
+                onLoadMoreTopics={() => {
+                  setTopicsLoadingMore(true);
+                  void loadTopics(topicsPage + 1, true, debouncedKeyword)
+                    .catch(() => {})
+                    .finally(() => setTopicsLoadingMore(false));
+                }}
                 activeJobsByArticle={activeJobsByArticle}
+                failedArticleIds={failedArticleIds}
                 drafts={drafts}
                 publishedDraftIds={publishedDraftIds}
                 onGenerate={setPickerItem}
@@ -449,7 +504,8 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
               </div>
             )}
 
-            {hasMoreTopics && !topicsLoading ? (
+            {/* 网格视图保留底部加载更多；看板的分页在各列列尾 */}
+            {topicsView === 'grid' && hasMoreTopics && !topicsLoading ? (
               <div className="mt-5 flex justify-center">
                 <button
                   type="button"

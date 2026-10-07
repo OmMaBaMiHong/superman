@@ -14,10 +14,12 @@ interface TopicPoolCardProps {
   onGenerate: (item: GovernanceQueueItem) => void;
   /** 打开详情（查看正文/视频文案）。 */
   onOpenDetail: (item: GovernanceQueueItem) => void;
+  /** 可选警示行（如「上次生成失败，可重试」）。 */
+  footerNote?: string;
 }
 
 /** 选题卡：液态玻璃卡片 + 形态徽章 + 质量分 + 「生成稿件」。 */
-export default function TopicPoolCard({ item, activeJobs, onGenerate, onOpenDetail }: TopicPoolCardProps) {
+export default function TopicPoolCard({ item, activeJobs, onGenerate, onOpenDetail, footerNote }: TopicPoolCardProps) {
   const generating = activeJobs.length > 0;
 
   return (
@@ -61,6 +63,10 @@ export default function TopicPoolCard({ item, activeJobs, onGenerate, onOpenDeta
           {formatPublishedAt(item.publishedAt)}
         </time>
       </div>
+
+      {footerNote ? (
+        <p className="mt-2 text-[10.5px] font-medium text-error">⚠ {footerNote}</p>
+      ) : null}
 
       <div className="mt-3 flex items-center justify-between gap-2 border-t border-border/60 pt-3">
         <button

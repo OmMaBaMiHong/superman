@@ -47,7 +47,7 @@ export interface RoutesDeps {
   /** 调度器热切换（P2e-5 服务面板）：设置页开关即时生效，免重启。 */
   schedulerControl?: { isRunning(): boolean; setRunning(enabled: boolean): void }
   /** 中转站模型桥状态（health 上报用：路由预配 + 凭据关联）。 */
-  relayLlmState?: () => { provision: string; error: string | null; credentialLinked: boolean }
+  relayLlmState?: () => { provision: string; error: string | null; credentialLinked: boolean; settingsServiceSeen: boolean }
 
   /** 项目根（透传给业务 API 的 keeper 重启脚本用）。 */
   projectRoot?: string

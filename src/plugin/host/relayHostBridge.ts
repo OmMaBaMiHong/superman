@@ -29,6 +29,7 @@ export type RelayBridgeProvisionState = 'pending' | 'done' | 'failed' | 'unavail
 let provisionState: RelayBridgeProvisionState = 'pending'
 let provisionError: string | null = null
 let credentialLinked = false
+let settingsServiceSeen = false
 /** 最近一次预配进路由的地址：H5 侧重跑预配时只覆盖仍等于该值的字段。 */
 let lastProvisionedBaseURL: string | null = null
 
@@ -36,8 +37,9 @@ export function getRelayHostBridgeState(): {
   provision: RelayBridgeProvisionState
   error: string | null
   credentialLinked: boolean
+  settingsServiceSeen: boolean
 } {
-  return { provision: provisionState, error: provisionError, credentialLinked }
+  return { provision: provisionState, error: provisionError, credentialLinked, settingsServiceSeen }
 }
 
 /** cordis 插件上下文的最小投影（真实宿主 ctx 的运行时形状）。 */
@@ -67,7 +69,12 @@ export function registerRelayHostBridge(
 
   ctx.inject(['settings'], ((svc: unknown) => {
     settings = svc as SettingsLike
-    void provisionRelayRoute({ settings, getDb: deps.getDb, log: ctx.logger }).catch(() => undefined)
+    settingsServiceSeen = true
+    provisionRelayRoute({ settings, getDb: deps.getDb, log: ctx.logger }).catch((err) => {
+      provisionState = 'failed'
+      provisionError = err instanceof Error ? err.message : String(err)
+      ctx.logger?.warn?.(`[superman] 中转站预配流程异常（不影响其他功能）: ${provisionError}`)
+    })
   }) as never)
 
   ctx.inject(['credentials'], ((svc: unknown) => {
@@ -132,16 +139,26 @@ async function provisionRelayRoute(io: {
   provisionState = 'pending'
 
   // llm-pi-ai 命名空间要等宿主插件树装载完成：每 2s 轮询，最多约 60s。
+  // describe() 偶发抛错（服务初始化中）按"未就绪"继续轮询，不中断。
   let ns: { ns?: string; value?: unknown } | undefined
+  let lastDescribeError: unknown = null
   for (let attempt = 0; attempt < 30; attempt += 1) {
-    const list = typeof settings.describe === 'function' ? settings.describe() : []
-    ns = list.find((entry) => entry?.ns === 'llm-pi-ai')
-    if (ns) break
+    try {
+      const list = typeof settings.describe === 'function' ? settings.describe() : []
+      if (attempt === 0) {
+        log?.info?.(`[superman] settings 命名空间清单: ${list.map((e) => e?.ns).filter(Boolean).join(', ') || '(空)'}`)
+      }
+      ns = list.find((entry) => entry?.ns === 'llm-pi-ai')
+      if (ns) break
+    } catch (err) {
+      lastDescribeError = err
+    }
     await new Promise((resolve) => setTimeout(resolve, 2_000))
   }
   if (!ns || typeof settings.mutate !== 'function') {
     provisionState = 'unavailable'
-    log?.warn?.('[superman] 中转站预配跳过：宿主无 llm-pi-ai 配置面（不影响其他功能）')
+    const detail = lastDescribeError instanceof Error ? lastDescribeError.message : lastDescribeError
+    log?.warn?.(`[superman] 中转站预配跳过：宿主无 llm-pi-ai 配置面（不影响其他功能）${detail ? `；describe 最后一次报错: ${detail}` : ''}`)
     return
   }
 
