@@ -212,6 +212,7 @@ export default function TrendingConsole() {
   const [detailItem, setDetailItem] = useState<TrendRadarItem | null>(null);
   const [detail, setDetail] = useState<TrendRadarItemDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
 
   const railRef = useRef<HTMLDivElement>(null);
   const pillBarRef = useRef<HTMLDivElement>(null);
@@ -285,10 +286,18 @@ export default function TrendingConsole() {
     if (Date.now() < railDragSuppressUntilRef.current) return;
     setDetailItem(item);
     setDetail(null);
+    setDetailError(null);
     setDetailLoading(true);
     void getTrendRadarItemDetail(item.id, { notifyOnError: false })
-      .then(setDetail)
-      .catch(() => setDetail(null))
+      .then((result) => {
+        setDetail(result);
+        setDetailError(null);
+      })
+      .catch(() => {
+        // 失败不再静默挂骨架：弹窗内给出错误与重试
+        setDetail(null);
+        setDetailError('详情加载失败，请重试');
+      })
       .finally(() => setDetailLoading(false));
   }, []);
 
@@ -536,11 +545,23 @@ export default function TrendingConsole() {
         onClose={() => {
           setDetailItem(null);
           setDetail(null);
+          setDetailError(null);
         }}
         ariaLabel={detailItem ? `热点详情：${detailItem.title}` : '热点详情'}
       >
         {detailItem ? (
-          detailLoading || !detail ? (
+          detailError ? (
+            <div className="space-y-3 px-5 pb-10 pt-6 sm:px-7" role="alert">
+              <p className="text-sm font-medium text-foreground">{detailError}</p>
+              <button
+                type="button"
+                onClick={() => detailItem && openDetail(detailItem)}
+                className="inline-flex h-9 items-center rounded-full border border-border px-4 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:text-foreground"
+              >
+                重试
+              </button>
+            </div>
+          ) : detailLoading || !detail ? (
             <div className="space-y-3 px-5 pb-10 pt-2 sm:px-7" aria-busy="true">
               <div className="h-5 w-24 animate-pulse rounded-full bg-muted" />
               <div className="h-7 w-4/5 animate-pulse rounded-lg bg-muted" />

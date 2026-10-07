@@ -122,6 +122,7 @@ import {
 } from '@/core/notify/repository'
 import { notify } from '@/core/notify/service'
 import { listTrendRadarItemsByDate, type TrendRadarItemRow } from '@/core/trendradar/repository'
+import { getTrendRadarItem } from '@/server/domains/trendradar/repository'
 import { promoteTrendRadarItem } from '@/core/trendradar/promote'
 import { isRewritePlatform, type RewritePlatform } from '@/core/pipelines/rewriteProfiles'
 import { createRewriteJobs, retryPipelineJob } from '@/core/pipelines/services/pipelineService'
@@ -577,6 +578,13 @@ const ROUTES: RouteDef[] = [
         platforms: groups,
       },
     })
+  }),
+  // 热榜条目详情（行字段 + payload_json 全量）：详情 sheet 的数据源，与 Next 版同构
+  route('GET', '/trend-radar/items/:id', async ({ res, params, session, db }) => {
+    const id = requireId(params.id, 'id')
+    const item = await getTrendRadarItem(db as never, id, session.userId)
+    if (!item) throw new NotFoundError('热榜条目不存在或不属于当前用户')
+    json(res, 200, { ok: true, data: item })
   }),
   route('POST', '/trend-radar/items/:id/promote', async ({ res, params, session, db }) => {
     const id = requireId(params.id, 'id')

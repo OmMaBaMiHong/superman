@@ -1,6 +1,7 @@
 'use client';
 
-import { Brain, FolderOpen, Music2, Send } from 'lucide-react';
+import { Brain, Flame, FolderOpen, Music2, Send } from 'lucide-react';
+import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import {
   READER_PANE_ACTIVE_ITEM_CLASS_NAME,
@@ -48,6 +49,19 @@ export default function WorkbenchMenu({ activeTab, onSelectTab }: WorkbenchMenuP
           </button>
         );
       })}
+
+      {/* 热点选题：整页视图（/trending），非工作台内嵌 tab，以链接项并列在菜单尾部 */}
+      <Link
+        href="/trending"
+        className={cn(
+          'flex w-full items-center gap-2 rounded-xl border border-transparent px-3 py-2 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset dark:border-white/[0.03]',
+          'text-foreground hover:text-accent-foreground',
+          READER_PANE_HOVER_BACKGROUND_CLASS_NAME,
+        )}
+      >
+        <Flame aria-hidden="true" className="h-4 w-4 shrink-0" />
+        <span>热点</span>
+      </Link>
     </div>
   );
 }
