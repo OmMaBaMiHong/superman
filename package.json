@@ -51,6 +51,8 @@
     }
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@electric-sql/pglite-pgvector": "^0.0.9",
     "@extractus/article-extractor": "^9.0.1",
     "@mozilla/readability": "^0.6.0",
     "@radix-ui/react-alert-dialog": "^1.1.15",
@@ -85,9 +87,11 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-i18next": "^17.0.11",
+    "react-resizable-panels": "^2.1.9",
     "rss-parser": "^3.13.0",
     "rsshub": "workspace:*",
     "sanitize-html": "^2.17.1",
+    "sortablejs": "^1.15.7",
     "tailwind-merge": "^3.5.0",
     "tailwindcss-animate": "^1.0.7",
     "tsx": "^4.21.0",
@@ -110,6 +114,7 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@types/sanitize-html": "^2.16.0",
+    "@types/sortablejs": "^1.15.9",
     "@vitejs/plugin-react": "^6.1.1",
     "esbuild": "^0.28.2",
     "eslint": "^9.39.1",

@@ -24,6 +24,8 @@ import { runTrendRadarScheduleTick } from './servicesKeeper.js'
 import { registerSkills } from './skills.js'
 import { registerHostIdentityBridge, getHostIdentity } from './hostIdentity.js'
 import { registerRelayHostBridge, relayBridgeApi, getRelayHostBridgeState } from './relayHostBridge.js'
+import { createQueryableStorage, resolveStorageMode, type StorageMode } from './pgliteAdapter.js'
+import { createLocalQueueDriver, setQueueDriver } from '@/server/infra/queue/localDriver'
 import { findServicesConfig, saveServicesConfig, getServicesConfig } from '@/core/services/serviceConfig'
 import { getAuthSettings } from '@/server/domains/settings/repositories/settingsRepo'
 import { registerDshLlm } from '@/server/integrations/ai/dshLlmBridge'
@@ -34,6 +36,8 @@ export const inject: string[] = []
 
 export interface SupermanConfig extends PluginSchedulerConfig {
   databaseUrl?: string
+  /** 存储形态：pg（配置连接串，云端/自建）| pglite（零配置本地库）| 缺省 auto（有连接串用 pg，否则 pglite） */
+  storageMode?: string
   /** 心跳间隔（毫秒），缺省 60000；设为 0 关闭心跳（测试用）。 */
   heartbeatIntervalMs?: number
 }
@@ -86,14 +90,23 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
   let scheduler: { stop(): void } | null = null
   let schedulerRunning = false
 
-  const databaseUrl = resolveDatabaseUrl(config)
-  // core/infra 里的 pg-boss（pipeline 入队）等读 DATABASE_URL；与插件连接串对齐。
-  if (!process.env.DATABASE_URL) process.env.DATABASE_URL = databaseUrl
-
   const intervalMs = config.heartbeatIntervalMs ?? 60_000
-  const dbReady = createPgPool(databaseUrl)
-    .then(async (pool) => {
+  // 存储形态（Phase B）：pg（配置了连接串，云端/自建）| pglite（零配置开源形态，装完即用）
+  const storageMode: StorageMode = resolveStorageMode(config)
+  let storageSnapshot: { mode: string; detail: string } = { mode: storageMode, detail: 'init' }
+  const dbReady = createQueryableStorage(config, createPgPool)
+    .then(async ({ db: pool, mode, detail }) => {
       db = pool
+      storageSnapshot = { mode, detail }
+      if (mode === 'pg') {
+        // core/infra 里的 pg-boss（pipeline 入队）等读 DATABASE_URL；与插件连接串对齐
+        if (!process.env.DATABASE_URL) process.env.DATABASE_URL = resolveDatabaseUrl(config)
+      } else {
+        // pglite：pg-boss 需要真 PG 服务器，切本地队列驱动（流水线执行本就轮询 pipeline_jobs）
+        process.env.SUPERMAN_STORAGE = 'pglite'
+        setQueueDriver(createLocalQueueDriver(pool))
+      }
+      log(`存储: ${mode}（${detail}）`)
       const applied = await runMigrations(pool, loadMigrations(migrationsDir))
       if (applied.length > 0) log(`迁移已应用: ${applied.join(', ')}`)
 
@@ -192,6 +205,7 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
     apiList: BUSINESS_API_LIST,
     projectRoot: PROJECT_ROOT,
     relayLlmState: () => getRelayHostBridgeState(),
+    storageInfo: () => storageSnapshot,
   }
   registerRoutes(ctx, deps)
   registerTools(ctx, {

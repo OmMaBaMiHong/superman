@@ -31,7 +31,7 @@ await esbuild.build({
   target: 'node22',
   alias: { '@': join(root, 'src') },
   // 原生模块与需要在运行时按 node_modules 解析的包保持 external。
-  external: ['pg', 'pg-native', 'pg-cloudflare', 'better-sqlite3', 'jsdom', '@whisper-cpp-node/*', 'cloudflare:sockets', 'busboy', '@extractus/article-extractor', 'patchright', 'playwright', 'playwright-core', '@deepseek-ai/*'],
+  external: ['pg', 'pg-native', 'pg-cloudflare', 'better-sqlite3', 'jsdom', '@whisper-cpp-node/*', 'cloudflare:sockets', 'busboy', '@extractus/article-extractor', 'patchright', 'playwright', 'playwright-core', '@deepseek-ai/*', '@electric-sql/*'],
   // CJS 依赖（http2-wrapper 等）在 ESM 产物里动态 require node 内置模块；
   // 用 createRequire 兜底（esbuild 的已知限制）。
   banner: {

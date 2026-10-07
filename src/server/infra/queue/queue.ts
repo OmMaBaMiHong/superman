@@ -1,4 +1,5 @@
 import { startBoss } from '@/server/infra/queue/boss';
+import { getQueueDriver } from '@/server/infra/queue/localDriver';
 import type { PgBoss } from 'pg-boss';
 
 const ensuredQueues = new Set<string>();
@@ -33,6 +34,9 @@ export async function enqueueWithResult(
   data: object | null,
   options?: unknown,
 ): Promise<EnqueueResult> {
+  // 队列驱动可插拔（pglite 存储形态换本地驱动，见 localDriver.ts；缺省 pg-boss）
+  const override = getQueueDriver();
+  if (override) return override(name, data, options);
   const instance = await startBoss();
   await ensureQueue(instance, name);
   // pg-boss types differ between CJS/ESM builds; keep options loosely typed.

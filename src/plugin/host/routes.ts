@@ -48,6 +48,8 @@ export interface RoutesDeps {
   schedulerControl?: { isRunning(): boolean; setRunning(enabled: boolean): void }
   /** 中转站模型桥状态（health 上报用：路由预配 + 凭据关联）。 */
   relayLlmState?: () => { provision: string; error: string | null; credentialLinked: boolean; settingsServiceSeen: boolean }
+  /** 存储形态（health 上报用：pg / pglite + 连接串掩码或数据目录）。 */
+  storageInfo?: () => { mode: string; detail: string }
 
   /** 项目根（透传给业务 API 的 keeper 重启脚本用）。 */
   projectRoot?: string
@@ -167,6 +169,7 @@ export function createApiHandler(deps: RoutesDeps) {
           db: deps.db !== null,
           dshLlm: isDshLlmAvailable(),
           relayLlm: deps.relayLlmState?.() ?? null,
+          storage: deps.storageInfo?.() ?? null,
           apis: deps.apiList ?? [],
         })
       }
