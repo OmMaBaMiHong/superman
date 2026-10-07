@@ -586,6 +586,28 @@ const ROUTES: RouteDef[] = [
     if (!item) throw new NotFoundError('热榜条目不存在或不属于当前用户')
     json(res, 200, { ok: true, data: item })
   }),
+  // 热榜条目原文抓取（二创素材）：按条目 url 现抓正文，与剪藏同源（article-extractor）。
+  // TrendRadar 只聚合标题+链接，原文必须现抓；视频类条目由前端引导走原链接。
+  route('POST', '/trend-radar/items/:id/extract', async ({ req, res, params, session, db }) => {
+    const id = requireId(params.id, 'id')
+    const item = await getTrendRadarItem(db as never, id, session.userId)
+    if (!item) throw new NotFoundError('热榜条目不存在或不属于当前用户')
+    if (!/^https?:\/\//.test(item.url)) {
+      throw new ValidationError('该条目没有可抓取的原文链接', { url: '条目缺少 http(s) 链接' })
+    }
+    const { extract } = await import('@extractus/article-extractor')
+    let article: { title?: string; content?: string } | null = null
+    try {
+      article = await extract(item.url)
+    } catch {
+      article = null
+    }
+    if (!article?.content) {
+      throw new AppError('未能抓取到原文（源页面可能反爬或不是文章页）', 'extract_failed', 502)
+    }
+    const text = article.content.replace(/<[^>]+>/g, '').replace(/\n{3,}/g, '\n\n').trim().slice(0, 12_000)
+    json(res, 200, { ok: true, data: { title: article.title ?? null, text, url: item.url } })
+  }),
   route('POST', '/trend-radar/items/:id/promote', async ({ res, params, session, db }) => {
     const id = requireId(params.id, 'id')
     const result = await promoteTrendRadarItem(db as never, { id, userId: session.userId })

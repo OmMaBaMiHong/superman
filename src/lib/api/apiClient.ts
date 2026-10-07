@@ -2417,6 +2417,14 @@ export interface TrendRadarItemDetail extends TrendRadarItem {
   payload: Record<string, unknown>;
 }
 
+/** 热榜条目原文抓取（服务端按 url 现抓正文，二创素材）。 */
+export async function extractTrendRadarOriginal(
+  id: string,
+  options?: RequestApiOptions,
+): Promise<{ title: string | null; text: string; url: string }> {
+  return requestApi(`/api/trend-radar/items/${encodeURIComponent(id)}/extract`, { method: 'POST' }, options);
+}
+
 export interface TrendRadarPlatformGroup {
   platform: string;
   platformName: string;

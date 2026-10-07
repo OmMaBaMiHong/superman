@@ -10,6 +10,7 @@ import {
   RefreshCw,
   TrendingDown,
   TrendingUp,
+  Loader2,
 } from 'lucide-react';
 import {
   getTrendRadarItemDetail,
@@ -19,6 +20,7 @@ import {
   type TrendRadarItem,
   type TrendRadarItemDetail,
   type TrendRadarToday,
+  extractTrendRadarOriginal,
 } from '@/lib/api/apiClient';
 import { toast } from '@/features/toast/toast';
 import ContentTypeBadge from '@/components/ui/content-type-badge';
@@ -111,10 +113,33 @@ function TrendRadarDetailView({
 }) {
   const promoted = detail.promotedAt !== null;
   const isExternal = /^https?:\/\//.test(detail.url);
-  // payload 里排除已上提的字段，其余按序展示
-  const payloadEntries = Object.entries(detail.payload).filter(
-    ([key]) => key !== 'previousRank',
-  );
+
+  // 原文抓取（二创素材）：打开即自动抓，视频类条目引导走原链接/转选题后处理
+  const isVideo = detail.contentType === 'video';
+  const [original, setOriginal] = useState<{ title: string | null; text: string } | null>(null);
+  const [originalState, setOriginalState] = useState<'loading' | 'ready' | 'unavailable'>('loading');
+  useEffect(() => {
+    if (isVideo) {
+      setOriginalState('unavailable');
+      return undefined;
+    }
+    setOriginal(null);
+    setOriginalState('loading');
+    let cancelled = false;
+    void extractTrendRadarOriginal(detail.id, { notifyOnError: false })
+      .then((result) => {
+        if (cancelled) return;
+        setOriginal(result);
+        setOriginalState('ready');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setOriginalState('unavailable');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail.id, isVideo]);
 
   return (
     <div className="px-5 pb-6 pt-1 sm:px-7">
@@ -151,19 +176,28 @@ function TrendRadarDetailView({
         ) : null}
       </div>
 
-      {payloadEntries.length > 0 ? (
-        <dl className="mt-4 space-y-2 rounded-2xl border border-border/60 bg-secondary/60 px-4 py-3">
-          {payloadEntries.map(([key, value]) => (
-            <div key={key} className="flex items-start gap-3 text-[13px]">
-              <dt className="shrink-0 font-mono text-[11px] text-muted-foreground">{key}</dt>
-              <dd className="min-w-0 flex-1 break-all text-secondary-foreground">
-                {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-              </dd>
-            </div>
-          ))}
-        </dl>
+      {isVideo ? (
+        <div className="mt-4 rounded-2xl border border-border/60 bg-secondary/60 px-4 py-3 text-[13px] text-muted-foreground">
+          视频类条目：直接{isExternal ? <a href={detail.url} target="_blank" rel="noreferrer" className="mx-0.5 text-primary hover:opacity-80">打开原视频</a> : null}观看；
+          转为选题后可下载视频、提取文案再二创。
+        </div>
+      ) : originalState === 'loading' ? (
+        <div className="mt-4 flex items-center gap-2 rounded-2xl border border-border/60 bg-secondary/60 px-4 py-3 text-[13px] text-muted-foreground" aria-busy="true">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          正在抓取原文…
+        </div>
+      ) : originalState === 'ready' && original ? (
+        <div className="mt-4 rounded-2xl border border-border/60 bg-secondary/60 px-4 py-3">
+          <p className="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">原文</p>
+          <p className="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap text-[13px] leading-relaxed text-secondary-foreground">
+            {original.text}
+          </p>
+        </div>
       ) : (
-        <p className="mt-4 text-sm text-muted-foreground">该条目没有更多详情数据。</p>
+        <div className="mt-4 rounded-2xl border border-border/60 bg-secondary/60 px-4 py-3 text-[13px] text-muted-foreground">
+          未能自动抓取原文（源页面可能反爬或不是文章页），可{isExternal ? <a href={detail.url} target="_blank" rel="noreferrer" className="mx-0.5 text-primary hover:opacity-80">打开原链接</a> : null}查看；
+          转为选题后走全文管道补抓。
+        </div>
       )}
 
       <div className="sticky bottom-0 -mx-1 mt-5 flex items-center justify-end gap-2 border-t border-border/60 px-1 pb-1 pt-3">
