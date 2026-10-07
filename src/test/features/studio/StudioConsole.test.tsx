@@ -7,6 +7,7 @@ import {
   getDraftDetail,
   getGovernanceQueue,
   getGovernanceStats,
+  getStudioBoard,
   listDrafts,
   listPipelineJobs,
   listPublishedPosts,
@@ -160,6 +161,25 @@ describe('StudioConsole · 选题卡池', () => {
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: /创作中/ })).toHaveAttribute('aria-selected', 'true');
     });
+  });
+
+  it('看板水合：/studio/board 切片直接渲染（缓存首击，不触发逐片加载）', async () => {
+    // 黑屏回归：服务端切片曾包 {payload} 信封、客户端直读 items → undefined。
+    // 本用例锁定客户端按内层形状消费水合切片。
+    vi.mocked(getStudioBoard).mockResolvedValue({
+      source: 'cache',
+      slices: {
+        review: { items: [], total: 0 },
+        topics: { items: [makeTopic()], total: 1 },
+        drafts: { items: [] },
+        published: { items: [] },
+        jobs: { items: [] },
+      },
+    });
+    render(<StudioConsole />);
+    expect(await screen.findByText('DeepSeek Harness 首发')).toBeInTheDocument();
+    // 自清理：后续用例回到降级路径（getStudioBoard 未 mock 时走各自直接加载）
+    vi.mocked(getStudioBoard).mockReset();
   });
 
   it('搜索选题：关键词经 queue API 透传', async () => {

@@ -68,7 +68,7 @@ import { ENTITLEMENTS, requireEntitled, type Entitlement } from '@/core/relay/en
 import { listRelayModels } from '@/core/relay/client'
 import { relayBridgeApi } from './relayHostBridge.js'
 import { readBoardSlices, writeBoardSlices, boardCacheInfo } from './boardCache.js'
-import { buildStudioBoardSlices } from './studioBoard.js'
+import { buildStudioBoardSlices, pickBoardSlices, unwrapBoardSlices } from './studioBoard.js'
 import {
   getServicesConfig,
   getTrendRadarRunState,
@@ -355,7 +355,7 @@ const ROUTES: RouteDef[] = [
     if (!refresh) {
       const cached = readBoardSlices(sliceKeys)
       if (cached && sliceKeys.every((key) => cached[key])) {
-        json(res, 200, { ok: true, data: { source: 'cache', cache: boardCacheInfo(), slices: cached } })
+        json(res, 200, { ok: true, data: { source: 'cache', cache: boardCacheInfo(), slices: unwrapBoardSlices(cached, sliceKeys) } })
         return
       }
     }
@@ -363,7 +363,7 @@ const ROUTES: RouteDef[] = [
     writeBoardSlices(built)
     json(res, 200, {
       ok: true,
-      data: { source: 'db', cache: boardCacheInfo(), slices: Object.fromEntries(sliceKeys.map((key) => [key, { payload: built[key], fetchedAt: new Date().toISOString() }])) },
+      data: { source: 'db', cache: boardCacheInfo(), slices: pickBoardSlices(built, sliceKeys) },
     })
   }),
 

@@ -59,3 +59,19 @@ export async function buildStudioBoardSlices(db: unknown, userId: string): Promi
     jobs: { items: jobs.items },
   }
 }
+
+/** 模型片信封契约：客户端 applyBoardSlices 直接读内层（items/total），信封只在服务端存在。 */
+export type BoardSliceEnvelope = Record<string, unknown>
+
+/** 从 SQLite 缓存行（{payload, fetchedAt}）解出客户端契约的内层形状。 */
+export function unwrapBoardSlices(
+  cached: Record<string, { payload: unknown } | undefined>,
+  keys: readonly string[],
+): BoardSliceEnvelope {
+  return Object.fromEntries(keys.map((key) => [key, cached[key]?.payload]))
+}
+
+/** 从刚构建的读模型选出客户端契约的片（直接内层，不包信封）。 */
+export function pickBoardSlices(built: Record<string, unknown>, keys: readonly string[]): BoardSliceEnvelope {
+  return Object.fromEntries(keys.map((key) => [key, built[key]]))
+}

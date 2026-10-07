@@ -251,13 +251,14 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
     published: { items: Array<{ draftId: string }> };
     jobs: { items: PipelineJobItem[] };
   }) => {
-    setReviewItems(slices.review.items);
-    setReviewTotal(slices.review.total);
-    setTopics(slices.topics.items);
-    setTopicsTotal(slices.topics.total);
-    setDrafts(slices.drafts.items);
-    setPublishedDraftIds(new Set(slices.published.items.map((post) => post.draftId)));
-    setJobs(slices.jobs.items);
+    // 防御：任何一片缺失/形状漂移都落空数组，绝不让面板黑屏
+    setReviewItems(slices.review?.items ?? []);
+    setReviewTotal(slices.review?.total ?? 0);
+    setTopics(slices.topics?.items ?? []);
+    setTopicsTotal(slices.topics?.total ?? 0);
+    setDrafts(slices.drafts?.items ?? []);
+    setPublishedDraftIds(new Set((slices.published?.items ?? []).map((post) => post.draftId)));
+    setJobs(slices.jobs?.items ?? []);
     setTopicsLoading(false);
     setDraftsLoading(false);
     setJobsLoading(false);
