@@ -1,5 +1,6 @@
 'use client';
 
+import { withAccessToken } from '@/lib/sessionToken';
 import { useCallback, useEffect, useState } from 'react';
 import { getContentDetail, requestVideoTranscript, type ContentDetail } from '@/lib/api/apiClient';
 import { toast } from '@/features/toast/toast';
@@ -131,7 +132,7 @@ export default function ContentVideoDetail({
       className={className}
       title={title ?? detail?.title ?? effective.videoTitle ?? '视频'}
       provider={effective.provider}
-      streamUrl={streamUrl ?? (downloaded ? `/s/api/video/serve/${articleId}` : null)}
+      streamUrl={streamUrl ?? (downloaded ? withAccessToken(`/s/api/video/serve/${articleId}`) : null)}
       poster={detail?.previewImageUrl ?? null}
       canonicalUrl={detail?.sourceUrl ?? effective.videoUrl}
       transcriptText={effective.transcriptText}

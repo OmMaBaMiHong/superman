@@ -1,3 +1,4 @@
+import { withAccessToken } from '@/lib/sessionToken';
 import ky from 'ky';
 import type { FreeModelOption, FreeModelSettings } from '@/lib/ai/freeModelConfig';
 import type { SubscriptionFeed, SubscriptionWorkDetail, SubscriptionWorkFilter, SubscriptionWorkPage } from '@/types/subscriptionReader';
@@ -3174,7 +3175,8 @@ export function getSubscriptionWork(id: string, options?: RequestApiOptions): Pr
 }
 
 export function getSubscriptionVideoStreamUrl(id: string): string {
-  return toAbsoluteUrl(`/api/reader/items/${encodeURIComponent(id)}/video`);
+  // <video> 标签带不了 Authorization 头、DSH 壳里又没有 cookie：媒体流靠查询串令牌鉴权。
+  return withAccessToken(toAbsoluteUrl(`/api/reader/items/${encodeURIComponent(id)}/video`));
 }
 
 export function getAiModelSettings(): Promise<FreeModelSettings> {

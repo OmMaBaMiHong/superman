@@ -129,6 +129,20 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('DSH subscription reader · Post
     expect((await request('/reader/items/11/video', 'GET', {}, false)).status).toBe(401);
   });
 
+  it('lets <video> tag requests authenticate via ?access_token= (DSH 壳无 cookie、媒体标签无自定义头)', async () => {
+    // 无头无 cookie → 401；同一请求带合法会话令牌的查询串 → 通过鉴权（404 = 已进入业务层）
+    expect((await request('/reader/items/99/video', 'GET', {}, false)).status).toBe(401);
+    const token = /superman_session=([^;]+)/.exec(cookie)![1];
+    const unauth = Object.assign(Readable.from([]), {
+      method: 'GET', url: '/s/api/reader/items/99/video?access_token=' + encodeURIComponent(token), headers: {},
+    });
+    let status = 0; let body = '';
+    const res = { writeHead: (v: number) => { status = v; }, end: (v?: string | Buffer) => { body += v?.toString() ?? ''; } };
+    await handler(unauth as never, res as never);
+    expect(status).toBe(404);
+    expect(JSON.parse(body).error.message).toBe('作品不存在');
+  });
+
   it('adds a work to the existing topic pool idempotently, retaining it in reading and preserving used status', async () => {
     expect((await request('/reader/items/11/candidate', 'POST')).status).toBe(200);
     expect((await request('/reader/items/11/candidate', 'POST')).status).toBe(200);

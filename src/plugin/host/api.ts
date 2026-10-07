@@ -207,6 +207,16 @@ function route(method: RouteDef['method'], pattern: string, handler: RouteHandle
   return { method, pattern, handler, authMode, ...compile(pattern) }
 }
 
+/**
+ * 允许 ?access_token= 查询串鉴权的媒体流路由（白名单，勿扩大）：
+ * 这些 URL 由 <video> 标签直接发起，带不了 Authorization 头，
+ * 且 DSH 桌面壳里 cookie 会被主进程剥掉（见 host/auth.ts 头注）。
+ */
+const MEDIA_TOKEN_ROUTES = new Set<string>([
+  '/reader/items/:id/video',
+  '/video/serve/:articleId',
+])
+
 function parsePositiveInt(value: string | null): number | null {
   if (value === null) return null
   const n = Number(value)
@@ -2198,7 +2208,13 @@ export async function handleBusinessApi(req: IncomingMessage, res: ServerRespons
         // 回调的用户绑定由扫码会话表完成，此处只占位。
         session = { userId: '0', role: 'member', sessionVersion: 0, username: 'sau-callback' }
       } else {
-        const authenticated = await deps.auth.authenticate(req)
+        let authenticated = await deps.auth.authenticate(req)
+        // DSH 壳里 cookie 进不来、<video>/<img> 等媒体标签又带不了 Authorization 头：
+        // 媒体流路由允许 ?access_token= 携带会话令牌（webserver 仅本机回环伺服）。
+        if (!authenticated && MEDIA_TOKEN_ROUTES.has(def.pattern)) {
+          const mediaToken = url.searchParams.get('access_token')?.trim() ?? ''
+          if (mediaToken) authenticated = await deps.auth.authenticateToken(mediaToken)
+        }
         if (!authenticated) throw new UnauthorizedError('请先登录后再继续')
         session = authenticated
       }

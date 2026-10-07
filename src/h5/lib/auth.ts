@@ -14,32 +14,10 @@ export interface H5Session {
   username: string | null;
 }
 
-const TOKEN_STORAGE_KEY = 'superman.session.token';
+// 令牌存取的实现收敛在共享叶模块（媒体 URL 也要用）；这里按原形状再导出。
+import { readSessionToken } from '@/lib/sessionToken';
 
-/** localStorage 不可用时的兜底：至少让当前页面生命周期内可用。 */
-let memoryToken: string | null = null;
-
-/** 读取本地保存的会话令牌。 */
-export function readSessionToken(): string | null {
-  try {
-    const stored = window.localStorage.getItem(TOKEN_STORAGE_KEY);
-    if (stored !== null) return stored;
-  } catch {
-    // 隐私模式 / 自定义协议下可能抛错，走内存兜底
-  }
-  return memoryToken;
-}
-
-/** 写入/清除本地会话令牌；localStorage 不可用时退回内存。 */
-export function writeSessionToken(token: string | null): void {
-  memoryToken = token;
-  try {
-    if (token) window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
-    else window.localStorage.removeItem(TOKEN_STORAGE_KEY);
-  } catch {
-    // 忽略：上面已经写进内存
-  }
-}
+export { readSessionToken, writeSessionToken } from '@/lib/sessionToken';
 
 /** 给请求补上会话令牌头。 */
 export function withSessionAuth(init: RequestInit = {}): RequestInit {

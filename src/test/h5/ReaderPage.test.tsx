@@ -88,7 +88,8 @@ describe('DSH 订阅阅读', () => {
     render(<H5ReaderPage />);
     await openFeed();
     fireEvent.click(screen.getByTestId('reader-article-row'));
-    expect(await screen.findByLabelText('播放：第一篇文章')).toHaveAttribute('src', expect.stringContaining('/api/reader/items/11/video'));
+    // 统一视频详情面板（VideoDetailPanel）：<video> 以 testid 承载，src 指向宿主流路由
+    expect(await screen.findByTestId('video-detail-stream')).toHaveAttribute('src', expect.stringContaining('/api/reader/items/11/video'));
   });
 
   it('plays Douyin inside the reader and permits retry without opening another page', async () => {
@@ -96,13 +97,14 @@ describe('DSH 订阅阅读', () => {
     render(<H5ReaderPage />);
     await openFeed();
     fireEvent.click(screen.getByTestId('reader-article-row'));
-    const player = await screen.findByLabelText('播放：第一篇文章');
+    const player = await screen.findByTestId('video-detail-stream');
     expect(player).toHaveAttribute('controls');
     expect(player).not.toHaveAttribute('autoplay');
+    // 播放失败退化为面板内错误条 + 重试，不开新页不跳原站
     expect(screen.queryByText('在抖音打开')).not.toBeInTheDocument();
     fireEvent.error(player);
-    fireEvent.click(await screen.findByRole('button', { name: '重试播放' }));
-    expect(screen.getByLabelText('播放：第一篇文章')).not.toBe(player);
+    fireEvent.click(await screen.findByRole('button', { name: '重试' }));
+    expect(screen.getByTestId('video-detail-stream')).not.toBe(player);
   });
 
   it('announces arrivals without replacing the current list until requested', async () => {

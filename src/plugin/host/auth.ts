@@ -57,6 +57,8 @@ export interface Auth {
   mintToken(session: Session): string
   /** 从请求头（Bearer）或 cookie 解析并校验 session（含 users 表状态复核）；无效返回 null。 */
   authenticate(req: Pick<IncomingMessage, 'headers'>): Promise<Session | null>
+  /** 直接校验一枚令牌（媒体流路由的 ?access_token= 通道用，见 api.ts MEDIA_TOKEN_ROUTES）。 */
+  authenticateToken(token: string): Promise<Session | null>
   /** 种会话 cookie，并把同一枚令牌返回给调用方（供请求体回传给 dsh-app:// 壳用）。 */
   issueCookie(res: ServerResponse, session: Session): string
   clearCookie(res: ServerResponse): void
@@ -145,6 +147,28 @@ export function createAuth(options: AuthOptions): Auth {
     return session
   }
 
+  async function authenticateToken(token: string): Promise<Session | null> {
+    if (!token) return null
+
+    if (options.db) {
+      if (!options.secret.trim()) return null
+      const payload = verifySessionToken({ token, secret: options.secret, nowMs: now() })
+      if (!payload) return null
+      const user = await getUserById(options.db as never, payload.userId)
+      if (
+        !user
+        || user.status !== 'active'
+        || user.role !== payload.role
+        || user.sessionVersion !== payload.sessionVersion
+      ) {
+        return null
+      }
+      return { userId: user.id, role: user.role, sessionVersion: user.sessionVersion, username: user.username }
+    }
+
+    return devSessions.get(token) ?? null
+  }
+
   return {
     async login(username, password) {
       if (options.db) {
@@ -166,25 +190,9 @@ export function createAuth(options: AuthOptions): Auth {
     async authenticate(req) {
       const token = readRequestToken(req)
       if (!token) return null
-
-      if (options.db) {
-        if (!options.secret.trim()) return null
-        const payload = verifySessionToken({ token, secret: options.secret, nowMs: now() })
-        if (!payload) return null
-        const user = await getUserById(options.db as never, payload.userId)
-        if (
-          !user
-          || user.status !== 'active'
-          || user.role !== payload.role
-          || user.sessionVersion !== payload.sessionVersion
-        ) {
-          return null
-        }
-        return { userId: user.id, role: user.role, sessionVersion: user.sessionVersion, username: user.username }
-      }
-
-      return devSessions.get(token) ?? null
+      return authenticateToken(token)
     },
+    authenticateToken,
     mintToken(session) {
       return mintToken(session)
     },

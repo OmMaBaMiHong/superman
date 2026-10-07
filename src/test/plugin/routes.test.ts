@@ -77,6 +77,23 @@ describe('plugin/host/routes · /s/api', () => {
     expect(body.apis).toContain('GET /s/api/governance/queue');
   });
 
+  it('媒体流路由接受 ?access_token=（<video> 标签带不了头、DSH 壳无 cookie）', async () => {
+    const deps = makeDeps({ query: async () => ({ rows: [] }) });
+    const handler = createApiHandler(deps);
+    const session = (await deps.auth.login('admin', 'superman-dev'))!;
+    const token = deps.auth.issueCookie(makeRes() as never, session);
+
+    const anon = makeRes();
+    await handler(makeGet('/s/api/reader/items/9/video'), anon as never);
+    expect(anon.status).toBe(401);
+
+    // 查询串令牌通过鉴权进入业务层：空库 → 作品不存在 404（绝不是 401）
+    const withToken = makeRes();
+    await handler(makeGet(`/s/api/reader/items/9/video?access_token=${encodeURIComponent(token)}`), withToken as never);
+    expect(withToken.status).toBe(404);
+    expect(withToken.body).toContain('作品不存在');
+  });
+
   it('POST /s/api/auth/login 成功签发 cookie，错误口令 401', async () => {
     const deps = makeDeps();
     const handler = createApiHandler(deps);
