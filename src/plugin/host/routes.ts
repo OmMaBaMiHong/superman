@@ -46,6 +46,8 @@ export interface RoutesDeps {
   hostIdentity?: () => Promise<{ dshAccountId: string; displayName: string | null } | null>
   /** 调度器热切换（P2e-5 服务面板）：设置页开关即时生效，免重启。 */
   schedulerControl?: { isRunning(): boolean; setRunning(enabled: boolean): void }
+  /** 洗稿执行即踢：创建/重试任务后立刻扫 queued（入队即执行，免等兜底扫）。 */
+  pipelineKick?: () => void
   /** 中转站模型桥状态（health 上报用：路由预配 + 凭据关联）。 */
   relayLlmState?: () => { provision: string; error: string | null; credentialLinked: boolean; settingsServiceSeen: boolean }
   /** 存储形态（health 上报用：pg / pglite + 连接串掩码或数据目录）。 */

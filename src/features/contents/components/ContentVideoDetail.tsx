@@ -55,7 +55,7 @@ export default function ContentVideoDetail({
     if (detailProp || video?.transcriptStatus !== 'extracting') return undefined;
     const timer = window.setInterval(() => {
       void load(articleId).catch(() => undefined);
-    }, 5000);
+    }, 15_000);
     return () => window.clearInterval(timer);
   }, [articleId, detailProp, video?.transcriptStatus, load]);
 

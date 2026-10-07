@@ -53,6 +53,8 @@ export interface PluginSchedulerConfig {
 
 export interface SchedulerHandle {
   stop(): void
+  /** 立即扫一遍 queued 的洗稿任务（入队/重试后由路由踢一次，免等兜底扫）。 */
+  kickPipeline(): void
 }
 
 interface Logger {
@@ -62,7 +64,8 @@ interface Logger {
 
 const TRENDRADAR_INTERVAL = 30 * 60_000
 const FEED_TICK_INTERVAL = 60_000
-const PIPELINE_POLL_INTERVAL = 15_000
+/** 兜底扫：入队/重试即时踢执行器，此周期只兜极小概率的漏网（进程重启间隙等）。 */
+const PIPELINE_POLL_INTERVAL = 5 * 60_000
 const PUBLISH_TRACKING_INTERVAL = 30 * 60_000
 const COMMENT_INTEL_INTERVAL = 6 * 3600_000
 const KNOWLEDGE_BACKFILL_INTERVAL = 30 * 60_000
@@ -132,7 +135,7 @@ export function startPluginScheduler(
 ): SchedulerHandle {
   if (!isSchedulerEnabled(config)) {
     logger.log('调度器未开启（默认关闭以避免与 Next.js worker 双跑；schedulerEnabled=true 开启）')
-    return { stop: () => {} }
+    return { stop: () => {}, kickPipeline: () => {} }
   }
 
   const timers: ReturnType<typeof setInterval>[] = []
@@ -197,7 +200,7 @@ export function startPluginScheduler(
     }
   })
 
-  every('pipeline.rewrite', config.pipelinePollIntervalMs ?? PIPELINE_POLL_INTERVAL, async () => {
+  const pipelineSweep = async (): Promise<void> => {
     const { rows } = await pool.query(
       `SELECT j.id, j.user_id AS "userId", j.platform, a.title AS "articleTitle"
        FROM pipeline_jobs j
@@ -225,7 +228,10 @@ export function startPluginScheduler(
         link: succeeded ? '/studio?tab=drafts' : '/studio?tab=jobs',
       }).catch(() => {})
     }
-  })
+  }
+
+  // 兜底慢扫 + 入队即踢（kickPipeline 由路由在创建/重试后调用，执行零延迟）
+  every('pipeline.rewrite', config.pipelinePollIntervalMs ?? PIPELINE_POLL_INTERVAL, pipelineSweep)
 
   every('publishTracking.tick', config.publishTrackingIntervalMs ?? PUBLISH_TRACKING_INTERVAL, async () => {
     const users = await listUsers(pool as never)
@@ -297,10 +303,17 @@ export function startPluginScheduler(
     }
   })
 
-  logger.log('调度器已启动：trendradar.sync(30m) + feed.fetch(60s) + pipeline.rewrite(15s) + publishTracking.tick(30m) + commentIntel.tick(6h) + knowledge.backfill(30m) + productPlan.scan(12h)')
+  logger.log('调度器已启动：trendradar.sync(30m) + feed.fetch(60s) + pipeline.rewrite(入队即踢+5m兜底) + publishTracking.tick(30m) + commentIntel.tick(6h) + knowledge.backfill(30m) + productPlan.scan(12h)')
   return {
     stop: () => {
       for (const timer of timers) clearInterval(timer)
+    },
+    kickPipeline: () => {
+      if (inFlight.has('pipeline.rewrite')) return
+      inFlight.add('pipeline.rewrite')
+      void pipelineSweep()
+        .catch((error) => logger.warn(`[superman] 调度 pipeline.rewrite 失败: ${error instanceof Error ? error.message : String(error)}`))
+        .finally(() => inFlight.delete('pipeline.rewrite'))
     },
   }
 }

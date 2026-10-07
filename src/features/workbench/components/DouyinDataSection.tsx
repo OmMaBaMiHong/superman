@@ -400,8 +400,15 @@ export default function DouyinDataSection() {
       } catch { /* 静默 */ }
     };
     void check();
-    const timer = setInterval(check, 10_000);
-    return () => { alive = false; clearInterval(timer); };
+    // 桥状态只在实际回看面板时刷新（可见性事件），不做定时轮询
+    const onVisible = () => {
+      if (!document.hidden) void check();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      alive = false;
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   const totalPages = Math.max(1, Math.ceil(selectedCommentTotal / 50));

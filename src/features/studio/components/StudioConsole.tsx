@@ -56,7 +56,6 @@ const SECTIONS: Array<{ id: StudioSection; name: string }> = [
 
 const GOV_PAGE_SIZE = 100; // 后端单页封顶 100：全量加载按 100 静默翻完，不暴露分页 UI
 const LIST_RENDER_CAP = 200; // 列表单次渲染封顶：数千条一次 mount 会冻结面板
-const JOB_POLL_MS = 5_000;
 const SEARCH_DEBOUNCE_MS = 400;
 
 // tab ↔ 看板列 的对应关系（产品计划/表现不是内容流转阶段，没有列）
@@ -313,11 +312,18 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
     }
   }, []);
 
-  // 任务 5s 轮询（进行中的任务需要实时性）
+  // 任务刷新事件驱动：挂载一次 + 面板重新可见/窗口聚焦时拉一次（无定时轮询）
   useEffect(() => {
     void loadJobs(false);
-    const timer = window.setInterval(() => void loadJobs(true), JOB_POLL_MS);
-    return () => window.clearInterval(timer);
+    const refresh = () => {
+      if (!document.hidden) void loadJobs(true);
+    };
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', refresh);
+    };
   }, [loadJobs]);
 
   const loadDrafts = useCallback(async () => {

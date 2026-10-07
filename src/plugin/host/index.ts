@@ -19,7 +19,7 @@ import { registerRoutes, type RoutesDeps } from './routes.js'
 import { BUSINESS_API_LIST } from './api.js'
 import { loadMigrations, runMigrations, startHeartbeat } from './scheduler.js'
 import { registerTools } from './tools.js'
-import { startPluginScheduler, fetchDueFeedsOnce, type PluginSchedulerConfig } from './jobs/scheduler.js'
+import { startPluginScheduler, fetchDueFeedsOnce, type PluginSchedulerConfig , type SchedulerHandle } from './jobs/scheduler.js'
 import { runTrendRadarScheduleTick } from './servicesKeeper.js'
 import { registerSkills } from './skills.js'
 import { registerHostIdentityBridge, getHostIdentity } from './hostIdentity.js'
@@ -87,7 +87,7 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
   let db: PgPoolLike | null = null
   let internalToken = ''
   let heartbeat: { stop(): void } | null = null
-  let scheduler: { stop(): void } | null = null
+  let scheduler: SchedulerHandle | null = null
   let schedulerRunning = false
 
   const intervalMs = config.heartbeatIntervalMs ?? 60_000
@@ -183,6 +183,7 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
       return internalToken
     },
     hostIdentity: () => getHostIdentity(),
+    pipelineKick: () => scheduler?.kickPipeline(),
     schedulerControl: {
       isRunning: () => schedulerRunning,
       /** 热切换（P2e-5）：设置页开关即时生效，免重启。 */
@@ -195,7 +196,7 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
               { ...config, schedulerEnabled: true, projectRoot: PROJECT_ROOT },
               { log, warn },
             )
-          : { stop: () => {} }
+          : { stop: () => {}, kickPipeline: () => {} }
         schedulerRunning = enabled
         log(`调度器已${enabled ? '开启' : '关闭'}（设置页热切换）`)
       },

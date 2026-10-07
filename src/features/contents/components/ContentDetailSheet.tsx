@@ -52,7 +52,7 @@ export default function ContentDetailSheet({ articleId, onClose, onGenerate }: C
     if (!articleId || detail?.video?.transcriptStatus !== 'extracting') return undefined;
     const timer = window.setInterval(() => {
       void load(articleId).catch(() => undefined);
-    }, 5000);
+    }, 15_000);
     return () => window.clearInterval(timer);
   }, [articleId, detail?.video?.transcriptStatus, load]);
 

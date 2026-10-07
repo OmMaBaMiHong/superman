@@ -156,6 +156,8 @@ import {
 } from '@/core/product-plans/repository'
 
 export interface ApiDeps {
+  /** 洗稿执行即踢（index 传入 scheduler.kickPipeline）。 */
+  pipelineKick?: () => void
   auth: Auth
   db: Queryable | null
   /** P2e-5 服务面板：调度器热切换句柄（index.ts 注入）。 */
@@ -171,6 +173,8 @@ interface RouteContext {
   query: URLSearchParams
   session: Session
   db: Queryable
+  /** 洗稿执行即踢（deps.pipelineKick 透传；测试/未注入时缺省跳过）。 */
+  pipelineKick?: () => void
 }
 
 type RouteHandler = (ctx: RouteContext) => Promise<void>
@@ -355,11 +359,11 @@ const ROUTES: RouteDef[] = [
         return
       }
     }
-    const slices = await buildStudioBoardSlices(db as never, session.userId)
-    writeBoardSlices(slices)
+    const built = (await buildStudioBoardSlices(db as never, session.userId)) as unknown as Record<string, unknown>
+    writeBoardSlices(built)
     json(res, 200, {
       ok: true,
-      data: { source: 'db', cache: boardCacheInfo(), slices: Object.fromEntries(sliceKeys.map((key) => [key, { payload: slices[key], fetchedAt: new Date().toISOString() }])) },
+      data: { source: 'db', cache: boardCacheInfo(), slices: Object.fromEntries(sliceKeys.map((key) => [key, { payload: built[key], fetchedAt: new Date().toISOString() }])) },
     })
   }),
 
@@ -585,7 +589,7 @@ const ROUTES: RouteDef[] = [
   }),
 
   // —— 洗稿流水线 ——
-  route('POST', '/pipelines/rewrite', async ({ req, res, session, db }) => {
+  route('POST', '/pipelines/rewrite', async ({ req, res, session, db, pipelineKick }) => {
     // 权益示范点（P2e-6）：洗稿是会员权益；未订阅时 403 membership_required 引导授权
     await requireEntitled(db as never, session.userId, 'rewrite.execute')
     const body = await readJsonBody(req)
@@ -607,6 +611,7 @@ const ROUTES: RouteDef[] = [
       platforms: platforms as RewritePlatform[],
       userId: session.userId,
     })
+    pipelineKick?.()
     json(res, 200, {
       ok: true,
       data: {
@@ -642,8 +647,9 @@ const ROUTES: RouteDef[] = [
     })
     json(res, 200, { ok: true, data: result })
   }),
-  route('POST', '/pipelines/jobs/:id/retry', async ({ res, params, session, db }) => {
+  route('POST', '/pipelines/jobs/:id/retry', async ({ res, params, session, db, pipelineKick }) => {
     const result = await retryPipelineJob(db as never, { id: requireId(params.id, '任务 ID'), userId: session.userId })
+    pipelineKick?.()
     json(res, 200, { ok: true, data: { job: result.job, queueJobId: result.queueJobId } })
   }),
 
@@ -2249,7 +2255,7 @@ export async function handleBusinessApi(req: IncomingMessage, res: ServerRespons
       def.keys.forEach((key, i) => {
         params[key] = decodeURIComponent(m[i + 1] ?? '')
       })
-      await def.handler({ req, res, params, query: url.searchParams, session, db: deps.db })
+      await def.handler({ req, res, params, query: url.searchParams, session, db: deps.db, pipelineKick: deps.pipelineKick })
     } catch (err) {
       sendError(res, err)
     }
