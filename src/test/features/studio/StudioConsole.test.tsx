@@ -27,6 +27,7 @@ vi.mock('@/lib/api/apiClient', async (importOriginal) => {
   return {
     ...original,
     getGovernanceQueue: vi.fn(),
+    getStudioBoard: vi.fn(),
     getGovernanceStats: vi.fn(),
     createRewriteJobs: vi.fn(),
     listPipelineJobs: vi.fn(),

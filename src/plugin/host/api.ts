@@ -67,6 +67,8 @@ import {
 import { ENTITLEMENTS, requireEntitled, type Entitlement } from '@/core/relay/entitlements'
 import { listRelayModels } from '@/core/relay/client'
 import { relayBridgeApi } from './relayHostBridge.js'
+import { readBoardSlices, writeBoardSlices, boardCacheInfo } from './boardCache.js'
+import { buildStudioBoardSlices } from './studioBoard.js'
 import {
   getServicesConfig,
   getTrendRadarRunState,
@@ -340,6 +342,27 @@ const ROUTES: RouteDef[] = [
     json(res, 200, { ok: true, data: await testFreeModel(body.freeModel) })
   }),
   // —— 治理 ——
+  // —— 创作看板读模型：本地 SQLite 缓存直出 + refresh=1 从源库按片重建（Phase A）——
+  // 面板要"一次查全量做分类"，首屏先读本机缓存立即可渲染；刷新按片整段重建，
+  // 用户的增删改（含手动删除）在下一次刷新天然反映，后续再演进行级水位增量。
+  route('GET', '/studio/board', async ({ res, query, session, db }) => {
+    const refresh = query.get('refresh') === '1'
+    const sliceKeys = ['review', 'topics', 'drafts', 'published', 'jobs']
+    if (!refresh) {
+      const cached = readBoardSlices(sliceKeys)
+      if (cached && sliceKeys.every((key) => cached[key])) {
+        json(res, 200, { ok: true, data: { source: 'cache', cache: boardCacheInfo(), slices: cached } })
+        return
+      }
+    }
+    const slices = await buildStudioBoardSlices(db as never, session.userId)
+    writeBoardSlices(slices)
+    json(res, 200, {
+      ok: true,
+      data: { source: 'db', cache: boardCacheInfo(), slices: Object.fromEntries(sliceKeys.map((key) => [key, { payload: slices[key], fetchedAt: new Date().toISOString() }])) },
+    })
+  }),
+
   route('GET', '/governance/queue', async ({ res, query, session, db }) => {
     const statusParam = query.get('status')
     let statuses: GovernanceStatus[] | undefined

@@ -3174,6 +3174,24 @@ export function getSubscriptionWork(id: string, options?: RequestApiOptions): Pr
   return requestApi(`/api/reader/items/${encodeURIComponent(id)}`, undefined, options);
 }
 
+export interface StudioBoardSlices {
+  review: { items: GovernanceQueueItem[]; total: number };
+  topics: { items: GovernanceQueueItem[]; total: number };
+  drafts: { items: DraftItem[] };
+  published: { items: Array<{ draftId: string }> };
+  jobs: { items: PipelineJobItem[] };
+}
+
+/** 创作看板读模型（服务端 SQLite 缓存直出；refresh=true 从源库整片重建并回写缓存）。 */
+export async function getStudioBoard(
+  options?: { refresh?: boolean },
+  requestOptions?: RequestApiOptions,
+): Promise<{ source: 'cache' | 'db'; slices: StudioBoardSlices }> {
+  const path = options?.refresh ? '/api/studio/board?refresh=1' : '/api/studio/board';
+  const res = await requestApi<{ source: 'cache' | 'db'; slices: StudioBoardSlices }>(path, undefined, requestOptions);
+  return { source: res.source, slices: res.slices };
+}
+
 export function getSubscriptionVideoStreamUrl(id: string): string {
   // <video> 标签带不了 Authorization 头、DSH 壳里又没有 cookie：媒体流靠查询串令牌鉴权。
   return withAccessToken(toAbsoluteUrl(`/api/reader/items/${encodeURIComponent(id)}/video`));

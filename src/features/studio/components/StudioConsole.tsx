@@ -10,6 +10,7 @@ import {
   exportDraftMarkdown,
   getDraftDetail,
   getGovernanceQueue,
+  getStudioBoard,
   listDrafts,
   listPipelineJobs,
   listPublishedPosts,
@@ -197,6 +198,7 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
   }, [keyword]);
 
   useEffect(() => {
+    if (!debouncedKeyword) return; // 首屏（空关键词）由看板水合覆盖；这里只管列表搜索
     let cancelled = false;
     setTopicsLoading(true);
     void loadTopics(debouncedKeyword)
@@ -209,10 +211,66 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
     };
   }, [debouncedKeyword, loadTopics]);
 
-  // 审批列首屏加载
+  // ── 看板水合（Phase A 本地缓存）：首屏读服务端 SQLite 缓存立即可渲染，
+  // 后台 refresh=1 从源库整片重建换入；增删改在下次刷新天然反映。──
+  const applyBoardSlices = useCallback((slices: {
+    review: { items: GovernanceQueueItem[]; total: number };
+    topics: { items: GovernanceQueueItem[]; total: number };
+    drafts: { items: DraftItem[] };
+    published: { items: Array<{ draftId: string }> };
+    jobs: { items: PipelineJobItem[] };
+  }) => {
+    setReviewItems(slices.review.items);
+    setReviewTotal(slices.review.total);
+    setTopics(slices.topics.items);
+    setDrafts(slices.drafts.items);
+    setPublishedDraftIds(new Set(slices.published.items.map((post) => post.draftId)));
+    setJobs(slices.jobs.items);
+    setTopicsLoading(false);
+    setDraftsLoading(false);
+    setJobsLoading(false);
+  }, []);
+
+  const boardHydratedRef = useRef(false);
   useEffect(() => {
-    void loadReview().catch(() => {});
-  }, [loadReview]);
+    if (boardHydratedRef.current) return;
+    boardHydratedRef.current = true;
+    let cancelled = false;
+    void (async () => {
+      // 第一击：缓存（首次 ever 无缓存时服务端会落库重建，耗时同旧路径，之后秒开）
+      let cached: Awaited<ReturnType<typeof getStudioBoard>> | null = null;
+      try {
+        cached = await getStudioBoard(undefined, { notifyOnError: false });
+      } catch {
+        cached = null;
+      }
+      if (cancelled || !cached?.slices) {
+        // 缓存通道不可用（旧内核/接口缺失）：退回各自的直接加载
+        setTopicsLoading(true);
+        void loadReview().catch(() => {});
+        void loadTopics(debouncedKeyword)
+          .catch(() => {})
+          .finally(() => {
+            if (!cancelled) setTopicsLoading(false);
+          });
+        void loadDrafts();
+        return;
+      }
+      applyBoardSlices(cached.slices);
+      // 第二击（后台）：源库整片重建换入
+      try {
+        const fresh = await getStudioBoard({ refresh: true }, { notifyOnError: false });
+        if (!cancelled) applyBoardSlices(fresh.slices);
+      } catch {
+        // 换入失败保留缓存内容
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // 挂载时执行一次；debouncedKeyword/loadTopics 仅初始兜底路径引用
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 审批列治理动作（与审批台同一套 API）：准奏→归档进选题池；驳回→rejected；重拟→退回重新聚合
   const refreshAfterReviewAction = useCallback(() => {
@@ -268,9 +326,7 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
     }
   }, []);
 
-  useEffect(() => {
-    void loadDrafts();
-  }, [loadDrafts]);
+  // 草稿箱首屏由看板水合覆盖；loadDrafts 保留给采纳/发布后的局部刷新
 
   // 选题「生成中」状态：活跃 job 按 articleId 归组
   const activeJobsByArticle = useMemo(() => {
