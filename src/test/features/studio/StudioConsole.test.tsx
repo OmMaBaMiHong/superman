@@ -157,7 +157,7 @@ describe('StudioConsole · 选题卡池', () => {
       );
     });
     await waitFor(() => {
-      expect(screen.getByRole('tab', { name: /流水线任务/ })).toHaveAttribute('aria-selected', 'true');
+      expect(screen.getByRole('tab', { name: /创作中/ })).toHaveAttribute('aria-selected', 'true');
     });
   });
 
@@ -187,7 +187,7 @@ describe('StudioConsole · 流水线任务', () => {
       total: 2,
     });
     render(<StudioConsole />);
-    fireEvent.click(await screen.findByRole('tab', { name: /流水线任务/ }));
+    fireEvent.click(await screen.findByRole('tab', { name: /创作中/ }));
 
     const runningRow = (await screen.findAllByTestId('pipeline-job'))[0];
     expect(runningRow).toHaveAttribute('data-status', 'running');

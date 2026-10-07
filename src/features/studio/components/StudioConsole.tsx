@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Kanban, LayoutGrid, PenLine, RefreshCw, Search } from 'lucide-react';
+import { ArrowLeft, Kanban, PenLine, RefreshCw, Rows3, Search } from 'lucide-react';
 import {
   acceptDraft,
+  approveGovernanceItem,
   createRewriteJobs,
   exportDraftMarkdown,
   getDraftDetail,
@@ -12,6 +13,8 @@ import {
   listDrafts,
   listPipelineJobs,
   listPublishedPosts,
+  redraftGovernanceItem,
+  rejectGovernanceItem,
   retryPipelineJob,
   type DraftDetail,
   type DraftItem,
@@ -44,16 +47,23 @@ type StudioSection = 'queue' | 'topics' | 'jobs' | 'drafts' | 'plans' | 'perform
 const SECTIONS: Array<{ id: StudioSection; name: string }> = [
   { id: 'queue', name: '审批' },
   { id: 'topics', name: '选题池' },
-  { id: 'jobs', name: '流水线任务' },
+  { id: 'jobs', name: '创作中' },
   { id: 'drafts', name: '草稿箱' },
   { id: 'plans', name: '产品计划' },
   { id: 'performance', name: '表现' },
 ];
 
-const TOPIC_PAGE_SIZE = 24;
-const REVIEW_PAGE_SIZE = 30;
+const GOV_PAGE_SIZE = 100; // 后端单页封顶 100：全量加载按 100 静默翻完，不暴露分页 UI
 const JOB_POLL_MS = 5_000;
 const SEARCH_DEBOUNCE_MS = 400;
+
+// tab ↔ 看板列 的对应关系（产品计划/表现不是内容流转阶段，没有列）
+const SECTION_TO_STAGE: Partial<Record<StudioSection, string>> = {
+  queue: 'review',
+  topics: 'pool',
+  jobs: 'generating',
+  drafts: 'drafts',
+};
 
 /** 触发浏览器下载（导出 Markdown）。 */
 function triggerDownload(fileName: string, content: string) {
@@ -66,52 +76,69 @@ function triggerDownload(fileName: string, content: string) {
   URL.revokeObjectURL(url);
 }
 
-/** 创作页主控台：审批 / 选题池 / 流水线任务 / 草稿箱 / 产品计划 / 表现 分区（审批台整体嵌入）。 */
+/** 创作页主控台：审批 / 选题池 / 流水线任务 / 草稿箱 / 产品计划 / 表现 分区（审批台整体嵌入）。
+ *  列表 / 看板是同一份数据的两种视图：列表按 tab 看单阶段，看板把各阶段并排成列，tab 与列双向联动。 */
 export default function StudioConsole({ initialSection }: { initialSection?: StudioSection }) {
   const [section, setSection] = useState<StudioSection>(initialSection ?? 'topics');
 
-  // ── 选题池（archived 文章）──
-  const [topics, setTopics] = useState<GovernanceQueueItem[]>([]);
-  const [topicsTotal, setTopicsTotal] = useState(0);
-  const [topicsPage, setTopicsPage] = useState(1);
-  const [topicsLoading, setTopicsLoading] = useState(true);
-  const [topicsLoadingMore, setTopicsLoadingMore] = useState(false);
-  const [keyword, setKeyword] = useState('');
-  const [debouncedKeyword, setDebouncedKeyword] = useState('');
-
-  // ── 选题池视图：看板(默认) / 网格，localStorage 记忆（SSR 安全：挂载后再读）──
-  const [topicsView, setTopicsView] = useState<'kanban' | 'grid'>('kanban');
+  // 视图模式：列表(默认，tab+各自列表) / 看板(同一份数据按阶段并排成列)。localStorage 记忆。
+  const [viewMode, setViewMode] = useState<'list' | 'kanban'>('list');
   useEffect(() => {
     try {
-      if (localStorage.getItem('studio_topics_view') === 'grid') setTopicsView('grid');
+      if (localStorage.getItem('studio_view_mode') === 'kanban') setViewMode('kanban');
     } catch {
-      // 隐私模式下 localStorage 不可用，保持默认看板
+      // localStorage 不可用时保持列表
     }
   }, []);
-  const switchTopicsView = useCallback((next: 'kanban' | 'grid') => {
-    setTopicsView(next);
+  const switchViewMode = useCallback((mode: 'list' | 'kanban') => {
+    setViewMode(mode);
     try {
-      localStorage.setItem('studio_topics_view', next);
+      localStorage.setItem('studio_view_mode', mode);
     } catch {
       // 忽略
     }
   }, []);
 
-  // ── 审批列（看板第一列）：治理队列 candidate/pending ──
+  // tab ↔ 看板列 的对应关系见模块级 SECTION_TO_STAGE
+  /** 选中一个分区：列表模式下就是普通切换；看板模式下滚到对应列，非流转阶段切回列表。 */
+  const activateSection = useCallback(
+    (id: StudioSection) => {
+      setSection(id);
+      if (viewMode === 'kanban') {
+        const stageId = SECTION_TO_STAGE[id];
+        if (stageId) {
+          document.getElementById(`ffw-kcol-${stageId}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+          return;
+        }
+        switchViewMode('list');
+      }
+    },
+    [viewMode, switchViewMode],
+  );
+
+  // ── 选题池（archived 文章，全量加载）──
+  const [topics, setTopics] = useState<GovernanceQueueItem[]>([]);
+  const [topicsLoading, setTopicsLoading] = useState(true);
+  const [keyword, setKeyword] = useState('');
+  const [debouncedKeyword, setDebouncedKeyword] = useState('');
+
+  // ── 审批列（看板第一列）：治理队列 candidate/pending（全量）──
   const [reviewItems, setReviewItems] = useState<GovernanceQueueItem[]>([]);
   const [reviewTotal, setReviewTotal] = useState(0);
-  const [reviewPage, setReviewPage] = useState(1);
-  const [reviewLoadingMore, setReviewLoadingMore] = useState(false);
 
-  const loadReview = useCallback(async (page: number, append: boolean) => {
-    const result = await getGovernanceQueue({
-      statuses: ['candidate', 'pending'],
-      page,
-      pageSize: REVIEW_PAGE_SIZE,
-    });
-    setReviewTotal(result.total);
-    setReviewItems((current) => (append ? [...current, ...result.items] : result.items));
-    setReviewPage(page);
+  const loadReview = useCallback(async () => {
+    const first = await getGovernanceQueue({ statuses: ['candidate', 'pending'], page: 1, pageSize: GOV_PAGE_SIZE });
+    let items = first.items;
+    if (items.length < first.total) {
+      const pageCount = Math.ceil(first.total / GOV_PAGE_SIZE);
+      const rest = await Promise.all(
+        Array.from({ length: pageCount - 1 }, (_, i) =>
+          getGovernanceQueue({ statuses: ['candidate', 'pending'], page: i + 2, pageSize: GOV_PAGE_SIZE })),
+      );
+      for (const part of rest) items = items.concat(part.items);
+    }
+    setReviewTotal(first.total);
+    setReviewItems(items);
   }, []);
 
   // ── 流水线任务 ──
@@ -141,20 +168,22 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
 
   const searchTimerRef = useRef<number | null>(null);
 
-  const loadTopics = useCallback(
-    async (page: number, append: boolean, search: string) => {
-      const result = await getGovernanceQueue({
-        statuses: ['archived'],
-        keyword: search || undefined,
-        page,
-        pageSize: TOPIC_PAGE_SIZE,
-      });
-      setTopicsTotal(result.total);
-      setTopics((current) => (append ? [...current, ...result.items] : result.items));
-      setTopicsPage(page);
-    },
-    [],
-  );
+  // 全量加载：不做「加载更多」分页，一次拉全、页面往下滚即可看全
+  const loadTopics = useCallback(async (search: string) => {
+    const keyword = search || undefined;
+    const first = await getGovernanceQueue({ statuses: ['archived'], keyword, page: 1, pageSize: GOV_PAGE_SIZE });
+    let items = first.items;
+    if (items.length < first.total) {
+      // 其余页并行拉：选题池可达数千条，串行翻页是看板首屏卡顿的主因
+      const pageCount = Math.ceil(first.total / GOV_PAGE_SIZE);
+      const rest = await Promise.all(
+        Array.from({ length: pageCount - 1 }, (_, i) =>
+          getGovernanceQueue({ statuses: ['archived'], keyword, page: i + 2, pageSize: GOV_PAGE_SIZE })),
+      );
+      for (const part of rest) items = items.concat(part.items);
+    }
+    setTopics(items);
+  }, []);
 
   // 搜索防抖
   useEffect(() => {
@@ -170,7 +199,7 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
   useEffect(() => {
     let cancelled = false;
     setTopicsLoading(true);
-    void loadTopics(1, false, debouncedKeyword)
+    void loadTopics(debouncedKeyword)
       .catch(() => {})
       .finally(() => {
         if (!cancelled) setTopicsLoading(false);
@@ -182,8 +211,26 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
 
   // 审批列首屏加载
   useEffect(() => {
-    void loadReview(1, false).catch(() => {});
+    void loadReview().catch(() => {});
   }, [loadReview]);
+
+  // 审批列治理动作（与审批台同一套 API）：准奏→归档进选题池；驳回→rejected；重拟→退回重新聚合
+  const refreshAfterReviewAction = useCallback(() => {
+    void loadReview().catch(() => {});
+    void loadTopics(debouncedKeyword).catch(() => {});
+  }, [loadReview, loadTopics, debouncedKeyword]);
+  const handleReviewApprove = useCallback(
+    (item: GovernanceQueueItem) => approveGovernanceItem(item.id).then(refreshAfterReviewAction),
+    [refreshAfterReviewAction],
+  );
+  const handleReviewReject = useCallback(
+    (item: GovernanceQueueItem, reason: string) => rejectGovernanceItem(item.id, { reason }).then(refreshAfterReviewAction),
+    [refreshAfterReviewAction],
+  );
+  const handleReviewRedraft = useCallback(
+    (item: GovernanceQueueItem, reason: string) => redraftGovernanceItem(item.id, { reason }).then(refreshAfterReviewAction),
+    [refreshAfterReviewAction],
+  );
 
   const loadJobs = useCallback(async (silent = true) => {
     if (!silent) setJobsLoading(true);
@@ -315,10 +362,11 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
       .finally(() => setExporting(false));
   }, [compareItem]);
 
-  const hasMoreTopics = topics.length < topicsTotal;
+
 
   return (
-    <div className="min-h-screen">
+    // studio-shell：DSH 面板内页面根在顶部标签条之下，高度基数在 globals.css 按宿主收窄
+    <div className="studio-shell flex min-h-dvh flex-col">
       {/* 顶部指挥条 */}
       <header className="glass-surface-strong sticky top-0 z-10 rounded-none border-x-0 border-t-0">
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
@@ -343,7 +391,7 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
             onClick={() => {
               void loadJobs(false);
               void loadDrafts();
-              void loadTopics(1, false, debouncedKeyword).catch(() => {});
+              void loadTopics(debouncedKeyword).catch(() => {});
             }}
             aria-label="刷新"
             className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:h-9 sm:w-9"
@@ -352,36 +400,108 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
           </button>
         </div>
 
-        {/* 分区切换 pill */}
-        <div className="mx-auto flex max-w-6xl gap-1.5 px-4 pb-2.5 sm:px-6">
-          {SECTIONS.map((entry) => (
+        {/* 分区切换 pill + 列表/看板视图切换（同一份数据的两种表现形式） */}
+        <div className="mx-auto flex max-w-6xl items-center gap-2 px-4 pb-2.5 sm:px-6">
+          <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">
+            {SECTIONS.map((entry) => (
+              <button
+                key={entry.id}
+                type="button"
+                role="tab"
+                aria-selected={section === entry.id}
+                onClick={() => activateSection(entry.id)}
+                className={cn(
+                  'flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-xs font-medium transition-colors duration-150',
+                  'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                  section === entry.id
+                    ? 'border-primary/40 bg-primary/10 text-primary'
+                    : 'border-border text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {entry.name}
+                {entry.id === 'jobs' && jobs.length > 0 ? (
+                  <span className="font-mono text-[10px] tabular-nums opacity-60">{jobs.length}</span>
+                ) : null}
+                {entry.id === 'drafts' && drafts.length > 0 ? (
+                  <span className="font-mono text-[10px] tabular-nums opacity-60">{drafts.length}</span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+          <div
+            role="group"
+            aria-label="视图切换"
+            className="flex flex-none items-center gap-1 rounded-full border border-border bg-card p-1"
+          >
             <button
-              key={entry.id}
               type="button"
-              role="tab"
-              aria-selected={section === entry.id}
-              onClick={() => setSection(entry.id)}
+              aria-label="列表视图"
+              aria-pressed={viewMode === 'list'}
+              onClick={() => switchViewMode('list')}
               className={cn(
-                'flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-xs font-medium transition-colors duration-150',
-                'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                section === entry.id
-                  ? 'border-primary/40 bg-primary/10 text-primary'
-                  : 'border-border text-muted-foreground hover:text-foreground',
+                'flex h-7 w-7 items-center justify-center rounded-full transition-colors duration-150',
+                viewMode === 'list' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground',
               )}
             >
-              {entry.name}
-              {entry.id === 'jobs' && jobs.length > 0 ? (
-                <span className="font-mono text-[10px] tabular-nums opacity-60">{jobs.length}</span>
-              ) : null}
-              {entry.id === 'drafts' && drafts.length > 0 ? (
-                <span className="font-mono text-[10px] tabular-nums opacity-60">{drafts.length}</span>
-              ) : null}
+              <Rows3 aria-hidden="true" className="h-4 w-4" />
             </button>
-          ))}
+            <button
+              type="button"
+              aria-label="看板视图"
+              aria-pressed={viewMode === 'kanban'}
+              onClick={() => switchViewMode('kanban')}
+              className={cn(
+                'flex h-7 w-7 items-center justify-center rounded-full transition-colors duration-150',
+                viewMode === 'kanban' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <Kanban aria-hidden="true" className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 pb-28 pt-5 sm:px-6 md:pb-10">
+      <main
+        className={cn(
+          'px-4 pt-5 sm:px-6',
+          viewMode === 'kanban'
+            ? // 看板：整页剩余高度全给轨道、宽度放开（列多时横向滑），底部与客户端探底
+              'flex min-h-0 flex-1 flex-col'
+            : 'mx-auto max-w-6xl pb-28 md:pb-10',
+        )}
+      >
+        {/* ── 看板模式：与列表同一份数据，各阶段并排成列，tab 与列双向联动 ── */}
+        {viewMode === 'kanban' ? (
+          <section aria-label="看板" className="flex min-h-0 flex-1 flex-col">
+            {topicsLoading && topics.length === 0 ? (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+                {Array.from({ length: 5 }, (_, index) => (
+                  <div key={index} className="gov-card h-96 animate-pulse" aria-hidden="true" />
+                ))}
+              </div>
+            ) : (
+              <TopicKanbanBoard
+                reviewItems={reviewItems}
+                reviewTotal={reviewTotal}
+                topics={topics}
+                activeJobsByArticle={activeJobsByArticle}
+                failedArticleIds={failedArticleIds}
+                drafts={drafts}
+                publishedDraftIds={publishedDraftIds}
+                activeSection={section}
+                onStageSelect={(stageSectionId) => activateSection(stageSectionId as StudioSection)}
+                onReviewApprove={handleReviewApprove}
+                onReviewReject={handleReviewReject}
+                onReviewRedraft={handleReviewRedraft}
+                onGenerate={setPickerItem}
+                onOpenDetail={setDetailItem}
+                onOpenDraft={openCompare}
+              />
+            )}
+          </section>
+        ) : (
+          <>
+
         {/* ── 审批（治理队列整体嵌入） ── */}
         {section === 'queue' ? (
           <section aria-label="审批">
@@ -398,51 +518,19 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
         {/* ── 选题卡池 ── */}
         {section === 'topics' ? (
           <section aria-label="选题池">
-            <div className="mb-4 flex items-center gap-2">
-              <div className="relative flex-1">
-                <Search
-                  aria-hidden="true"
-                  className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-                />
-                <input
-                  type="search"
-                  value={keyword}
-                  onChange={(event) => setKeyword(event.target.value)}
-                  placeholder="搜索选题（标题 / 摘要）…"
-                  aria-label="搜索选题"
-                  className="h-11 w-full rounded-full border border-border bg-card pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                />
-              </div>
-              <div
-                role="group"
-                aria-label="视图切换"
-                className="flex flex-none items-center gap-1 rounded-full border border-border bg-card p-1"
-              >
-                <button
-                  type="button"
-                  aria-label="看板视图"
-                  aria-pressed={topicsView === 'kanban'}
-                  onClick={() => switchTopicsView('kanban')}
-                  className={cn(
-                    'flex h-8 w-8 items-center justify-center rounded-full transition-colors duration-150',
-                    topicsView === 'kanban' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  <Kanban aria-hidden="true" className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  aria-label="网格视图"
-                  aria-pressed={topicsView === 'grid'}
-                  onClick={() => switchTopicsView('grid')}
-                  className={cn(
-                    'flex h-8 w-8 items-center justify-center rounded-full transition-colors duration-150',
-                    topicsView === 'grid' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  <LayoutGrid aria-hidden="true" className="h-4 w-4" />
-                </button>
-              </div>
+            <div className="relative mb-4">
+              <Search
+                aria-hidden="true"
+                className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+              />
+              <input
+                type="search"
+                value={keyword}
+                onChange={(event) => setKeyword(event.target.value)}
+                placeholder="搜索选题（标题 / 摘要）…"
+                aria-label="搜索选题"
+                className="h-11 w-full rounded-full border border-border bg-card pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
             </div>
 
             {topicsLoading ? (
@@ -451,7 +539,7 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
                   <div key={index} className="gov-card h-44 animate-pulse" aria-hidden="true" />
                 ))}
               </div>
-            ) : topics.length === 0 && reviewItems.length === 0 ? (
+            ) : topics.length === 0 ? (
               <div className="rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center">
                 <p className="text-sm font-medium text-foreground">
                   {debouncedKeyword ? '没有匹配的选题' : '选题池是空的'}
@@ -460,36 +548,6 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
                   {debouncedKeyword ? '换个关键词试试。' : '先去审批台准奏一些内容，归档后就能在这里改写。'}
                 </p>
               </div>
-            ) : topicsView === 'kanban' ? (
-              <TopicKanbanBoard
-                reviewItems={reviewItems}
-                reviewTotal={reviewTotal}
-                reviewLoadingMore={reviewLoadingMore}
-                hasMoreReview={reviewItems.length < reviewTotal}
-                onLoadMoreReview={() => {
-                  setReviewLoadingMore(true);
-                  void loadReview(reviewPage + 1, true)
-                    .catch(() => {})
-                    .finally(() => setReviewLoadingMore(false));
-                }}
-                topics={topics}
-                topicsTotal={topicsTotal}
-                topicsLoadingMore={topicsLoadingMore}
-                hasMoreTopics={hasMoreTopics}
-                onLoadMoreTopics={() => {
-                  setTopicsLoadingMore(true);
-                  void loadTopics(topicsPage + 1, true, debouncedKeyword)
-                    .catch(() => {})
-                    .finally(() => setTopicsLoadingMore(false));
-                }}
-                activeJobsByArticle={activeJobsByArticle}
-                failedArticleIds={failedArticleIds}
-                drafts={drafts}
-                publishedDraftIds={publishedDraftIds}
-                onGenerate={setPickerItem}
-                onOpenDetail={setDetailItem}
-                onOpenDraft={openCompare}
-              />
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {topics.map((item) => (
@@ -503,25 +561,6 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
                 ))}
               </div>
             )}
-
-            {/* 网格视图保留底部加载更多；看板的分页在各列列尾 */}
-            {topicsView === 'grid' && hasMoreTopics && !topicsLoading ? (
-              <div className="mt-5 flex justify-center">
-                <button
-                  type="button"
-                  disabled={topicsLoadingMore}
-                  onClick={() => {
-                    setTopicsLoadingMore(true);
-                    void loadTopics(topicsPage + 1, true, debouncedKeyword)
-                      .catch(() => {})
-                      .finally(() => setTopicsLoadingMore(false));
-                  }}
-                  className="h-11 rounded-full border border-border px-6 text-xs text-muted-foreground transition-colors duration-150 hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
-                >
-                  {topicsLoadingMore ? '加载中…' : `加载更多（${topics.length}/${topicsTotal}）`}
-                </button>
-              </div>
-            ) : null}
           </section>
         ) : null}
 
@@ -631,6 +670,8 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
             )}
           </section>
         ) : null}
+          </>
+        )}
       </main>
 
       {/* 平台多选 sheet */}

@@ -500,6 +500,59 @@ html[data-host='dsh'] .gov-card {
   min-width: 0;
 }
 
+/* 页面根带 .studio-shell 时：整页高度基数扣掉面板内顶部标签条（3rem），
+ * 页内 flex-1 内容（如创作看板轨道）才能与客户端底部探底不留白 */
+html[data-host='dsh'] .studio-shell {
+  min-height: calc(100dvh - var(--superman-panel-strip));
+}
+
 html[data-host='dsh'] .prose {
   overflow-wrap: anywhere;
+}
+
+/* 看板拖拽（SortableJS chosenClass 只接受单 token，视觉用自定义类） */
+.ffw-drag-chosen {
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 45%, transparent);
+  outline-offset: -2px;
+  border-radius: 0.75rem;
+}
+
+/* 看板横向轨道：隐藏滚动条（保留滚轮/触控板横向滑动） */
+.kanban-track {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.kanban-track::-webkit-scrollbar {
+  display: none;
+  height: 0;
+}
+
+/* 阅读页分栏拖拽手柄：平时 1px 分隔线，悬停/拖拽变宽并显主色 */
+.reader-divider {
+  position: relative;
+  width: 6px;
+  flex: none;
+  cursor: col-resize;
+  background: transparent;
+  transition: background-color 0.15s ease;
+}
+.reader-divider::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: color-mix(in srgb, var(--color-border) 60%, transparent);
+  transition: background-color 0.15s ease;
+}
+.reader-divider:hover,
+.reader-divider[data-resize-handle-state='drag'],
+.reader-divider[data-resize-handle-active='pointer'] {
+  background: color-mix(in srgb, var(--color-primary) 18%, transparent);
+}
+.reader-divider:hover::after,
+.reader-divider[data-resize-handle-state='drag']::after,
+.reader-divider[data-resize-handle-active='pointer']::after {
+  width: 3px;
+  background: var(--color-primary);
 }
