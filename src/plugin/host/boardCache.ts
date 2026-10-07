@@ -36,10 +36,12 @@ export function boardCacheFile(): string {
 }
 
 let cachedDb: SqliteDatabaseSync | null = null
-let probeDone = false
+let openedPath: string | null = null
+let sqliteUnavailable = false
 
 /** node:sqlite 解析（createRequire 对内置模块不依赖锚文件存在）；不可用返回 null。 */
 function resolveSqlite(): (new (path: string) => SqliteDatabaseSync) | null {
+  if (sqliteUnavailable) return null
   try {
     // node:sqlite 在 Node ≥22.5 需 flag、≥23.4 稳定；DSH 宿主（Electron 44 系）自带新内核
     const mod = createRequire(pathToFileURL(join(homedir(), '.dsh', 'package.json')))('node:sqlite') as {
@@ -47,14 +49,16 @@ function resolveSqlite(): (new (path: string) => SqliteDatabaseSync) | null {
     }
     return mod.DatabaseSync ?? null
   } catch {
+    sqliteUnavailable = true
     return null
   }
 }
 
+/** 按当前配置路径取库实例；路径变化（测试/配置热切）自动换库，失败路径不反复重试。 */
 function db(): SqliteDatabaseSync | null {
-  if (probeDone) return cachedDb
-  probeDone = true
   const path = boardCacheFile()
+  if (cachedDb && openedPath === path) return cachedDb
+  if (sqliteUnavailable) return null
   try {
     mkdirSync(dirname(path), { recursive: true })
     const DatabaseSync = resolveSqlite()
@@ -69,6 +73,7 @@ function db(): SqliteDatabaseSync | null {
       );
     `)
     cachedDb = instance
+    openedPath = path
     return cachedDb
   } catch {
     return null
