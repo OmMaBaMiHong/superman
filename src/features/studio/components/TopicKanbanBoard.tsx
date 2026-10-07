@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, RotateCcw, X } from 'lucide-react';
 import Sortable from 'sortablejs';
 import type { DraftItem, DraftStatus, GovernanceQueueItem, PipelineJobItem } from '@/lib/api/apiClient';
@@ -66,6 +66,9 @@ interface BoardColumn {
 /** 单列渲染封顶：看板是工作面不是全量浏览，数千条只挂最近一段，条数徽章仍显真实总数。 */
 const COLUMN_RENDER_CAP = 120;
 
+/** 池列无任务：常量空数组，保证 TopicPoolCard memo 命中（行内 [] 每次渲染都是新引用）。 */
+const EMPTY_ACTIVE_JOBS: import('@/lib/api/apiClient').PipelineJobItem[] = [];
+
 /** 全局状态流转：审批 → 选题池 → 生成中 → 草稿箱 → 已发布。 */
 const COLUMNS: BoardColumn[] = [
   { id: 'review', sectionId: 'queue', name: '审批', hint: '审批台准奏后进入选题池', dotClass: 'bg-warning' },
@@ -76,7 +79,7 @@ const COLUMNS: BoardColumn[] = [
 ];
 
 /** 审批卡：与审批台同一套治理动作（准奏/驳回/重拟），驳回/重拟需填理由；不做「生成稿件」。 */
-function ReviewCard({ item, onApprove, onReject, onRedraft }: {
+const ReviewCard = memo(function ReviewCard({ item, onApprove, onReject, onRedraft }: {
   item: GovernanceQueueItem;
   onApprove: (item: GovernanceQueueItem) => Promise<void> | void;
   onReject: (item: GovernanceQueueItem, reason: string) => Promise<void> | void;
@@ -218,9 +221,7 @@ function ReviewCard({ item, onApprove, onReject, onRedraft }: {
       ) : null}
     </article>
   );
-}
-
-/** 草稿卡：平台徽章 + 状态徽章 + 相似度/原创度，点击进对比视图。 */
+});
 function DraftBoardCard({ draft, published, onOpenDraft }: {
   draft: DraftItem;
   published: boolean;
@@ -459,7 +460,7 @@ export default function TopicKanbanBoard({
                   <div key={item.id} data-card-id={item.id} data-stage="pool" className="cursor-grab active:cursor-grabbing">
                     <TopicPoolCard
                       item={item}
-                      activeJobs={[]}
+                      activeJobs={EMPTY_ACTIVE_JOBS}
                       onGenerate={onGenerate}
                       onOpenDetail={onOpenDetail}
                       footerNote={failedArticleIds.has(item.id) ? '上次生成失败，可重试' : undefined}

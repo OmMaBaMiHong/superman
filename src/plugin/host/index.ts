@@ -139,8 +139,7 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
       log(schedulerEnabled ? '插件调度器已开启（采集/热点同步/评论/洗稿/追踪 + 服务 keeper）' : '插件调度器未开启（设置页可热切换）')
     })
     .catch((error: unknown) => {
-      const redacted = databaseUrl.replace(/\/\/[^/@]*@/, '//***@')
-      warn(`[superman] Postgres 不可用（${redacted}）：${error instanceof Error ? error.message : String(error)}；路由与工具继续可用（dev 鉴权），心跳/调度关闭`)
+      warn(`[superman] 存储 ${storageMode} 初始化失败：${error instanceof Error ? error.message : String(error)}；路由与工具继续可用（dev 鉴权），心跳/调度关闭`)
     })
 
   // TrendRadar 每日定时任务：独立于全局调度器开关（schedulerEnabled 只管采集/同步等

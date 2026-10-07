@@ -33,19 +33,15 @@ async function ensureEventsTable(db: Queryable): Promise<void> {
 }
 
 /** pglite 模式的队列驱动：入队落事件表，任务执行由 pipeline_jobs 轮询承担。 */
-export function createLocalQueueDriver(db: Queryable): {
-  enqueue(name: string, data: object | null, options?: unknown): Promise<LocalEnqueueResult>
-} {
-  return {
-    async enqueue(name, data, options) {
-      await ensureEventsTable(db)
-      const jobRef = `local-${randomUUID()}`
-      await db.query(
-        'insert into plugin_queue_events(queue_name, payload, options, job_ref) values ($1, $2, $3, $4)',
-        [name, JSON.stringify(data ?? {}), options ? JSON.stringify(options) : null, jobRef],
-      )
-      return { status: 'enqueued', jobId: jobRef }
-    },
+export function createLocalQueueDriver(db: Queryable): QueueDriver {
+  return async (name, data, options) => {
+    await ensureEventsTable(db)
+    const jobRef = `local-${randomUUID()}`
+    await db.query(
+      'insert into plugin_queue_events(queue_name, payload, options, job_ref) values ($1, $2, $3, $4)',
+      [name, JSON.stringify(data ?? {}), options ? JSON.stringify(options) : null, jobRef],
+    )
+    return { status: 'enqueued', jobId: jobRef }
   }
 }
 

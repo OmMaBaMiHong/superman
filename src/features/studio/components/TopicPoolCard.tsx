@@ -1,6 +1,7 @@
 'use client';
 
 import { FileText, PenLine } from 'lucide-react';
+import { memo } from 'react';
 import type { GovernanceQueueItem, PipelineJobItem } from '@/lib/api/apiClient';
 import ContentTypeBadge from '@/components/ui/content-type-badge';
 import QualityScore from '@/features/governance/components/QualityScore';
@@ -19,7 +20,7 @@ interface TopicPoolCardProps {
 }
 
 /** 选题卡：液态玻璃卡片 + 形态徽章 + 质量分 + 「生成稿件」。 */
-export default function TopicPoolCard({ item, activeJobs, onGenerate, onOpenDetail, footerNote }: TopicPoolCardProps) {
+function TopicPoolCardImpl({ item, activeJobs, onGenerate, onOpenDetail, footerNote }: TopicPoolCardProps) {
   const generating = activeJobs.length > 0;
 
   return (
@@ -99,3 +100,7 @@ export default function TopicPoolCard({ item, activeJobs, onGenerate, onOpenDeta
     </article>
   );
 }
+
+/** memo：看板/列表数百张卡随轮询重渲染时跳过未变化项（5s 轮询节流的关键）。 */
+export const TopicPoolCard = memo(TopicPoolCardImpl);
+export default TopicPoolCard;

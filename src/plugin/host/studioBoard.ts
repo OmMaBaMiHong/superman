@@ -12,6 +12,8 @@ import { listPublishedPostsWithMetrics } from '@/core/publish-tracking/repositor
 
 /** 后端单页封顶（与治理/草稿仓储的 pageSize 上限一致）。 */
 const PAGE_SIZE = 100
+/** 单片载荷封顶：面板只消费最近的若干条（看板 120、列表 200），total 徽章仍显真实总数。 */
+const SLICE_ITEM_CAP = 400
 
 /** 首页拿 total 后其余页并行拉，拼成全量。 */
 async function allPages<T>(
@@ -45,9 +47,9 @@ export async function buildStudioBoardSlices(db: unknown, userId: string): Promi
     listPipelineJobs(db as never, { userId, kind: 'rewrite', pageSize: 50, page: 1 }),
   ])
   return {
-    topics: { items: topics.items, total: topics.total },
-    review: { items: review.items, total: review.total },
-    drafts: { items: drafts.items },
+    topics: { items: topics.items.slice(0, SLICE_ITEM_CAP), total: topics.total },
+    review: { items: review.items.slice(0, SLICE_ITEM_CAP), total: review.total },
+    drafts: { items: drafts.items.slice(0, SLICE_ITEM_CAP) },
     published: {
       items: publishedRows
         .map((row) => (row as { draftId: string | null }).draftId)

@@ -80,8 +80,8 @@ describe('plugin/host/pgliteAdapter · 真库行为', () => {
         id bigserial primary key, queue_name text not null,
         payload jsonb not null default '{}'::jsonb, options jsonb,
         job_ref text not null, created_at timestamptz not null default now())`);
-      const driver = createLocalQueueDriver(pool);
-      const result = await driver.enqueue('pipeline.rewrite', { jobId: 'j1', userId: 'u1' }, { retryLimit: 3 });
+      const enqueue = createLocalQueueDriver(pool);
+      const result = await enqueue('pipeline.rewrite', { jobId: 'j1', userId: 'u1' }, { retryLimit: 3 });
       expect(result.status).toBe('enqueued');
       const rows = await pool.query('select queue_name, job_ref from plugin_queue_events');
       expect(rows.rows).toHaveLength(1);

@@ -55,6 +55,7 @@ const SECTIONS: Array<{ id: StudioSection; name: string }> = [
 ];
 
 const GOV_PAGE_SIZE = 100; // 后端单页封顶 100：全量加载按 100 静默翻完，不暴露分页 UI
+const LIST_RENDER_CAP = 200; // 列表单次渲染封顶：数千条一次 mount 会冻结面板
 const JOB_POLL_MS = 5_000;
 const SEARCH_DEBOUNCE_MS = 400;
 
@@ -65,6 +66,15 @@ const SECTION_TO_STAGE: Partial<Record<StudioSection, string>> = {
   jobs: 'generating',
   drafts: 'drafts',
 };
+
+/** 任务列表浅等价：id+状态+更新时间不变即视为未变（轮询节流用）。 */
+function sameJobs(prev: PipelineJobItem[], next: PipelineJobItem[]): boolean {
+  if (prev.length !== next.length) return false;
+  return prev.every((job, i) => {
+    const other = next[i];
+    return job.id === other?.id && job.status === other.status && (job.updatedAt ?? '') === (other.updatedAt ?? '');
+  });
+}
 
 /** 触发浏览器下载（导出 Markdown）。 */
 function triggerDownload(fileName: string, content: string) {
@@ -294,7 +304,8 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
     if (!silent) setJobsLoading(true);
     try {
       const result = await listPipelineJobs({ kind: 'rewrite', pageSize: 50 }, { notifyOnError: false });
-      setJobs(result.items);
+      // 轮询没变化就不换引用：否则每 5 秒整块看板（600 卡）全量 diff 重渲染，常驻卡顿
+      setJobs((prev) => (sameJobs(prev, result.items) ? prev : result.items));
     } catch {
       // 静默
     } finally {
@@ -605,17 +616,24 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
                 </p>
               </div>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {topics.map((item) => (
-                  <TopicPoolCard
-                    key={item.id}
-                    item={item}
-                    activeJobs={activeJobsByArticle.get(item.id) ?? []}
-                    onGenerate={setPickerItem}
-                    onOpenDetail={setDetailItem}
-                  />
-                ))}
-              </div>
+              <>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {topics.slice(0, LIST_RENDER_CAP).map((item) => (
+                    <TopicPoolCard
+                      key={item.id}
+                      item={item}
+                      activeJobs={activeJobsByArticle.get(item.id) ?? []}
+                      onGenerate={setPickerItem}
+                      onOpenDetail={setDetailItem}
+                    />
+                  ))}
+                </div>
+                {topics.length > LIST_RENDER_CAP ? (
+                  <p className="pt-2 text-center text-[11px] text-muted-foreground">
+                    仅显示前 {LIST_RENDER_CAP} 条 / 共 {topics.length} 条，可用搜索缩小范围
+                  </p>
+                ) : null}
+              </>
             )}
           </section>
         ) : null}

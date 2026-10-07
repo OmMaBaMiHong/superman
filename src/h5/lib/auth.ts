@@ -15,7 +15,7 @@ export interface H5Session {
 }
 
 // 令牌存取的实现收敛在共享叶模块（媒体 URL 也要用）；这里按原形状再导出。
-import { readSessionToken } from '@/lib/sessionToken';
+import { readSessionToken, writeSessionToken } from '@/lib/sessionToken';
 
 export { readSessionToken, writeSessionToken } from '@/lib/sessionToken';
 
