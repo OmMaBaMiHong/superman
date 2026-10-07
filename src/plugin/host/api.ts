@@ -66,6 +66,7 @@ import {
 } from '@/core/relay/service'
 import { ENTITLEMENTS, requireEntitled, type Entitlement } from '@/core/relay/entitlements'
 import { listRelayModels } from '@/core/relay/client'
+import { relayBridgeApi } from './relayHostBridge.js'
 import {
   getServicesConfig,
   getTrendRadarRunState,
@@ -1039,11 +1040,17 @@ const ROUTES: RouteDef[] = [
     const password = typeof body.password === 'string' ? body.password : ''
     if (!email || !password) throw new ValidationError('请求参数非法', { email: '邮箱与密码必填' })
     const result = await relayLoginWithPassword(db as never, session.userId, { email, password })
+    // 授权成功 → Key 同步进宿主凭据缝（DSH 模型页的中转站路由即时可用，免手填）。
+    try {
+      const cred = await resolveRelayAiCredential(db as never, session.userId)
+      await relayBridgeApi.syncKeyToHost(cred.apiKey)
+    } catch { /* 未选 Key 等场景：模型页仍可手填 */ }
     json(res, 200, { ok: true, data: result })
   }),
 
   route('POST', '/relay/logout', async ({ res, session, db }) => {
     if (db) await relayLogout(db as never, session.userId)
+    await relayBridgeApi.clearHostKey()
     json(res, 200, { ok: true })
   }),
 
@@ -1060,10 +1067,16 @@ const ROUTES: RouteDef[] = [
   }),
 
   route('POST', '/relay/keys/select', async ({ req, res, session, db }) => {
+    if (!db) return json(res, 503, { ok: false, error: { code: 'service_unavailable', message: '数据库未连接' } })
     const body = await readJsonBody(req)
     const keyId = typeof body.keyId === 'string' ? body.keyId.trim() : ''
     if (!keyId) throw new ValidationError('请求参数非法', { keyId: '必填' })
     await selectRelayKey(db as never, session.userId, keyId)
+    // 换绑 Key → 同步进宿主凭据缝（覆盖上一个）。
+    try {
+      const cred = await resolveRelayAiCredential(db as never, session.userId)
+      await relayBridgeApi.syncKeyToHost(cred.apiKey)
+    } catch { /* 保持宿主侧原值 */ }
     json(res, 200, { ok: true })
   }),
 
@@ -1093,6 +1106,8 @@ const ROUTES: RouteDef[] = [
       ...(typeof body.llmBaseUrl === 'string' ? { llmBaseUrl: body.llmBaseUrl } : {}),
       ...(typeof body.defaultModel === 'string' ? { defaultModel: body.defaultModel } : {}),
     })
+    // H5 侧改了中转站地址/默认模型 → 重跑预配（只覆盖仍为预配值的字段，不动编辑器手改）。
+    if (db) await relayBridgeApi.reprovision().catch(() => undefined)
     json(res, 200, { ok: true, data: saved })
   }),
 
