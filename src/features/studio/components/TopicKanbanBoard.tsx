@@ -19,8 +19,12 @@ interface TopicKanbanBoardProps {
   /** 审批台待审条目（candidate/pending），看板第一列（全量）。 */
   reviewItems: GovernanceQueueItem[];
   reviewTotal: number;
-  /** 选题池（archived，全量）。 */
+  /** 选题池（archived，首屏 + 滚动分页追加）。 */
   topics: GovernanceQueueItem[];
+  /** 选题池是否还有下一页（滚动到底触发 onLoadMorePool）。 */
+  poolHasMore?: boolean;
+  poolLoadingMore?: boolean;
+  onLoadMorePool?: () => void;
   /** 进行中的改写任务（按 articleId 归组）。 */
   activeJobsByArticle: Map<string, PipelineJobItem[]>;
   /** 有失败任务且当前无活跃任务的选题（卡片标红提醒重试）。 */
@@ -272,6 +276,9 @@ export default function TopicKanbanBoard({
   reviewItems,
   reviewTotal,
   topics,
+  poolHasMore,
+  poolLoadingMore,
+  onLoadMorePool,
   activeJobsByArticle,
   failedArticleIds,
   drafts,
@@ -355,6 +362,16 @@ export default function TopicKanbanBoard({
     }
     return map;
   }, [drafts]);
+
+  // 池列滚动接近底部 → 加载下一页（无限滚动；渲染量由用户滚动决定，不做截断）
+  const handlePoolScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      const el = event.currentTarget;
+      if (el.scrollTop + el.clientHeight < el.scrollHeight - 120) return;
+      onLoadMorePool?.();
+    },
+    [onLoadMorePool],
+  );
 
   const poolCards = useMemo(
     () => topics.filter((item) => !activeJobsByArticle.has(item.id) && !draftsByArticle.has(item.id)),
@@ -441,6 +458,7 @@ export default function TopicKanbanBoard({
           <div
             ref={bodyRefSetters[col.id]}
             data-stage={col.id}
+            onScroll={col.id === 'pool' ? handlePoolScroll : undefined}
             className="flex min-h-0 flex-1 flex-col space-y-2.5 overflow-y-auto overflow-x-hidden px-2.5 pb-3 pt-0.5"
           >
             {col.id === 'review'
@@ -456,7 +474,7 @@ export default function TopicKanbanBoard({
                 ))
               : null}
             {col.id === 'pool'
-              ? poolCards.slice(0, COLUMN_RENDER_CAP).map((item) => (
+              ? poolCards.map((item) => (
                   <div key={item.id} data-card-id={item.id} data-stage="pool" className="cursor-grab active:cursor-grabbing">
                     <TopicPoolCard
                       item={item}
@@ -495,7 +513,13 @@ export default function TopicKanbanBoard({
                 ))
               : null}
             {counts[col.id] === 0 ? <p className="py-8 text-center text-[11px] text-muted-foreground">—</p> : null}
-            {counts[col.id] > COLUMN_RENDER_CAP ? (
+            {col.id === 'pool' && poolLoadingMore ? (
+              <p className="pt-1 pb-2 text-center text-[10.5px] text-muted-foreground">加载中…</p>
+            ) : null}
+            {col.id === 'pool' && !poolLoadingMore && poolHasMore ? (
+              <p className="pt-1 pb-2 text-center text-[10.5px] text-muted-foreground">下滑加载更多</p>
+            ) : null}
+            {col.id !== 'pool' && counts[col.id] > COLUMN_RENDER_CAP ? (
               <p className="pt-1 pb-2 text-center text-[10.5px] text-muted-foreground">
                 仅显示最近 {COLUMN_RENDER_CAP} 条 / 共 {counts[col.id]} 条
               </p>

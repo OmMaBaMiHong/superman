@@ -55,7 +55,6 @@ const SECTIONS: Array<{ id: StudioSection; name: string }> = [
 ];
 
 const GOV_PAGE_SIZE = 100; // 后端单页封顶 100：全量加载按 100 静默翻完，不暴露分页 UI
-const LIST_RENDER_CAP = 200; // 列表单次渲染封顶：数千条一次 mount 会冻结面板
 const SEARCH_DEBOUNCE_MS = 400;
 
 // tab ↔ 看板列 的对应关系（产品计划/表现不是内容流转阶段，没有列）
@@ -126,8 +125,10 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
     [viewMode, switchViewMode],
   );
 
-  // ── 选题池（archived 文章，全量加载）──
+  // ── 选题池（archived 文章，首屏水合 + 滚动分页追加）──
   const [topics, setTopics] = useState<GovernanceQueueItem[]>([]);
+  const [topicsTotal, setTopicsTotal] = useState(0);
+  const [topicsLoadingMore, setTopicsLoadingMore] = useState(false);
   const [topicsLoading, setTopicsLoading] = useState(true);
   const [keyword, setKeyword] = useState('');
   const [debouncedKeyword, setDebouncedKeyword] = useState('');
@@ -193,7 +194,28 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
       for (const part of rest) items = items.concat(part.items);
     }
     setTopics(items);
+    setTopicsTotal(first.total);
   }, []);
+
+  // 选题池滚动分页：追加下一页（渲染多少由用户滚动决定，不做截断）
+  const loadMoreTopics = useCallback(async () => {
+    if (topicsLoadingMore || debouncedKeyword) return;
+    if (topics.length === 0 || topics.length >= topicsTotal) return;
+    setTopicsLoadingMore(true);
+    try {
+      const page = Math.floor(topics.length / GOV_PAGE_SIZE) + 1;
+      const next = await getGovernanceQueue({ statuses: ['archived'], page, pageSize: GOV_PAGE_SIZE });
+      setTopics((prev) => {
+        const seen = new Set(prev.map((item) => item.id));
+        return [...prev, ...next.items.filter((item) => !seen.has(item.id))];
+      });
+      setTopicsTotal(next.total);
+    } catch {
+      // 静默
+    } finally {
+      setTopicsLoadingMore(false);
+    }
+  }, [topicsLoadingMore, topics.length, topicsTotal, debouncedKeyword]);
 
   // 搜索防抖
   useEffect(() => {
@@ -232,6 +254,7 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
     setReviewItems(slices.review.items);
     setReviewTotal(slices.review.total);
     setTopics(slices.topics.items);
+    setTopicsTotal(slices.topics.total);
     setDrafts(slices.drafts.items);
     setPublishedDraftIds(new Set(slices.published.items.map((post) => post.draftId)));
     setJobs(slices.jobs.items);
@@ -557,6 +580,9 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
                 reviewItems={reviewItems}
                 reviewTotal={reviewTotal}
                 topics={topics}
+                poolHasMore={topics.length < topicsTotal && !debouncedKeyword}
+                poolLoadingMore={topicsLoadingMore}
+                onLoadMorePool={() => void loadMoreTopics()}
                 activeJobsByArticle={activeJobsByArticle}
                 failedArticleIds={failedArticleIds}
                 drafts={drafts}
@@ -624,7 +650,7 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
             ) : (
               <>
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {topics.slice(0, LIST_RENDER_CAP).map((item) => (
+                  {topics.map((item) => (
                     <TopicPoolCard
                       key={item.id}
                       item={item}
@@ -634,10 +660,17 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
                     />
                   ))}
                 </div>
-                {topics.length > LIST_RENDER_CAP ? (
-                  <p className="pt-2 text-center text-[11px] text-muted-foreground">
-                    仅显示前 {LIST_RENDER_CAP} 条 / 共 {topics.length} 条，可用搜索缩小范围
-                  </p>
+                {!debouncedKeyword && topics.length < topicsTotal ? (
+                  <div className="pt-2 text-center">
+                    <button
+                      type="button"
+                      onClick={() => void loadMoreTopics()}
+                      disabled={topicsLoadingMore}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-full border border-border px-4 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:text-foreground disabled:opacity-50"
+                    >
+                      {topicsLoadingMore ? '加载中…' : `加载更多（已加载 ${topics.length} / 共 ${topicsTotal}）`}
+                    </button>
+                  </div>
                 ) : null}
               </>
             )}

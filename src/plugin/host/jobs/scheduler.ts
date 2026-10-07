@@ -41,7 +41,6 @@ export interface PluginSchedulerConfig {
   schedulerEnabled?: boolean
   trendradarIntervalMs?: number
   feedRefreshIntervalMs?: number
-  pipelinePollIntervalMs?: number
   publishTrackingIntervalMs?: number
   commentIntelIntervalMs?: number
   knowledgeBackfillIntervalMs?: number
@@ -64,8 +63,6 @@ interface Logger {
 
 const TRENDRADAR_INTERVAL = 30 * 60_000
 const FEED_TICK_INTERVAL = 60_000
-/** 兜底扫：入队/重试即时踢执行器，此周期只兜极小概率的漏网（进程重启间隙等）。 */
-const PIPELINE_POLL_INTERVAL = 5 * 60_000
 const PUBLISH_TRACKING_INTERVAL = 30 * 60_000
 const COMMENT_INTEL_INTERVAL = 6 * 3600_000
 const KNOWLEDGE_BACKFILL_INTERVAL = 30 * 60_000
@@ -230,9 +227,8 @@ export function startPluginScheduler(
     }
   }
 
-  // 兜底慢扫 + 入队即踢（kickPipeline 由路由在创建/重试后调用，执行零延迟）
-  every('pipeline.rewrite', config.pipelinePollIntervalMs ?? PIPELINE_POLL_INTERVAL, pipelineSweep)
-
+  // 不做任何周期轮询：洗稿执行由状态变化触发——任务创建/重试（状态→queued）时
+  // 路由直接 kickPipeline() 执行；此处仅保留函数体供句柄调用。
   every('publishTracking.tick', config.publishTrackingIntervalMs ?? PUBLISH_TRACKING_INTERVAL, async () => {
     const users = await listUsers(pool as never)
     for (const user of users.filter((u) => u.status === 'active')) {
@@ -303,7 +299,7 @@ export function startPluginScheduler(
     }
   })
 
-  logger.log('调度器已启动：trendradar.sync(30m) + feed.fetch(60s) + pipeline.rewrite(入队即踢+5m兜底) + publishTracking.tick(30m) + commentIntel.tick(6h) + knowledge.backfill(30m) + productPlan.scan(12h)')
+  logger.log('调度器已启动：trendradar.sync(30m) + feed.fetch(60s) + pipeline.rewrite(状态变化触发，无轮询) + publishTracking.tick(30m) + commentIntel.tick(6h) + knowledge.backfill(30m) + productPlan.scan(12h)')
   return {
     stop: () => {
       for (const timer of timers) clearInterval(timer)
