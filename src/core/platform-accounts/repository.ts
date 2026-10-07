@@ -8,9 +8,11 @@ import {
 
 type DbClient = Pool | PoolClient;
 
-export type AccountPlatform = 'wechat' | 'douyin' | 'xhs' | 'bilibili' | 'channels';
+export type AccountPlatform = 'wechat' | 'douyin' | 'xhs' | 'bilibili' | 'channels' | 'weibo';
 export type CredKind = 'app_secret' | 'cookie' | 'oauth';
 export type AccountStatus = 'active' | 'expired' | 'error';
+/** 凭据用途：publish 发布 / collect 采集 / oauth 三方授权。 */
+export type CredentialPurpose = 'publish' | 'collect' | 'oauth';
 
 /** 对外视图：永不包含 credential_encrypted / 明文。 */
 export interface PlatformAccountView {
@@ -19,8 +21,10 @@ export interface PlatformAccountView {
   platform: AccountPlatform;
   accountName: string;
   credKind: CredKind;
+  purpose: CredentialPurpose;
   credentialMasked: string;
   status: AccountStatus;
+  remark: string;
   expiresAt: string | null;
   lastVerifiedAt: string | null;
   metaJson: Record<string, unknown> | null;
@@ -34,8 +38,10 @@ const viewSelectSql = `
   platform,
   account_name as "accountName",
   cred_kind as "credKind",
+  purpose,
   credential_masked as "credentialMasked",
   status,
+  remark,
   expires_at as "expiresAt",
   last_verified_at as "lastVerifiedAt",
   meta_json as "metaJson",
@@ -53,6 +59,7 @@ export async function createPlatformAccount(
     platform: AccountPlatform;
     accountName?: string;
     credKind: CredKind;
+    purpose?: CredentialPurpose;
     /** 凭据明文（JSON 字符串）。只在加密封装内存在，落库即密文。 */
     credentialPlaintext: string;
     metaJson?: Record<string, unknown> | null;
@@ -65,10 +72,10 @@ export async function createPlatformAccount(
   const { rows } = await db.query<PlatformAccountView>(
     `
       insert into platform_accounts(
-        user_id, platform, account_name, cred_kind,
+        user_id, platform, account_name, cred_kind, purpose,
         credential_encrypted, credential_masked, meta_json
       )
-      values ($1, $2, $3, $4, $5, $6, $7::jsonb)
+      values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
       returning ${viewSelectSql}
     `,
     [
@@ -76,6 +83,7 @@ export async function createPlatformAccount(
       input.platform,
       input.accountName ?? '',
       input.credKind,
+      input.purpose ?? 'publish',
       credentialEncrypted,
       credentialMasked,
       input.metaJson ? JSON.stringify(input.metaJson) : null,
@@ -86,21 +94,25 @@ export async function createPlatformAccount(
 
 export async function listPlatformAccounts(
   db: DbClient,
-  input?: { userId?: string; platform?: AccountPlatform },
+  input?: { userId?: string; platform?: AccountPlatform; purpose?: CredentialPurpose },
 ): Promise<PlatformAccountView[]> {
   const scopedUserId = normalizeUserId(input?.userId);
   const conditions = ['user_id = $1'];
   const values: string[] = [scopedUserId];
   if (input?.platform) {
-    conditions.push('platform = $2');
     values.push(input.platform);
+    conditions.push(`platform = $${values.length}`);
+  }
+  if (input?.purpose) {
+    values.push(input.purpose);
+    conditions.push(`purpose = $${values.length}`);
   }
   const { rows } = await db.query<PlatformAccountView>(
     `
       select ${viewSelectSql}
       from platform_accounts
       where ${conditions.join(' and ')}
-      order by platform asc, account_name asc, id asc
+      order by platform asc, purpose asc, account_name asc, id asc
     `,
     values,
   );

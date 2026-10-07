@@ -25,6 +25,13 @@ import { promoteTrendRadarItem } from '@/core/trendradar/promote'
 import { isRewritePlatform, type RewritePlatform } from '@/core/pipelines/rewriteProfiles'
 import { createRewriteJobs } from '@/core/pipelines/services/pipelineService'
 import { getDraftDetail, listDrafts } from '@/core/pipelines/repository'
+import {
+  createManualProductPlan,
+  createProductPlanFromArticle,
+  resolveProductPlanAiConfig,
+  scanProductPlanCandidates,
+} from '@/core/product-plans/service'
+import { isProductPlanStatus, listProductPlans, type ProductPlanStatus } from '@/core/product-plans/repository'
 import type { Queryable } from './db.js'
 import { PLUGIN_NAME, type MinimalContext } from './routes.js'
 
@@ -498,6 +505,163 @@ export function buildSupermanTools(deps: ToolsDeps): ToolDef[] {
             ? `今日：待批 ${String(v.todayPending)} · 归档 ${String(v.todayArchived)} · 采集成功 ${String(v.todayFetchSucceeded)} · 失败 ${String(v.todayFetchFailed)} · 队列 ${String(v.queueSize)}`
             : `查询失败：${String(v.error)}`,
         ),
+    },
+    {
+      name: 'superman_product_plans_list',
+      description:
+        '列产品计划（商业决策 MVP 规划）：人工口述的想法 + AI 从内容推理出的产品机会。返回 id/标题/一句话/状态/来源。',
+      parameters: {
+        type: 'object',
+        properties: {
+          status: { type: 'string', description: 'idea/validating/building/launched/archived（可选）' },
+          limit: { type: 'number', description: '返回条数上限（1-50，缺省 20）' },
+        },
+      },
+      execute: async (args) => {
+        try {
+          const status = typeof args.status === 'string' ? args.status.trim() : ''
+          if (status && !isProductPlanStatus(status)) {
+            return { ok: false, error: `status 取值非法: ${status}（仅支持 idea/validating/building/launched/archived）` }
+          }
+          const limit = typeof args.limit === 'number' && args.limit >= 1 ? Math.min(Math.floor(args.limit), 50) : 20
+          const result = await listProductPlans(requireDb(deps) as never, {
+            userId: AGENT_USER_ID,
+            status: status ? (status as ProductPlanStatus) : undefined,
+            limit,
+            offset: 0,
+          })
+          return {
+            ok: true,
+            total: result.total,
+            items: result.items.map((p) => ({
+              id: p.id,
+              title: cut(p.title, 80),
+              oneLiner: cut(p.oneLiner, 120),
+              status: p.status,
+              sourceType: p.sourceType,
+            })),
+          }
+        } catch (err) {
+          return fail(err)
+        }
+      },
+      render: (_a, v) => {
+        const items = (v.items as { id: string; title: string; status: string }[] | undefined) ?? []
+        return text(
+          v.ok
+            ? `产品计划（共 ${String(v.total)} 条）：\n${items.map((p) => `#${p.id} [${p.status}] ${p.title}`).join('\n') || '（空）'}`
+            : `查询失败：${String(v.error)}`,
+        )
+      },
+    },
+    {
+      name: 'superman_product_plan_create',
+      description:
+        '把一个产品想法（用户口述/输入）整理成产品计划（AI 生成 MVP 规划：产品描述/目标人群/思路/商业模式/风险/竞品/定价/里程碑/验证计划）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          idea: { type: 'string', description: '产品想法原文（必填）' },
+          note: { type: 'string', description: '补充备注/约束（可选）' },
+        },
+        required: ['idea'],
+      },
+      execute: async (args) => {
+        try {
+          const idea = typeof args.idea === 'string' ? args.idea.trim() : ''
+          if (!idea) return { ok: false, error: 'idea 必填：请提供产品想法原文' }
+          const db = requireDb(deps)
+          const aiConfig = await resolveProductPlanAiConfig(db as never, AGENT_USER_ID)
+          const result = await createManualProductPlan(db as never, {
+            userId: AGENT_USER_ID,
+            rawIdea: idea,
+            note: typeof args.note === 'string' ? args.note : null,
+            aiConfig,
+          })
+          return {
+            ok: true,
+            plan: {
+              id: result.plan.id,
+              title: result.plan.title,
+              oneLiner: result.plan.oneLiner,
+              usedFallback: result.usedFallback,
+            },
+          }
+        } catch (err) {
+          return fail(err)
+        }
+      },
+      render: (_a, v) => {
+        const plan = v.plan as Json | undefined
+        return text(
+          v.ok && plan
+            ? `已生成产品计划 #${String(plan.id)}：${String(plan.title)}${plan.usedFallback ? '（AI 未配置，启发式占位，建议进 UI 补全）' : ''}`
+            : `生成失败：${String(v.error)}`,
+        )
+      },
+    },
+    {
+      name: 'superman_product_plan_from_article',
+      description:
+        '从一篇已归档文章（采集内容）推理出产品计划。幂等：同一文章已生成过则返回原计划。适合「这条内容能不能做成产品」类问题。',
+      parameters: {
+        type: 'object',
+        properties: { articleId: { type: 'string', description: '文章 id（正整数，须已归档）' } },
+        required: ['articleId'],
+      },
+      execute: async (args) => {
+        try {
+          const db = requireDb(deps)
+          const aiConfig = await resolveProductPlanAiConfig(db as never, AGENT_USER_ID)
+          const result = await createProductPlanFromArticle(db as never, {
+            userId: AGENT_USER_ID,
+            articleId: requireId(args.articleId, 'articleId'),
+            aiConfig,
+          })
+          if (!result) return { ok: false, error: '文章不存在或不属于当前用户' }
+          return {
+            ok: true,
+            plan: { id: result.plan.id, title: result.plan.title, oneLiner: result.plan.oneLiner },
+            alreadyExists: result.alreadyExists,
+          }
+        } catch (err) {
+          return fail(err)
+        }
+      },
+      render: (_a, v) => {
+        const plan = v.plan as Json | undefined
+        return text(
+          v.ok && plan
+            ? `已生成产品计划 #${String(plan.id)}：${String(plan.title)}${v.alreadyExists ? '（此前已生成，幂等返回）' : ''}`
+            : `生成失败：${String(v.error)}`,
+        )
+      },
+    },
+    {
+      name: 'superman_product_plan_scan',
+      description:
+        '批量扫描「搞钱」方向已归档文章，为尚未生成计划的内容逐篇推理产品机会（每轮最多 5 篇）。',
+      parameters: {
+        type: 'object',
+        properties: { limit: { type: 'number', description: '本轮最多生成条数（1-20，缺省 5）' } },
+      },
+      execute: async (args) => {
+        try {
+          const db = requireDb(deps)
+          const limit = typeof args.limit === 'number' && args.limit >= 1 ? Math.min(Math.floor(args.limit), 20) : 5
+          const aiConfig = await resolveProductPlanAiConfig(db as never, AGENT_USER_ID)
+          const result = await scanProductPlanCandidates(db as never, {
+            userId: AGENT_USER_ID,
+            limit,
+            aiConfig,
+          })
+          return { ok: true, ...result }
+        } catch (err) {
+          return fail(err)
+        }
+      },
+      render: (_a, v) =>
+        text(v.ok ? `扫描 ${String(v.scanned)} 篇，生成 ${String(v.created)} 个产品计划` : `扫描失败：${String(v.error)}`),
     },
   ]
 }

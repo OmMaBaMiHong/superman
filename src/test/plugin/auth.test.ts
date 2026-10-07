@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { createAuth, parseCookies, SESSION_COOKIE } from '@/plugin/host/auth';
+import { createAuth, parseCookies, readRequestToken, SESSION_COOKIE } from '@/plugin/host/auth';
 import { createSessionToken } from '@/core/auth/sessionToken';
 import { hashPassword } from '@/core/auth/password';
+import { makeHostUsersDb } from './hostUsersDb';
 
 function makeReq(cookie?: string) {
   return { headers: cookie ? { cookie } : {} };
@@ -118,5 +119,93 @@ describe('plugin/host/auth · dev 兜底模式（无数据库）', () => {
     } finally {
       delete process.env.SUPERMAN_DEV_PASSWORD;
     }
+  });
+});
+
+describe('plugin/host/auth · Bearer 令牌通道（dsh-app:// 桌面壳）', () => {
+  it('readRequestToken 优先取 Authorization: Bearer，其次回退 cookie', () => {
+    expect(readRequestToken({ headers: { authorization: 'Bearer abc.def' } } as never)).toBe('abc.def');
+    expect(readRequestToken({ headers: { authorization: 'bearer xyz' } } as never)).toBe('xyz');
+    expect(readRequestToken({ headers: { cookie: `${SESSION_COOKIE}=from-cookie` } } as never)).toBe('from-cookie');
+    // 两者都在时以请求头为准
+    expect(
+      readRequestToken({ headers: { authorization: 'Bearer from-header', cookie: `${SESSION_COOKIE}=from-cookie` } } as never),
+    ).toBe('from-header');
+    // 非 Bearer 的 authorization、空头都退回 cookie / 空串
+    expect(readRequestToken({ headers: { authorization: 'Basic zzz' } } as never)).toBe('');
+    expect(readRequestToken({ headers: {} } as never)).toBe('');
+  });
+
+  it('users 表模式：没有 cookie、只带 Authorization 头也能认证（桌面代理会抹掉 cookie）', async () => {
+    const auth = createAuth({ db: makeUsersDb([ACTIVE_USER]) as never, secret: 's3cret', now: () => 1_000_000 });
+    const session = (await auth.login('admin', 'pw123'))!;
+    const res = makeRes();
+    const token = auth.issueCookie(res as never, session);
+
+    const viaHeader = await auth.authenticate({ headers: { authorization: `Bearer ${token}` } } as never);
+    expect(viaHeader?.userId).toBe('1');
+    expect(viaHeader?.username).toBe('admin');
+
+    // 同一枚令牌去掉 Bearer 前缀就无效，避免误认任意头
+    expect(await auth.authenticate({ headers: { authorization: token } } as never)).toBeNull();
+  });
+
+  it('dev 兜底模式：Authorization 头同样能取到内存会话', async () => {
+    process.env.SUPERMAN_DEV_PASSWORD = 'dev-pw';
+    try {
+      const auth = createAuth({ db: null, secret: '' });
+      const session = (await auth.login('admin', 'dev-pw'))!;
+      const res = makeRes();
+      const token = auth.issueCookie(res as never, session);
+      expect(token).toBe(session.token);
+
+      const authed = await auth.authenticate({ headers: { authorization: `Bearer ${token}` } } as never);
+      expect(authed?.username).toBe('admin');
+
+      auth.revoke(token);
+      expect(await auth.authenticate({ headers: { authorization: `Bearer ${token}` } } as never)).toBeNull();
+    } finally {
+      delete process.env.SUPERMAN_DEV_PASSWORD;
+    }
+  });
+});
+
+describe('plugin/host/auth · 宿主身份直通（免登录）', () => {
+  it('首次宿主身份自动建号（首个绑定= admin）并签发可校验会话', async () => {
+    const db = makeHostUsersDb();
+    const auth = createAuth({ db: db as never, secret: 's3cret', now: () => 1_000_000 });
+
+    const session = await auth.loginWithHostIdentity({ dshAccountId: 'acc-1', displayName: '李白哥哥' });
+    expect(session).not.toBeNull();
+    expect(session!.username).toBe('李白哥哥');
+    expect(session!.role).toBe('admin');
+
+    // 会话与口令登录同构：HMAC 令牌能过 authenticate（users 表复核）
+    const token = auth.mintToken(session!);
+    const verified = await auth.authenticate({ headers: { authorization: `Bearer ${token}` } } as never);
+    expect(verified?.userId).toBe(session!.userId);
+  });
+
+  it('同一宿主身份重复登录复用同一用户；第二个账号建为 member', async () => {
+    const db = makeHostUsersDb();
+    const auth = createAuth({ db: db as never, secret: 's3cret', now: () => 1_000_000 });
+
+    const first = await auth.loginWithHostIdentity({ dshAccountId: 'acc-1', displayName: '李白哥哥' });
+    const again = await auth.loginWithHostIdentity({ dshAccountId: 'acc-1', displayName: '李白哥哥' });
+    expect(again!.userId).toBe(first!.userId);
+    expect(db.users).toHaveLength(1);
+
+    const second = await auth.loginWithHostIdentity({ dshAccountId: 'acc-2', displayName: '路人' });
+    expect(second!.userId).not.toBe(first!.userId);
+    expect(second!.role).toBe('member');
+  });
+
+  it('无数据库（dev 兜底模式）或空账号 ID 时宿主登录返回 null', async () => {
+    const auth = createAuth({ db: null, secret: '' });
+    expect(await auth.loginWithHostIdentity({ dshAccountId: 'acc-1', displayName: 'x' })).toBeNull();
+
+    const db = makeHostUsersDb();
+    const dbAuth = createAuth({ db: db as never, secret: 's3cret', now: () => 1_000_000 });
+    expect(await dbAuth.loginWithHostIdentity({ dshAccountId: '  ', displayName: 'x' })).toBeNull();
   });
 });

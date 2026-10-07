@@ -742,6 +742,20 @@ JSON 字段：
                 json(res, 200, r)
                 return
               }
+              // 二创送出标记：某形态最新一版已送入聊天（看板「已送草稿」列依据）
+              if (op === 'remix-sent') {
+                const articleId = body && body.articleId
+                const contentType = (body && body.contentType) || 'oral'
+                if (!articleId) return json(res, 400, { ok: false, error: '缺少 articleId' })
+                const map = loadRemixes()
+                const list = map[articleId] || []
+                for (let i = list.length - 1; i >= 0; i--) {
+                  if ((list[i].contentType || 'oral') === contentType && !list[i].sentAt) { list[i].sentAt = Date.now(); break }
+                }
+                saveRemixes(map)
+                json(res, 200, { ok: true, versions: list })
+                return
+              }
               // 流水线：创建 / 更新 / 删除 / 手动执行
               if (op === 'pipelines/save') {
                 const data = loadPipelines()
@@ -837,13 +851,29 @@ JSON 字段：
               json(res, 200, { ok: true, imageProxy: false, article, videoUrl })
               return
             }
-            // 加工台队列：订阅来的视频条目 + 文案与标签完成度
+            // 加工台队列：订阅来的视频条目 + 文案与标签完成度 + 二创摘要（看板列依据）
             if (op === 'workbench') {
               const all = rss.listArticles({ mediaType: 'video', limit: '1000' })
               const limit = Number(q.get('limit')) || 200
+              // 二创摘要：{[articleId]: {count, types, sentAt}}，一次读 remixes.json 汇总
+              const remixRaw = loadRemixes()
+              const remixes = {}
+              for (const rid of Object.keys(remixRaw)) {
+                const vs = remixRaw[rid] || []
+                if (!vs.length) continue
+                let sentAt = 0
+                const types = {}
+                for (const v of vs) {
+                  const t = v.contentType || 'oral'
+                  types[t] = (types[t] || 0) + 1
+                  if (v.sentAt && v.sentAt > sentAt) sentAt = v.sentAt
+                }
+                remixes[rid] = { count: vs.length, types: types, sentAt: sentAt || null }
+              }
               json(res, 200, {
                 ok: true,
                 items: all.slice(0, limit),
+                remixes: remixes,
                 stats: {
                   total: all.length,
                   transcribed: all.filter((a) => a.transcript).length,

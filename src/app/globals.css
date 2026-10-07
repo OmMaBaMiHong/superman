@@ -473,3 +473,33 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* ============================================================
+   DSH 宿主形态适配（只有 H5 在 dsh-app:// 协议 / ?host=dsh 下运行时，
+   main.tsx 才会写 <html data-host="dsh">，以下规则对 H5/浏览器零影响）
+   ============================================================ */
+html[data-host='dsh'] {
+  /* 面板内顶部标签条高度：供 sticky 偏移与锚点定位统一取值 */
+  --superman-panel-strip: 3rem;
+  /*
+   * 按面板宽度等比缩放（用户要求"按比例缩小、不要变形"）：
+   * Tailwind 4 的间距/字号/栏宽全部基于 rem，缩根字号即整层等比缩放，
+   * 布局关系保持不变——浏览器 H5（browser 宿主）不受影响。
+   * 曲线：780px 面板 ≈13.1px（0.82×），1024 ≈14.2px，1440+ 回到 16px。
+   */
+  font-size: clamp(13px, 0.45vw + 9.6px, 16px);
+}
+
+html[data-host='dsh'] body {
+  /* 面板嵌在宿主 iframe 里，滚动归属已由内部容器接管，禁止滚动链穿透宿主 */
+  overscroll-behavior: none;
+}
+
+/* DSH 面板常见窄容器：玻璃卡片与富文本在窄宽度下不撑破横向 */
+html[data-host='dsh'] .gov-card {
+  min-width: 0;
+}
+
+html[data-host='dsh'] .prose {
+  overflow-wrap: anywhere;
+}

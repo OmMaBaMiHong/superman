@@ -18,6 +18,7 @@ import {
 import {
   getAiApiKey,
   getAppSettings,
+  getAuthSettings,
   getTranslationApiKey,
   getUiSettings,
 } from '@/server/domains/settings/repositories/settingsRepo';
@@ -42,6 +43,7 @@ import { startBoss } from '@/server/infra/queue/boss';
 import { evaluateGovernanceBatch } from '@/server/domains/governance/services/governanceIngestService';
 import type { GovernanceIngestDecision } from '@/server/domains/governance/services/governanceIngestService';
 import { resolveSharedAiConfig } from '@/server/integrations/ai/runtimeConfig';
+import { configureDshLlmHttp } from '@/server/integrations/ai/dshLlmBridge';
 import { stripHtmlToText } from '@/lib/reader/articleSummary';
 import { bootstrapQueues } from '@/server/infra/queue/bootstrap';
 import { getQueueSendOptions, QUEUE_CONTRACTS } from '@/server/infra/queue/contracts';
@@ -463,6 +465,21 @@ export async function fetchAndIngestFeed(
 
 async function main() {
   const pool = getPool();
+
+  // 复用 DSH 宿主模型：独立 worker 无 ctx.llm，改经插件内部 HTTP 端点调用
+  // （token = 两端共享的 auth_session_secret）。未配/不可达时 AI 保持不可用。
+  try {
+    const dshLlmUrl =
+      process.env.SUPERMAN_DSH_LLM_URL ?? 'http://127.0.0.1:3080/s/api/internal/llm-complete';
+    const { authSessionSecret } = await getAuthSettings(pool);
+    if (authSessionSecret.trim()) {
+      configureDshLlmHttp({ url: dshLlmUrl, token: authSessionSecret });
+      console.log('[superman-worker] 已接入 DSH 宿主模型（经插件内部 HTTP）');
+    }
+  } catch (err) {
+    console.warn('[superman-worker] DSH 模型接入失败，AI 能力将不可用:', err);
+  }
+
   const boss = await startBoss();
 
   await bootstrapQueues(boss);

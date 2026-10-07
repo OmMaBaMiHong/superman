@@ -2,13 +2,15 @@
  * 平台识别与 B站 BV 号解析（纯函数）。
  */
 
-export type PublishPlatform = 'bilibili' | 'douyin' | 'xhs' | 'wechat' | 'other';
+export type PublishPlatform = 'bilibili' | 'douyin' | 'xhs' | 'wechat' | 'channels' | 'kuaishou' | 'other';
 
 export const PUBLISH_PLATFORMS: readonly PublishPlatform[] = [
   'bilibili',
   'douyin',
   'xhs',
   'wechat',
+  'channels',
+  'kuaishou',
   'other',
 ];
 
@@ -28,6 +30,8 @@ export function inferPlatformFromUrl(rawUrl: string): PublishPlatform {
   if (host.endsWith('.douyin.com') || host === 'douyin.com') return 'douyin';
   if (host.endsWith('.xiaohongshu.com') || host === 'xiaohongshu.com' || host === 'xhslink.com') return 'xhs';
   if (host === 'mp.weixin.qq.com') return 'wechat';
+  if (host.endsWith('.kuaishou.com')) return 'kuaishou';
+  if (host === 'channels.weixin.qq.com') return 'channels';
   return 'other';
 }
 

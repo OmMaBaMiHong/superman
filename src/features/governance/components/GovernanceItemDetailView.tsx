@@ -1,10 +1,12 @@
 'use client';
 
-import { Check, ExternalLink, RotateCcw, X } from 'lucide-react';
-import type { GovernanceItemDetail } from '@/lib/api/apiClient';
+import { useState } from 'react';
+import { Check, ExternalLink, Lightbulb, RotateCcw, X } from 'lucide-react';
+import { generateProductPlanFromArticle, type GovernanceItemDetail } from '@/lib/api/apiClient';
 import ContentTypeBadge from '@/components/ui/content-type-badge';
 import DirectionBadge from '@/components/ui/direction-badge';
 import VideoEmbed from '@/components/ui/video-embed';
+import { toast } from '@/features/toast/toast';
 import { cn } from '@/lib/utils';
 import { formatPublishedAt } from './GovernanceQueueCard';
 import QualityScore from './QualityScore';
@@ -31,6 +33,22 @@ export default function GovernanceItemDetailView({
   onSubmitReason,
 }: GovernanceItemDetailViewProps) {
   const busy = pendingAction !== null;
+  const [converting, setConverting] = useState(false);
+
+  const handleConvertToProductPlan = () => {
+    if (converting) return;
+    setConverting(true);
+    void generateProductPlanFromArticle(detail.id)
+      .then((result) => {
+        toast.success(
+          result.alreadyExists ? '该条目已有产品计划' : `已生成产品计划：${result.plan.title}`,
+        );
+      })
+      .catch(() => {
+        // apiClient 已统一 toast 错误
+      })
+      .finally(() => setConverting(false));
+  };
 
   return (
     <div className="px-5 pb-6 pt-1 sm:px-7">
@@ -143,7 +161,22 @@ export default function GovernanceItemDetailView({
       />
 
       {/* 操作行 */}
-      <div className="sticky bottom-0 -mx-1 mt-5 flex items-center justify-end gap-2 border-t border-border/60 px-1 pb-1 pt-3">
+      <div className="sticky bottom-0 -mx-1 mt-5 flex items-center justify-between gap-2 border-t border-border/60 px-1 pb-1 pt-3">
+        <button
+          type="button"
+          disabled={converting}
+          onClick={handleConvertToProductPlan}
+          className={cn(
+            'inline-flex h-11 items-center gap-1.5 rounded-full border border-primary/30 px-4',
+            'text-sm font-medium text-primary transition-all duration-150 hover:bg-primary/10 active:scale-[0.97]',
+            'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary',
+            'disabled:pointer-events-none disabled:opacity-50',
+          )}
+        >
+          <Lightbulb aria-hidden="true" className="h-4 w-4" />
+          {converting ? '生成中…' : '转为产品计划'}
+        </button>
+        <div className="flex items-center gap-2">
         <button
           type="button"
           disabled={busy}
@@ -186,6 +219,7 @@ export default function GovernanceItemDetailView({
           <RotateCcw aria-hidden="true" className="h-4 w-4" />
           重拟
         </button>
+        </div>
       </div>
     </div>
   );

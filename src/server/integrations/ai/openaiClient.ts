@@ -3,6 +3,7 @@ import { getPool } from '@/server/infra/db/pool';
 import { writeSystemLog } from '@/server/infra/logging/systemLogger';
 import { FREE_MODEL_BASE_URL, isFreeModelId } from '@/lib/ai/freeModelConfig';
 import { AppError } from '@/server/infra/http/errors';
+import { DSH_LLM_BASE_URL, dshComplete, isDshLlmAvailable } from './dshLlmBridge';
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 
@@ -73,6 +74,83 @@ function getCompletionModel(payload: unknown): string | null {
   return typeof model === 'string' ? model : null;
 }
 
+/** 把 OpenAI 风格 content（string 或 content 数组）摊平成纯文本。 */
+function flattenMessageContent(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === 'string') return part;
+        if (part && typeof part === 'object' && typeof (part as { text?: unknown }).text === 'string') {
+          return (part as { text: string }).text;
+        }
+        return '';
+      })
+      .join('');
+  }
+  return typeof content === 'undefined' || content === null ? '' : String(content);
+}
+
+interface DshChatPayload {
+  model?: string;
+  messages?: Array<{ role?: unknown; content?: unknown }>;
+  temperature?: number;
+  max_tokens?: number;
+  maxTokens?: number;
+}
+
+/**
+ * DSH 宿主模型 shim：OpenAI 形状的 `chat.completions.create`，内部走 `ctx.llm.stream`。
+ * 因此所有既有 AI 调用点（治理拟折 / 产品计划 / 洗稿 / 摘要）零改动即可用上 DSH 模型。
+ */
+async function createDshLlmCompletion(payload: unknown): Promise<unknown> {
+  const input = (payload ?? {}) as DshChatPayload;
+  const messages = Array.isArray(input.messages) ? input.messages : [];
+
+  let system: string | undefined;
+  const chat: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  for (const message of messages) {
+    const role = typeof message.role === 'string' ? message.role : 'user';
+    const content = flattenMessageContent(message.content);
+    if (role === 'system') {
+      system = system ? `${system}\n${content}` : content;
+    } else if (role === 'assistant') {
+      chat.push({ role: 'assistant', content });
+    } else {
+      chat.push({ role: 'user', content });
+    }
+  }
+
+  const startedAt = Date.now();
+  try {
+    const text = await dshComplete({
+      ...(system ? { system } : {}),
+      messages: chat,
+      ...(typeof input.temperature === 'number' ? { temperature: input.temperature } : {}),
+      maxTokens: typeof input.max_tokens === 'number' ? input.max_tokens : (typeof input.maxTokens === 'number' ? input.maxTokens : 4096),
+      reasoningEffort: 'off',
+    });
+    await writeSystemLog(getPool(), {
+      level: 'info',
+      category: 'external_api',
+      source: 'dsh-llm',
+      message: 'DSH 模型调用 completed',
+      context: { model: input.model ?? null, durationMs: Date.now() - startedAt, via: 'ctx.llm' },
+    }).catch(() => {});
+    return { choices: [{ message: { role: 'assistant', content: text }, finish_reason: 'stop' }] };
+  } catch (err) {
+    await writeSystemLog(getPool(), {
+      level: 'error',
+      category: 'external_api',
+      source: 'dsh-llm',
+      message: 'DSH 模型调用 failed',
+      details: stringifyExternalError(err),
+      context: { model: input.model ?? null, durationMs: Date.now() - startedAt, via: 'ctx.llm' },
+    }).catch(() => {});
+    throw err instanceof Error ? err : new Error(String(err));
+  }
+}
+
 function stringifyExternalError(err: unknown): string {
   if (err instanceof Error) {
     return err.message || err.name || 'Unknown error';
@@ -117,6 +195,22 @@ export function createOpenAIClient(
   input: { apiBaseUrl: string; apiKey: string } & OpenAIClientLoggingInput,
 ) {
   const apiBaseUrl = normalizeBaseUrl(input.apiBaseUrl);
+
+  // 走 DSH 宿主模型：返回 OpenAI 形状 shim（内部 ctx.llm.stream），零改动复用。
+  if (apiBaseUrl === DSH_LLM_BASE_URL) {
+    if (!isDshLlmAvailable()) {
+      throw new AppError('DSH 模型服务不可用', 'dsh_llm_unavailable', 503);
+    }
+    const shim = {
+      chat: {
+        completions: {
+          create: (payload: unknown) => createDshLlmCompletion(payload),
+        },
+      },
+    };
+    return shim as unknown as OpenAI;
+  }
+
   const anonymousFree = apiBaseUrl === FREE_MODEL_BASE_URL && input.apiKey === 'anonymous';
   const fallbackApiBaseUrl = getDockerFallbackBaseUrl(apiBaseUrl);
   const client = buildOpenAIClient(apiBaseUrl, input.apiKey);

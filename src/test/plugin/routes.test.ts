@@ -5,6 +5,7 @@ import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createAuth, SESSION_COOKIE } from '@/plugin/host/auth';
 import { createApiHandler, createStaticHandler } from '@/plugin/host/routes';
+import { makeHostUsersDb } from './hostUsersDb';
 
 interface MockRes {
   status: number | null;
@@ -114,6 +115,55 @@ describe('plugin/host/routes · /s/api', () => {
     await handler(makePost('/s/api/health', {}), res2 as never);
     expect(res2.status).toBe(405);
   });
+
+  it('登录响应回传令牌；随后只带 Authorization 头、没有 cookie 也能进（dsh-app:// 桌面壳的路径）', async () => {
+    const deps = makeDeps();
+    const handler = createApiHandler(deps);
+
+    const login = makeRes();
+    await handler(makePost('/s/api/auth/login', { username: 'admin', password: 'superman-dev' }), login as never);
+    expect(login.status).toBe(200);
+    const token = JSON.parse(login.body).token as string;
+    expect(typeof token).toBe('string');
+    expect(token.length).toBeGreaterThan(0);
+
+    // Electron 主进程转发时会删掉请求里的 cookie、只透传请求头，这里照那样构造
+    const cookieLess = {
+      method: 'GET',
+      url: '/s/api/auth/session',
+      headers: { authorization: `Bearer ${token}` },
+    } as never;
+    const res = makeRes();
+    await handler(cookieLess, res as never);
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body)).toMatchObject({ ok: true, authenticated: true, username: 'admin' });
+  });
+
+  it('cookie 通道回归：带 cookie 的会话照旧可用', async () => {
+    const deps = makeDeps();
+    const handler = createApiHandler(deps);
+    const cookie = await loginCookie(deps);
+    const res = makeRes();
+    await handler(makeGet('/s/api/auth/session', cookie), res as never);
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body)).toMatchObject({ ok: true, authenticated: true });
+  });
+
+  it('伪造令牌：session 端点如实回未登录，业务端点 401', async () => {
+    const handler = createApiHandler(makeDeps());
+    const forged = (url: string) => ({ method: 'GET', url, headers: { authorization: 'Bearer not-a-real-token' } } as never);
+
+    // session 端点不报 401，它只如实回答「没登录」
+    const sessionRes = makeRes();
+    await handler(forged('/s/api/auth/session'), sessionRes as never);
+    expect(sessionRes.status).toBe(200);
+    expect(JSON.parse(sessionRes.body)).toMatchObject({ ok: true, authenticated: false });
+
+    // 真正要求会话的业务端点仍应拒绝
+    const guarded = makeRes();
+    await handler(forged('/s/api/heartbeat'), guarded as never);
+    expect(guarded.status).toBe(401);
+  });
 });
 
 describe('plugin/host/routes · /s/app 静态伺服', () => {
@@ -148,5 +198,54 @@ describe('plugin/host/routes · /s/app 静态伺服', () => {
     await handler(makeGet('/s/app/..%2F..%2Fetc%2Fpasswd'), res as never);
     expect([403, 404]).toContain(res.status);
     if (res.status === 200) throw new Error('路径穿越未被拦截');
+  });
+});
+
+describe('plugin/host/routes · /s/api/auth/host-session（免登录通道）', () => {
+  it('宿主身份可用时自动建号并签发 token；未注入通道依赖时 404', async () => {
+    const db = makeHostUsersDb();
+    const handler = createApiHandler({
+      auth: createAuth({ db: db as never, secret: 's3cret' }),
+      db: db as never,
+      staticRoot: '/nonexistent',
+      hostIdentity: async () => ({ dshAccountId: 'acc-9', displayName: 'tester' }),
+    });
+    const res = makeRes();
+    await handler(makePost('/s/api/auth/host-session', {}), res as never);
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body)).toMatchObject({ ok: true, username: 'tester' });
+    expect(typeof JSON.parse(res.body).token).toBe('string');
+
+    // 浏览器/Web 宿主：没有注入 hostIdentity → 明确 404，H5 据此回落口令登录页
+    const off = createApiHandler(makeDeps());
+    const res2 = makeRes();
+    await off(makePost('/s/api/auth/host-session', {}), res2 as never);
+    expect(res2.status).toBe(404);
+  });
+
+  it('宿主未登录 DeepSeek（identity=null）返回 404，不签会话', async () => {
+    const db = makeHostUsersDb();
+    const handler = createApiHandler({
+      auth: createAuth({ db: db as never, secret: 's3cret' }),
+      db: db as never,
+      staticRoot: '/nonexistent',
+      hostIdentity: async () => null,
+    });
+    const res = makeRes();
+    await handler(makePost('/s/api/auth/host-session', {}), res as never);
+    expect(res.status).toBe(404);
+    expect(db.users).toHaveLength(0);
+  });
+
+  it('数据库未连接时返回 503', async () => {
+    const handler = createApiHandler({
+      auth: createAuth({ db: null, secret: '' }),
+      db: null,
+      staticRoot: '/nonexistent',
+      hostIdentity: async () => ({ dshAccountId: 'acc-9', displayName: 'tester' }),
+    });
+    const res = makeRes();
+    await handler(makePost('/s/api/auth/host-session', {}), res as never);
+    expect(res.status).toBe(503);
   });
 });

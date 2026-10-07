@@ -60,6 +60,13 @@ import {
 import { publishDraftVideoToSau } from '@/core/platform-accounts/sau/sauPublishService'
 import { runTrendRadarSync } from '@/core/trendradar/sync'
 import {
+  relayLoginWithPassword, relayLogout, getRelayStatus, syncMembership,
+  selectRelayKey, selectRelayModel, getRelayRuntimeConfig, saveRelayRuntimeConfig,
+  resolveRelayAiCredential,
+} from '@/core/relay/service'
+import { ENTITLEMENTS, requireEntitled, type Entitlement } from '@/core/relay/entitlements'
+import { listRelayModels } from '@/core/relay/client'
+import {
   getServicesConfig,
   getTrendRadarRunState,
   markTrendRadarRunDate,
@@ -545,6 +552,8 @@ const ROUTES: RouteDef[] = [
 
   // —— 洗稿流水线 ——
   route('POST', '/pipelines/rewrite', async ({ req, res, session, db }) => {
+    // 权益示范点（P2e-6）：洗稿是会员权益；未订阅时 403 membership_required 引导授权
+    await requireEntitled(db as never, session.userId, 'rewrite.execute')
     const body = await readJsonBody(req)
     const articleId = typeof body.articleId === 'string' || typeof body.articleId === 'number'
       ? String(body.articleId)
@@ -1019,6 +1028,72 @@ const ROUTES: RouteDef[] = [
     child.on('error', () => {})
     child.unref()
     json(res, 200, { ok: true, data: { restarting: true } })
+  }),
+
+  // —— 中转站会员（P2e-6 relay 一期）：账密授权 / 会员状态 / Key 与模型选择 / 对账 ——
+
+  route('POST', '/relay/login', async ({ req, res, session, db }) => {
+    if (!db) return json(res, 503, { ok: false, error: { code: 'service_unavailable', message: '数据库未连接' } })
+    const body = await readJsonBody(req)
+    const email = typeof body.email === 'string' ? body.email.trim() : ''
+    const password = typeof body.password === 'string' ? body.password : ''
+    if (!email || !password) throw new ValidationError('请求参数非法', { email: '邮箱与密码必填' })
+    const result = await relayLoginWithPassword(db as never, session.userId, { email, password })
+    json(res, 200, { ok: true, data: result })
+  }),
+
+  route('POST', '/relay/logout', async ({ res, session, db }) => {
+    if (db) await relayLogout(db as never, session.userId)
+    json(res, 200, { ok: true })
+  }),
+
+  route('GET', '/relay/status', async ({ res, session, db }) => {
+    if (!db) return json(res, 503, { ok: false, error: { code: 'service_unavailable', message: '数据库未连接' } })
+    const status = await getRelayStatus(db as never, session.userId)
+    json(res, 200, { ok: true, data: { ...status, entitlementCatalog: ENTITLEMENTS } })
+  }),
+
+  route('POST', '/relay/sync', async ({ res, session, db }) => {
+    if (!db) return json(res, 503, { ok: false, error: { code: 'service_unavailable', message: '数据库未连接' } })
+    const result = await syncMembership(db as never, session.userId)
+    json(res, 200, { ok: true, data: result })
+  }),
+
+  route('POST', '/relay/keys/select', async ({ req, res, session, db }) => {
+    const body = await readJsonBody(req)
+    const keyId = typeof body.keyId === 'string' ? body.keyId.trim() : ''
+    if (!keyId) throw new ValidationError('请求参数非法', { keyId: '必填' })
+    await selectRelayKey(db as never, session.userId, keyId)
+    json(res, 200, { ok: true })
+  }),
+
+  route('POST', '/relay/model/select', async ({ req, res, session, db }) => {
+    const body = await readJsonBody(req)
+    const model = typeof body.model === 'string' ? body.model.trim() : ''
+    if (!model) throw new ValidationError('请求参数非法', { model: '必填' })
+    await selectRelayModel(db as never, session.userId, model)
+    json(res, 200, { ok: true })
+  }),
+
+  route('GET', '/relay/models', async ({ res, session, db }) => {
+    if (!db) return json(res, 503, { ok: false, error: { code: 'service_unavailable', message: '数据库未连接' } })
+    const endpoints = await getRelayRuntimeConfig(db as never)
+    let apiKey = ''
+    try {
+      apiKey = (await resolveRelayAiCredential(db as never, session.userId)).apiKey
+    } catch { apiKey = '' }
+    const models = await listRelayModels(endpoints, apiKey)
+    json(res, 200, { ok: true, data: { items: models } })
+  }),
+
+  route('POST', '/relay/config', async ({ req, res, db }) => {
+    const body = await readJsonBody(req)
+    const saved = await saveRelayRuntimeConfig(db as never, {
+      ...(typeof body.apiUrl === 'string' ? { apiUrl: body.apiUrl } : {}),
+      ...(typeof body.llmBaseUrl === 'string' ? { llmBaseUrl: body.llmBaseUrl } : {}),
+      ...(typeof body.defaultModel === 'string' ? { defaultModel: body.defaultModel } : {}),
+    })
+    json(res, 200, { ok: true, data: saved })
   }),
 
   route('POST', '/drafts/:id/publish', async ({ req, res, params, session, db }) => {

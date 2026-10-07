@@ -6,24 +6,29 @@
  *   - 扫码登录：/login?type=<平台代号>&id=<会话 id> 的 SSE 流 → 会话 + 轮询模型；
  *   - cookie 上收：vendor 回调（payload.type 区分平台）+ confirm 拉取兜底；
  *   - 共享密钥：env SAU_TOKEN，随 X-Sau-Token 头发送。
- * 本期开放 douyin(3) / xhs(1)；视频号(2)/快手(4) 留后续。
+ * 四平台全开：xhs(1) / channels(2) / douyin(3) / kuaishou(4)（P2e-4 泛化，
+ * vendor login.py 的视频号/快手流程已同步补 push_login_callback）。
  */
 import { randomUUID } from 'node:crypto';
 
-export type SauPlatform = 'douyin' | 'xhs';
+export type SauPlatform = 'xhs' | 'channels' | 'douyin' | 'kuaishou';
 
 export const SAU_PLATFORM_TYPE: Record<SauPlatform, number> = {
   xhs: 1,
+  channels: 2,
   douyin: 3,
+  kuaishou: 4,
 };
 
 export function isSauPlatform(value: unknown): value is SauPlatform {
-  return value === 'douyin' || value === 'xhs';
+  return value === 'douyin' || value === 'xhs' || value === 'channels' || value === 'kuaishou';
 }
 
 export function sauPlatformFromType(type: number): SauPlatform | null {
   if (type === 1) return 'xhs';
+  if (type === 2) return 'channels';
   if (type === 3) return 'douyin';
+  if (type === 4) return 'kuaishou';
   return null;
 }
 
@@ -141,6 +146,15 @@ export interface SauLoginSession {
 const sessions = new Map<string, SauLoginSession>();
 const SESSION_TTL_MS = 220_000; // vendor 扫码超时 200s + 余量
 
+/**
+ * vendor 二维码归一：视频号（type=2）推的是微信开放平台相对路径
+ * （/connect/qrcode/<ticket>），补全为绝对 URL；其余平台是 data-url 或绝对地址原样放行。
+ */
+function normalizeQrSrc(raw: string): string {
+  if (raw.startsWith('/connect/qrcode/')) return `https://open.weixin.qq.com${raw}`;
+  return raw;
+}
+
 export function getSauLoginSession(id: string): SauLoginSession | null {
   return sessions.get(id) ?? null;
 }
@@ -239,7 +253,7 @@ async function consumeVendorLoginSse(
       } else if (data === '500') {
         session.status = 'expired';
       } else if (!session.qrSrc) {
-        session.qrSrc = data;
+        session.qrSrc = normalizeQrSrc(data);
       }
     }
   }

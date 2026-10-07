@@ -70,8 +70,8 @@ window.__ModuleLoader__.load({
 
     // RSS 与加工台各自独立 store（互不干扰）
     var rssStore = createStore({ feeds: [], categories: [], status: 'idle', feed: null, articles: null, detail: null })
-    // 加工台队列（视频条目 + 文案/分析完成度 + 已下载素材 + 仪表盘统计 + UI 状态）
-    var wbStore = createStore({ status: 'idle', items: [], stats: {}, materials: [], dashboard: null, busy: null, note: '' })
+    // 加工台队列（视频条目 + 文案/分析完成度 + 已下载素材 + 仪表盘统计 + 二创摘要 + UI 状态）
+    var wbStore = createStore({ status: 'idle', items: [], stats: {}, materials: [], dashboard: null, remixes: {}, busy: null, note: '' })
     // 主工作区浮层 store：点击博主后在此展开文章列表(二级)+文章详情(三级)，
     // 仿 dsh-worktable 控制室在 main 区域铺满，不挤在侧边栏。
     var wsStore = createStore({ open: false, feed: null, articles: [], article: null })
@@ -713,6 +713,66 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'ffw-root' }, body, overlay)
     }
 
+    /**
+     * Kanban 看板（复用组件，jKanban 式三件套接口：列配置 + 卡片渲染 + 拖拽回调）。
+     * props:
+     *   columns   [{ id, name, count?, cards: [card], hint? }] — 列由外部按状态推导
+     *   renderCard(card) -> node
+     *   onCardClick(card)                      — 点击卡片
+     *   onDrop(card, fromColId, toColId)       — 拖拽跨列落下（同列不回调）
+     * 拖拽用原生 HTML5 DnD：桌面端宿主可用，浏览器自带 ghost，无需额外依赖。
+     */
+    function Kanban(props) {
+      var columns = props.columns || []
+      var dragRef = useRef(null)
+      var overPair = useState(null)
+      var over = overPair[0]
+      var setOver = overPair[1]
+      function onDragStart(colId, card, e) {
+        dragRef.current = { colId: colId, card: card }
+        try { e.dataTransfer.setData('text/plain', 'ffw-kanban'); e.dataTransfer.effectAllowed = 'move' } catch (err) {}
+        if (e.target && e.target.classList) e.target.classList.add('dragging')
+      }
+      function onDragEnd(e) {
+        dragRef.current = null
+        if (e.target && e.target.classList) e.target.classList.remove('dragging')
+        setOver(null)
+      }
+      function colDrop(e, col) {
+        e.preventDefault()
+        var d = dragRef.current
+        setOver(null)
+        if (!d || d.colId === col.id) return
+        if (props.onDrop) props.onDrop(d.card, d.colId, col.id)
+      }
+      return h('div', { className: 'ffw-kanban' }, columns.map(function (col) {
+        return h('div', {
+          key: col.id,
+          className: cx('ffw-kcol', over === col.id && 'over'),
+          onDragOver: function (e) { e.preventDefault(); e.dataTransfer.dropEffect = 'move' },
+          onDragEnter: function () { setOver(col.id) },
+          onDrop: function (e) { colDrop(e, col) },
+        },
+          h('div', { className: 'ffw-kcol-h' },
+            col.dot ? h('span', { className: 'ffw-kcol-dot', style: { background: col.dot } }) : null,
+            h('span', { className: 'ffw-kcol-name' }, col.name),
+            h('span', { className: 'ffw-kcol-cnt' }, col.count != null ? col.count : col.cards.length)),
+          col.hint ? h('div', { className: 'ffw-kcol-hint' }, col.hint) : null,
+          h('div', { className: 'ffw-kcol-b' },
+            col.cards.length === 0 ? h('div', { className: 'ffw-kcol-empty' }, '—') : null,
+            col.cards.map(function (card) {
+              return h('div', {
+                key: card.id,
+                className: 'ffw-kcard',
+                draggable: true,
+                onDragStart: function (e) { onDragStart(col.id, card, e) },
+                onDragEnd: onDragEnd,
+                onClick: function () { if (props.onCardClick) props.onCardClick(card) },
+              }, props.renderCard(card))
+            })))
+      }))
+    }
+
     // —— 自媒体 tab ——
     // —— 加工台：订阅来的短视频 → 提取文案 → AI 标签评分 → 二次创作 ——
     //
@@ -733,14 +793,24 @@ window.__ModuleLoader__.load({
       var notePair = useState(null)
       var note = notePair[0]
       var setNote = notePair[1]
+      // 视图模式：看板(默认) / 列表，localStorage 记忆
+      var viewPair = useState(function () {
+        try { return localStorage.getItem('ffw_wb_view') === 'table' ? 'table' : 'kanban' } catch (e) { return 'kanban' }
+      })
+      var view = viewPair[0]
+      var setView = viewPair[1]
+      function switchView(v) {
+        setView(v)
+        try { localStorage.setItem('ffw_wb_view', v) } catch (e) {}
+      }
 
       function loadList(force) {
         wbStore.set({ status: 'loading', items: [], stats: {}, dashboard: dashboard })
         Promise.all([ffFetch('workbench', { limit: '300' }), ffFetch('materials'), ffFetch('workbench-stats')]).then(function (rs) {
           var r = rs[0], mat = rs[1], ds = rs[2]
-          if (r && r.ok) wbStore.set({ status: 'ready', items: r.items || [], stats: r.stats || {}, materials: (mat && mat.materials) || [], dashboard: (ds && ds.ok) ? ds : dashboard })
-          else wbStore.set({ status: 'error', items: [], stats: {}, materials: [], dashboard: dashboard })
-        }).catch(function () { wbStore.set({ status: 'error', items: [], stats: {}, materials: [], dashboard: dashboard }) })
+          if (r && r.ok) wbStore.set({ status: 'ready', items: r.items || [], stats: r.stats || {}, materials: (mat && mat.materials) || [], dashboard: (ds && ds.ok) ? ds : dashboard, remixes: r.remixes || {} })
+          else wbStore.set({ status: 'error', items: [], stats: {}, materials: [], dashboard: dashboard, remixes: {} })
+        }).catch(function () { wbStore.set({ status: 'error', items: [], stats: {}, materials: [], dashboard: dashboard, remixes: {} }) })
       }
 
       var load = useCallback(function () {
@@ -807,6 +877,80 @@ window.__ModuleLoader__.load({
         return procStatus(a) === filter
       })
 
+      // —— 看板视图：按处理进度自动归列（列即进度；拖拽向右 = 触发下一步动作）——
+      // 归列依据全部来自现有数据，零建库：transcript / structured_tags / remixes / sentAt
+      var remixMap = s.remixes || {}
+      var boardColDefs = [
+        { id: 'pending', name: '待提取', hint: '新抓取入库 · 拖向右列 = 提取文案', dot: 'var(--dsw-alias-label-secondary)' },
+        { id: 'transcribed', name: '已提取文案', hint: '拖向右列 = AI 打标', dot: 'var(--dsw-alias-brand-primary)' },
+        { id: 'tagged', name: '已打标', hint: '拖向右列 = 去二创', dot: 'var(--dsw-alias-state-success-primary,var(--dsw-alias-brand-primary))' },
+        { id: 'remixed', name: '已产稿', hint: '二创里生成稿件', dot: 'var(--dsw-alias-state-warning-primary,var(--dsw-alias-brand-primary))' },
+        { id: 'sent', name: '已送草稿', hint: '二创点「送入聊天」后自动归列', dot: 'var(--dsw-alias-state-success-primary,var(--dsw-alias-brand-primary))' },
+      ]
+      function boardCol(a) {
+        var rm = remixMap[a.id]
+        if (rm && rm.sentAt) return 'sent'
+        if (rm && rm.count > 0) return 'remixed'
+        if (a.structured_tags) return 'tagged'
+        if (a.transcript) return 'transcribed'
+        return 'pending'
+      }
+      var boardGroups = {}
+      boardColDefs.forEach(function (c) { boardGroups[c.id] = [] })
+      items.forEach(function (a) { var c = boardCol(a); if (!boardGroups[c]) boardGroups[c] = []; boardGroups[c].push(a) })
+      boardColDefs.forEach(function (c) {
+        c.cards = boardGroups[c.id] || []
+        c.count = c.cards.length
+        // 列内排序：爆款分降序 → 发布时间降序
+        c.cards.sort(function (x, y) {
+          var sx = x.score == null ? -1 : x.score, sy = y.score == null ? -1 : y.score
+          if (sy !== sx) return sy - sx
+          return (y.publishedAt || 0) - (x.publishedAt || 0)
+        })
+      })
+      var REMIX_TYPE_SHORT = { oral: '口播', storyboard: '分镜', drama: '短剧', post: '图文', title: '标题' }
+      function renderKCard(a) {
+        var rm = remixMap[a.id]
+        var st = a.structured_tags
+        var chips = []
+        if (a.score != null) chips.push(h('span', { key: 'sc', className: 'ffw-score' }, a.score))
+        if (st && st.direction) chips.push(h('span', { key: 'dir', className: 'ffw-dir-badge' }, st.direction))
+        if (a.transcript) chips.push(h('span', { key: 'tc', className: 'ffw-chip static' }, a.transcriptSource === 'whisper' ? '🎙 语音' : '🎙 字幕'))
+        if (rm && rm.count) {
+          var names = Object.keys(rm.types || {}).map(function (t) { return REMIX_TYPE_SHORT[t] || t }).join('/')
+          chips.push(h('span', { key: 'rm', className: 'ffw-chip static ok', title: names }, '📝 ' + rm.count))
+        }
+        if (rm && rm.sentAt) chips.push(h('span', { key: 'sent', className: 'ffw-chip static ok' }, '📤 ' + fmtTime(rm.sentAt)))
+        return h('div', { className: 'ffw-kcard-in' },
+          h('div', { className: 'ffw-kcard-top' },
+            a.previewImage ? h('img', { className: 'ffw-art-cover', src: a.previewImage, alt: '', loading: 'lazy' }) : h('div', { className: 'ffw-art-cover ph' }, '🎬'),
+            h('div', { className: 'ffw-kcard-t' },
+              h('div', { className: 'ffw-art-title' }, a.title),
+              h('div', { className: 'ffw-meta' }, (a.author || '') + (a.publishedAt ? ' · ' + fmtTime(a.publishedAt) : '')))),
+          chips.length ? h('div', { className: 'ffw-kcard-tags' }, chips) : null)
+      }
+      /** 拖拽跨列：向右一列 = 触发该步动作，落点列由数据自动归位（不支持回拖）。 */
+      function kanbanDrop(a, fromCol, toCol) {
+        if (busy) { setNote('有任务进行中，等当前动作完成再拖'); return }
+        if (toCol === 'transcribed' && fromCol === 'pending') { transcribe(a); return }
+        if (toCol === 'tagged') {
+          if (!a.transcript && !a.summary) { setNote('这条还没有文案，先拖到「已提取文案」'); return }
+          autoTagOne(a); return
+        }
+        if (toCol === 'remixed') {
+          if (!a.transcript && !a.summary) { setNote('这条还没有文案，请先提取文案再去二创'); return }
+          openRemix(a); return
+        }
+        if (toCol === 'sent') { setNote('在二创里生成稿件点「送入聊天」后，会自动归到这里'); return }
+        setNote('看板按处理进度自动归列，只能向右拖触发下一步')
+      }
+      var kanbanNode = h(Kanban, {
+        columns: boardColDefs,
+        renderCard: renderKCard,
+        onCardClick: function (a) { openWb(items, a) },
+        onDrop: kanbanDrop,
+      })
+
       return h('div', { className: 'ffw-root' },
         h('div', { className: 'ffw-body' },
           // ── 仪表盘 ──
@@ -854,6 +998,11 @@ window.__ModuleLoader__.load({
           h('div', { className: 'ffw-toolbar ffw-subbar' },
             h('span', { className: 'ffw-cnt' }, '共 ' + items.length + ' 条'),
             h('span', { className: 'ffw-sp' }),
+            h('div', { className: 'ffw-viewseg' },
+              h(Tooltip, { label: '看板视图（按处理进度自动归列）', delayMs: 400 },
+                h('button', { type: 'button', className: cx('ffw-iconbtn', view === 'kanban' && 'on'), 'aria-label': '看板视图', disabled: !!busy, onClick: function () { switchView('kanban') } }, '▦')),
+              h(Tooltip, { label: '列表视图', delayMs: 400 },
+                h('button', { type: 'button', className: cx('ffw-iconbtn', view === 'table' && 'on'), 'aria-label': '列表视图', disabled: !!busy, onClick: function () { switchView('table') } }, '☰'))),
             h(Tooltip, { label: '刷新数据与统计', delayMs: 400 },
               h('button', { type: 'button', className: 'ffw-iconbtn', 'aria-label': '刷新', disabled: !!busy, onClick: function () { loadList(true) } },
                 h(IconRefreshOutline16, { size: 14, className: busy && busy.id === 'batch' ? 'ffw-spin' : null }))),
@@ -861,19 +1010,21 @@ window.__ModuleLoader__.load({
               h('button', { type: 'button', className: cx('ffw-tbtn', 'on'), disabled: !!busy, onClick: autoTagBatch },
                 busy && busy.id === 'batch' ? '打标中…' : '批量自动打标'))),
           note ? h('div', { className: 'ffw-note' }, note) : null,
-          // ── 状态筛选 ──
-          h('div', { className: 'ffw-filters' },
+          // ── 状态筛选（列表视图专用；看板的列本身就是分组）──
+          view === 'table' ? h('div', { className: 'ffw-filters' },
             FILTERS.map(function (f) {
               return h('button', {
                 key: f.id, type: 'button',
                 className: cx('ffw-chip', filter === f.id && 'on'),
                 onClick: function () { setFilter(f.id) },
               }, f.name + (f.count != null ? ' (' + f.count + ')' : ''))
-            })),
+            })) : null,
           status === 'error' ? h('div', { className: 'ffw-status err' }, '读取加工台队列失败', h('button', { onClick: function () { loadList(true) } }, '重试')) : null,
           shown.length === 0 ? h('div', { className: 'ffw-empty' }, items.length === 0 ? '还没有视频条目。到「RSS订阅」里订阅一个抖音博主（粘贴 rsshub://douyin/user/<secUid> 或主页地址）即可。' : '该筛选下没有条目') : null,
-          // ── 数据表格 ──
-          h('div', { className: 'ffw-table' },
+          // ── 数据表格 / 看板（按视图切换）──
+          view === 'kanban'
+            ? kanbanNode
+            : h('div', { className: 'ffw-table' },
             h('div', { className: 'ffw-table-hdr' },
               h('span', { className: 'ffw-th ffw-th-cover' }, ''),
               h('span', { className: 'ffw-th ffw-th-title' }, '标题 / 博主'),
@@ -1651,6 +1802,29 @@ window.__ModuleLoader__.load({
       '.ffw-status-tag.transcribed{color:var(--dsw-alias-brand-primary);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 12%,transparent)}',
       '.ffw-status-tag.tagged{color:var(--dsw-alias-state-success-primary,var(--dsw-alias-brand-primary));background:color-mix(in srgb,var(--dsw-alias-state-success-primary,var(--dsw-alias-brand-primary)) 12%,transparent)}',
       '.ffw-dir-badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10.5px;font-weight:600;color:var(--dsw-alias-brand-primary);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 10%,transparent)}',
+      // —— 视图切换 + 看板（对齐表格/卡片的既有设计语言）——
+      '.ffw-viewseg{display:flex;gap:2px;padding:2px;border-radius:9px;border:1px solid var(--dsw-alias-border-l1)}',
+      '.ffw-viewseg .ffw-iconbtn{border:none;width:24px;height:22px;border-radius:7px}',
+      '.ffw-viewseg .ffw-iconbtn.on{background:var(--dsw-alias-brand-primary);color:#fff}',
+      '.ffw-kanban{display:flex;gap:10px;align-items:flex-start;overflow-x:auto;padding-bottom:10px}',
+      '.ffw-kcol{flex:1 1 0;min-width:216px;max-width:300px;display:flex;flex-direction:column;max-height:calc(100vh - 350px);border:1px solid var(--dsw-alias-border-l1);border-radius:11px;background:color-mix(in srgb,var(--dsw-alias-label-primary) 2%,transparent)}',
+      '.ffw-kcol.over{border-color:var(--dsw-alias-brand-primary);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 6%,transparent)}',
+      '.ffw-kcol-h{display:flex;align-items:center;gap:7px;padding:8px 11px 6px;font-size:10px;font-weight:600;color:var(--dsw-alias-label-secondary);text-transform:uppercase;letter-spacing:.4px}',
+      '.ffw-kcol-dot{width:7px;height:7px;border-radius:50%;flex:none}',
+      '.ffw-kcol-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.ffw-kcol-cnt{flex:none;min-width:20px;text-align:center;padding:0 7px;border-radius:999px;font-size:10px;font-weight:700;background:color-mix(in srgb,var(--dsw-alias-label-primary) 8%,transparent);color:var(--dsw-alias-label-secondary)}',
+      '.ffw-kcol-hint{font-size:10px;color:var(--dsw-alias-label-secondary);opacity:.75;padding:0 11px 6px}',
+      '.ffw-kcol-b{flex:1;overflow-y:auto;min-height:64px;padding:2px 8px 8px;display:flex;flex-direction:column;gap:8px}',
+      '.ffw-kcol-empty{text-align:center;color:var(--dsw-alias-label-secondary);font-size:11px;padding:14px 0}',
+      '.ffw-kcard{border:1px solid var(--dsw-alias-border-l1);border-radius:11px;padding:9px 10px;background:var(--dsw-alias-bg-base);cursor:grab;transition:.14s}',
+      '.ffw-kcard:hover{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 35%,transparent)}',
+      '.ffw-kcard.dragging{opacity:.45;cursor:grabbing}',
+      '.ffw-kcard-in{display:flex;flex-direction:column;gap:7px}',
+      '.ffw-kcard-top{display:flex;gap:8px;align-items:flex-start}',
+      '.ffw-kcard-t{flex:1;min-width:0}',
+      '.ffw-kcard-tags{display:flex;flex-wrap:wrap;gap:4px}',
+      '.ffw-chip.static{cursor:default}',
+      '.ffw-chip.static.ok{color:var(--dsw-alias-state-success-primary,var(--dsw-alias-brand-primary));border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary,var(--dsw-alias-brand-primary)) 35%,transparent)}',
       // —— 结构化标签 ——
       '.ffw-st-row{display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;font-size:12px}',
       '.ffw-st-label{flex:none;min-width:68px;color:var(--dsw-alias-label-secondary);font-weight:600;text-transform:uppercase;letter-spacing:.3px;font-size:10.5px}',
@@ -2140,7 +2314,13 @@ window.__ModuleLoader__.load({
       function copyOut() {
         try { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(output || ''); setRemix({ note: '已复制' }) } catch (e) { setRemix({ note: '复制失败' }) }
       }
-      function sendToChat() { if (output) sendDraft('这是我对这条视频的二创（' + (REMIX_TYPES[contentType] || contentType) + '）：\n' + output) }
+      function sendToChat() {
+        if (!output) return
+        sendDraft('这是我对这条视频的二创（' + (REMIX_TYPES[contentType] || contentType) + '）：\n' + output)
+        // 看板「已送草稿」列依据：标记该形态最新一版已送出
+        ffJson('remix-sent', 'POST', { articleId: a.id, contentType: contentType })
+        setRemix({ note: '已送入聊天，看板将归入「已送草稿」' })
+      }
       var srcText = String((a && (a.transcript || a.summary || '')) || '')
 
       return h('div', { className: 'ffw-ov', style: { left: geom.left, top: geom.top, width: width, height: height } },

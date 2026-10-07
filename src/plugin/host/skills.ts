@@ -38,6 +38,11 @@ rejected → archived（restore 恢复）
 - 相似度 > 0.5 会自动带降重指令重写一次；仍 > 0.5 落 needs_review。
 - **needs_review 草稿必须提醒用户人工终审，绝不能当完成品交付。**
 
+### 产品计划（商业决策 MVP 规划）
+- 两个数据来源汇入同一张 product_plans 表：manual（用户口述想法）/ ai_inferred（从「搞钱」方向内容推理）。
+- 每份计划是一份结构化 MVP 规划：产品描述 / 目标人群·客户 / 思路打法 / 商业模式 / 风险 / 竞品 / 定价 / 里程碑 / 验证计划。
+- 状态机：idea → validating → building → launched（archived 归档）。AI 未配置时回退启发式占位，不阻塞落库。
+
 ## 工具清单
 - superman_stats：今日概况（待批/归档/采集成败/队列规模）
 - superman_queue_list(status?, limit?, keyword?)：看治理队列
@@ -51,6 +56,10 @@ rejected → archived（restore 恢复）
 - superman_drafts_list(platform?, limit?)：草稿箱
 - superman_draft_read(id)：读草稿全文
 - superman_fetch_trigger(scope?)：手动触发一轮到期源抓取（单次，不动调度开关）
+- superman_product_plans_list(status?, limit?)：列产品计划（口述想法 + AI 内容推理）
+- superman_product_plan_create(idea, note?)：把一句产品想法整理成 MVP 规划（产品描述/人群/思路/商业模式/风险/竞品/定价/里程碑/验证计划）
+- superman_product_plan_from_article(articleId)：从一篇已归档内容推理产品机会（幂等）
+- superman_product_plan_scan(limit?)：批量扫描「搞钱」方向内容生成产品计划
 - superman_ping：连通性自检
 
 ## 安全边界（红线，违反即错误操作）
@@ -66,6 +75,9 @@ rejected → archived（restore 恢复）
 - 「帮我审一下待批」→ queue_list → 逐条 item_detail → 给建议 → 用户确认后 approve/reject/redraft
 - 「热点找选题」→ trending_today → 挑中后 trending_promote → 提示用户去审批台批准
 - 「把这篇洗成小红书」→ item_detail 确认 → rewrite_start → 稍后 drafts_list / draft_read 验收
+- 「我有个产品想法」→ product_plan_create（把口述整理成 MVP 规划）→ 提示用户去创作台「产品计划」区查看/编辑
+- 「这条内容能不能做成产品」→ product_plan_from_article(articleId)（幂等，已生成则返回原计划）
+- 「最近有什么产品机会」→ product_plan_scan → product_plans_list 汇总
 `
 
 /** 注册 superman 技能（modelInvocable + userInvocable）。 */

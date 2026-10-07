@@ -25,6 +25,16 @@ export const PLATFORM_META: Record<
     badgeClass: 'border-success/40 bg-success/10 text-success',
     realData: false,
   },
+  channels: {
+    name: '视频号',
+    badgeClass: 'border-warning/40 bg-warning/10 text-warning',
+    realData: false,
+  },
+  kuaishou: {
+    name: '快手',
+    badgeClass: 'border-warning/40 bg-warning/10 text-warning',
+    realData: false,
+  },
   other: {
     name: '其他',
     badgeClass: 'border-border bg-secondary text-secondary-foreground',

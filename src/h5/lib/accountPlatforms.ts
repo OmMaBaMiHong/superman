@@ -8,8 +8,10 @@ export const ACCOUNT_PLATFORM_META: Record<
   wechat: { name: '公众号', icon: '💬', supported: true },
   douyin: { name: '抖音', icon: '🎵', supported: true },
   xhs: { name: '小红书', icon: '📕', supported: true },
+  channels: { name: '视频号', icon: '🎬', supported: true },
+  kuaishou: { name: '快手', icon: '⚡', supported: true },
   bilibili: { name: 'B站', icon: '📺', supported: false },
-  channels: { name: '视频号', icon: '🎬', supported: false },
+  weibo: { name: '微博', icon: '🌐', supported: false },
 };
 
 /** 相对时间（验证时间显示用）。 */

@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>加工台 · 看板视图 视觉稿</title>
+<style>
+  /* ===== 主题令牌（对齐 DSH --dsw-alias-* 风格）===== */
+  :root, html[data-theme="dark"] {
+    --bg: #17181c;            /* 宿主底 */
+    --bg-base: #1e2025;       /* 面板底 */
+    --bg-hover: rgba(255,255,255,.05);
+    --label: rgba(255,255,255,.92);
+    --label-2: rgba(255,255,255,.55);
+    --label-3: rgba(255,255,255,.38);
+    --border: rgba(255,255,255,.10);
+    --brand: #4d6bfe;
+    --brand-soft: rgba(77,107,254,.14);
+    --ok: #34c77b;
+    --ok-soft: rgba(52,199,123,.16);
+    --warn: #f5a623;
+  }
+  html[data-theme="light"] {
+    --bg: #eceef2;
+    --bg-base: #ffffff;
+    --bg-hover: rgba(0,0,0,.04);
+    --label: #1b1f27;
+    --label-2: #5b6472;
+    --label-3: #9aa1ad;
+    --border: rgba(0,0,0,.09);
+    --brand: #4d6bfe;
+    --brand-soft: rgba(77,107,254,.10);
+    --ok: #1fa464;
+    --ok-soft: rgba(31,164,100,.12);
+    --warn: #d9860b;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    width:1440px; height:960px; overflow:hidden;
+    background:var(--bg); color:var(--label);
+    font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    font-size:13px; display:flex;
+  }
+  /* ===== 左侧宿主侧栏（示意）===== */
+  .side { width:196px; flex:none; background:var(--bg-base); border-right:1px solid var(--border); padding:14px 10px; }
+  .brand { display:flex; align-items:center; gap:8px; padding:6px 8px 16px; font-weight:700; font-size:14px; }
+  .brand i { width:22px; height:22px; border-radius:7px; background:linear-gradient(135deg,var(--brand),#8a5cff); display:inline-block; }
+  .nav { display:flex; flex-direction:column; gap:2px; }
+  .nav a { display:flex; align-items:center; gap:9px; padding:8px 10px; border-radius:9px; color:var(--label-2); text-decoration:none; font-size:12.5px; }
+  .nav a.on { background:var(--brand-soft); color:var(--brand); font-weight:600; }
+  .nav a .ico { width:16px; text-align:center; opacity:.9; }
+  .side .foot { margin-top:420px; padding:8px 10px; color:var(--label-3); font-size:11px; }
+
+  /* ===== 主区 ===== */
+  .main { flex:1; padding:16px 18px; display:flex; flex-direction:column; gap:12px; min-width:0; }
+  .crumb { color:var(--label-3); font-size:11.5px; }
+  .crumb b { color:var(--label); font-size:15px; margin-right:8px; }
+
+  /* 仪表盘条 */
+  .dash { display:flex; gap:10px; }
+  .stat { flex:1; background:var(--bg-base); border:1px solid var(--border); border-radius:12px; padding:10px 14px; }
+  .stat .v { font-size:20px; font-weight:700; }
+  .stat .l { font-size:10.5px; color:var(--label-2); margin-top:2px; }
+  .stat.brand .v { color:var(--brand); }
+  .stat.ok .v { color:var(--ok); }
+
+  /* 工具栏 */
+  .bar { display:flex; align-items:center; gap:8px; }
+  .cnt { color:var(--label-2); font-size:12px; }
+  .sp { flex:1; }
+  .seg { display:flex; gap:2px; padding:2px; border:1px solid var(--border); border-radius:9px; background:var(--bg-base); }
+  .seg button { width:28px; height:24px; border:none; border-radius:7px; background:transparent; color:var(--label-3); cursor:pointer; font-size:13px; }
+  .seg button.on { background:var(--brand); color:#fff; }
+  .btn { padding:6px 12px; border-radius:9px; border:1px solid var(--border); background:var(--bg-base); color:var(--label-2); font-size:12px; cursor:pointer; }
+  .btn.primary { background:var(--brand); border-color:var(--brand); color:#fff; font-weight:600; }
+  .iconbtn { width:26px; height:26px; border-radius:8px; border:1px solid var(--border); background:var(--bg-base); color:var(--label-2); }
+
+  /* ===== 看板 ===== */
+  .board { display:flex; gap:10px; align-items:flex-start; }
+  .col { flex:1 1 0; min-width:222px; max-width:292px; background:var(--bg-base); border:1px solid var(--border); border-radius:12px; display:flex; flex-direction:column; max-height:700px; }
+  .col.over { border:1.5px dashed var(--brand); background:var(--brand-soft); }
+  .colh { display:flex; align-items:center; gap:8px; padding:9px 12px 7px; }
+  .colh .dot { width:7px; height:7px; border-radius:50%; flex:none; }
+  .colh .nm { flex:1; font-size:12px; font-weight:700; color:var(--label); }
+  .colh .cd { min-width:22px; text-align:center; padding:1px 7px; border-radius:999px; font-size:10.5px; font-weight:700; color:var(--label-2); background:var(--bg-hover); }
+  .colh .cd.hi { background:var(--brand-soft); color:var(--brand); }
+  .hint { padding:0 12px 7px; font-size:10px; color:var(--label-3); }
+  .colb { padding:4px 8px 8px; display:flex; flex-direction:column; gap:8px; overflow:hidden; }
+  .more { text-align:center; font-size:10.5px; color:var(--label-3); padding:2px 0 4px; }
+
+  /* 卡片 */
+  .card { background:var(--bg); border:1px solid var(--border); border-radius:11px; padding:9px; cursor:grab; }
+  html[data-theme="light"] .card { background:#fbfcfe; }
+  .card:hover { border-color:color-mix(in srgb, var(--brand) 40%, transparent); }
+  .card .top { display:flex; gap:8px; }
+  .cover { width:52px; height:52px; border-radius:8px; flex:none; display:flex; align-items:center; justify-content:center; font-size:16px; color:rgba(255,255,255,.85); }
+  .g1 { background:linear-gradient(135deg,#3b4b9e,#6a5cff); } .g2 { background:linear-gradient(135deg,#8a3b5e,#d66a8a); }
+  .g3 { background:linear-gradient(135deg,#1f7a5c,#3bbf8e); } .g4 { background:linear-gradient(135deg,#8a6d3b,#d9a94e); }
+  .g5 { background:linear-gradient(135deg,#4b5563,#8b95a5); } .g6 { background:linear-gradient(135deg,#2f5fa8,#5f9be0); }
+  .card .tt { flex:1; min-width:0; }
+  .card .title { font-size:12px; font-weight:600; line-height:1.45; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .card .meta { font-size:10.5px; color:var(--label-2); margin-top:3px; }
+  .tags { display:flex; flex-wrap:wrap; gap:4px; margin-top:8px; }
+  .chip { padding:1px 7px; border-radius:999px; font-size:10px; color:var(--label-2); background:var(--bg-hover); border:1px solid var(--border); }
+  .chip.score { color:var(--brand); background:var(--brand-soft); border:none; font-weight:700; }
+  .chip.dir { color:var(--brand); background:var(--brand-soft); border:none; font-weight:600; }
+  .chip.ok { color:var(--ok); background:var(--ok-soft); border:none; font-weight:600; }
+  .chip.warn { color:var(--warn); background:color-mix(in srgb, var(--warn) 12%, transparent); border:none; font-weight:600; }
+
+  /* 拖拽示意：被拖起的卡 */
+  .card.drag { transform:rotate(2.5deg); opacity:.92; box-shadow:0 12px 28px rgba(0,0,0,.35); cursor:grabbing; }
+  .dropzone { border:1.5px dashed var(--brand); border-radius:10px; padding:10px; text-align:center; color:var(--brand); font-size:11px; background:var(--brand-soft); }
+
+  .note { font-size:11.5px; color:var(--label-2); background:var(--bg-base); border:1px solid var(--border); border-radius:9px; padding:6px 12px; width:fit-content; }
+  .note b { color:var(--brand); }
+
+  /* 底部图例 */
+  .legend { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:auto; padding:10px 14px; background:var(--bg-base); border:1px solid var(--border); border-radius:10px; font-size:11px; color:var(--label-2); }
+  .lg-t { font-weight:700; color:var(--label); font-size:11.5px; margin-right:4px; }
+  .lg-item { display:inline-flex; align-items:center; gap:6px; }
+  .lg-item i { width:8px; height:8px; border-radius:50%; display:inline-block; }
+  .lg-arrow { color:var(--label-3); }
+</style>
+</head>
+<body>
+  <!-- 左侧宿主侧栏 -->
+  <div class="side">
+    <div class="brand"><i></i>FeedFuse</div>
+    <div class="nav">
+      <a href="#"><span class="ico">💬</span>工作区</a>
+      <a href="#"><span class="ico">📡</span>RSS订阅</a>
+      <a class="on" href="#"><span class="ico">🎬</span>自媒体 · 加工台</a>
+      <a href="#"><span class="ico">⚙️</span>设置</a>
+    </div>
+    <div class="foot">视觉稿 v1 · 仅供确认</div>
+  </div>
+
+  <div class="main">
+    <div class="crumb"><b>加工台</b>订阅视频 → 提取文案 → AI 打标 → 二创 → 送出</div>
+
+    <!-- 仪表盘条（保留） -->
+    <div class="dash">
+      <div class="stat"><div class="v">320</div><div class="l">总视频</div></div>
+      <div class="stat brand"><div class="v">+26</div><div class="l">今日新增</div></div>
+      <div class="stat"><div class="v">218</div><div class="l">已提取</div></div>
+      <div class="stat ok"><div class="v">164</div><div class="l">已打标</div></div>
+      <div class="stat brand"><div class="v">72</div><div class="l">平均爆款分</div></div>
+    </div>
+
+    <!-- 工具栏：视图切换 -->
+    <div class="bar">
+      <span class="cnt">共 320 条 · 看板按处理进度自动归列</span>
+      <span class="sp"></span>
+      <div class="seg" title="视图切换">
+        <button class="on" title="看板视图">▦</button>
+        <button title="列表视图">☰</button>
+      </div>
+      <button class="btn iconbtn">⟳</button>
+      <button class="btn primary">批量自动打标</button>
+    </div>
+
+    <div class="note">💡 卡片可<b>向右拖拽</b>触发下一步：拖进「已提取」= 提取文案；拖进「已打标」= AI 打标；拖进「已产稿」= 打开二创</div>
+
+    <!-- 看板 -->
+    <div class="board">
+
+      <!-- 列1：待提取 -->
+      <div class="col">
+        <div class="colh"><span class="dot" style="background:var(--label-3)"></span><span class="nm">待提取</span><span class="cd">102</span></div>
+        <div class="hint">新抓取入库</div>
+        <div class="colb">
+          <div class="card"><div class="top">
+            <div class="cover g5">🎬</div>
+            <div class="tt"><div class="title">月薪3千和3万的人，差的不是努力是这3个习惯</div>
+            <div class="meta">@成长研习社 · 2小时前</div></div></div>
+            <div class="tags"><span class="chip">📹 视频</span></div></div>
+          <div class="card"><div class="top">
+            <div class="cover g6">🎬</div>
+            <div class="tt"><div class="title">成都最近的天气也太舒服了吧，出门走走</div>
+            <div class="meta">@城市漫游指南 · 3小时前</div></div></div>
+            <div class="tags"><span class="chip">📹 视频</span></div></div>
+          <div class="card"><div class="top">
+            <div class="cover g4">🎬</div>
+            <div class="tt"><div class="title">一天一个装修冷知识：开关插座的留位清单</div>
+            <div class="meta">@装修老王 · 6小时前</div></div></div>
+            <div class="tags"><span class="chip">📹 视频</span></div></div>
+          <div class="card"><div class="top">
+            <div class="cover g3">🎬</div>
+            <div class="tt"><div class="title">新手健身房第一课：别急着上重量</div>
+            <div class="meta">@铁馆日记 · 昨天</div></div></div>
+            <div class="tags"><span class="chip">📹 视频</span></div></div>
+          <div class="more">… 还有 98 条（列内滚动）</div>
+        </div>
+      </div>
+
+      <!-- 列2：已提取 -->
+      <div class="col">
+        <div class="colh"><span class="dot" style="background:var(--brand)"></span><span class="nm">已提取文案</span><span class="cd">54</span></div>
+        <div class="hint">拖到这里 = 提取文案 🎙</div>
+        <div class="colb">
+          <div class="card"><div class="top">
+            <div class="cover g2">🎬</div>
+            <div class="tt"><div class="title">被这段话治愈了：允许一切发生，才是真正的强大</div>
+            <div class="meta">@深夜电台 · 5小时前</div></div></div>
+            <div class="tags"><span class="chip">🎙 字幕</span></div></div>
+          <div class="card"><div class="top">
+            <div class="cover g1">🎬</div>
+            <div class="tt"><div class="title">三分钟看懂存量房贷利率怎么调，能省多少</div>
+            <div class="meta">@财经小课 · 8小时前</div></div></div>
+            <div class="tags"><span class="chip">🎙 语音识别</span></div></div>
+          <div class="card"><div class="top">
+            <div class="cover g6">🎬</div>
+            <div class="tt"><div class="title">打工人午餐便携清单，微波炉 3 分钟搞定</div>
+            <div class="meta">@阿膳的厨房 · 昨天</div></div></div>
+            <div class="tags"><span class="chip">🎙 字幕</span></div></div>
+        </div>
+      </div>
+
+      <!-- 列3：已打标（演示拖拽落点高亮） -->
+      <div class="col over">
+        <div class="colh"><span class="dot" style="background:var(--ok)"></span><span class="nm">已打标</span><span class="cd hi">110</span></div>
+        <div class="hint">拖到这里 = AI 打标 🏷（松手触发）</div>
+        <div class="colb">
+          <div class="dropzone">松手 → 执行「自动打标」</div>
+          <div class="card"><div class="top">
+            <div class="cover g1">🎬</div>
+            <div class="tt"><div class="title">2026 最值得买的三件数码好物，无广自费</div>
+            <div class="meta">@科技所长 · 1天前</div></div></div>
+            <div class="tags"><span class="chip score">爆款分 91</span><span class="chip dir">好物测评</span><span class="chip">🎙</span></div></div>
+          <div class="card"><div class="top">
+            <div class="cover g3">🎬</div>
+            <div class="tt"><div class="title">凌晨四点的批发市场，藏着小人物的坚持</div>
+            <div class="meta">@人间观察员 · 1天前</div></div></div>
+            <div class="tags"><span class="chip score">爆款分 87</span><span class="chip dir">情感共鸣</span><span class="chip">🎙</span></div></div>
+          <div class="card"><div class="top">
+            <div class="cover g4">🎬</div>
+            <div class="tt"><div class="title">刚需买房别慌：2026 年窗口期就这两个月</div>
+            <div class="meta">@楼市观察 · 2天前</div></div></div>
+            <div class="tags"><span class="chip score">爆款分 74</span><span class="chip dir">热点追踪</span><span class="chip">🎙</span></div></div>
+        </div>
+      </div>
+
+      <!-- 列4：已产稿（演示被拖起的卡片悬停在其上方） -->
+      <div class="col">
+        <div class="colh"><span class="dot" style="background:var(--warn)"></span><span class="nm">已产稿</span><span class="cd">38</span></div>
+        <div class="hint">拖到这里 = 打开二创 ✍️</div>
+        <div class="colb">
+          <div class="card drag" style="margin-bottom:-6px;"><div class="top">
+            <div class="cover g2">🎬</div>
+            <div class="tt"><div class="title">被这段话治愈了：允许一切发生，才是真正的强大</div>
+            <div class="meta">@深夜电台 · 拖拽中…</div></div></div>
+            <div class="tags"><span class="chip score">爆款分 88</span><span class="chip dir">情感共鸣</span><span class="chip">🎙</span></div></div>
+          <div class="card"><div class="top">
+            <div class="cover g6">🎬</div>
+            <div class="tt"><div class="title">二手房过户全流程，第一集：签约当天要带啥</div>
+            <div class="meta">@安家顾问小周 · 2天前</div></div></div>
+            <div class="tags"><span class="chip score">爆款分 83</span><span class="chip dir">干货教程</span><span class="chip ok">📝 口播×2</span><span class="chip ok">📝 标题</span></div></div>
+          <div class="card"><div class="top">
+            <div class="cover g3">🎬</div>
+            <div class="tt"><div class="title">露营装备入坑顺序：先买这四样就够了</div>
+            <div class="meta">@山野装备党 · 3天前</div></div></div>
+            <div class="tags"><span class="chip score">爆款分 79</span><span class="chip dir">好物测评</span><span class="chip ok">📝 图文</span></div></div>
+        </div>
+      </div>
+
+      <!-- 列5：已送草稿 -->
+      <div class="col">
+        <div class="colh"><span class="dot" style="background:var(--brand)"></span><span class="nm">已送草稿</span><span class="cd">16</span></div>
+        <div class="hint">二创点「送入聊天」后自动归列</div>
+        <div class="colb">
+          <div class="card"><div class="top">
+            <div class="cover g1">🎬</div>
+            <div class="tt"><div class="title">三个动作拯救久坐腰，办公室就能练</div>
+            <div class="meta">@体态纠正师 · 2小时前</div></div></div>
+            <div class="tags"><span class="chip score">爆款分 92</span><span class="chip ok">📤 已送 · 10:24</span><span class="chip ok">📝 口播</span></div></div>
+          <div class="card"><div class="top">
+            <div class="cover g4">🎬</div>
+            <div class="tt"><div class="title">存款到 10 万的第一个月，我改了 3 个习惯</div>
+            <div class="meta">@攒钱小李 · 昨天</div></div></div>
+            <div class="tags"><span class="chip score">爆款分 85</span><span class="chip ok">📤 已送 · 昨天</span><span class="chip ok">📝 口播×3</span></div></div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- 底部图例：状态 → 列 自动归列规则 -->
+    <div class="legend">
+      <span class="lg-t">自动归列规则</span>
+      <span class="lg-item"><i style="background:var(--label-3)"></i>新抓取 → 待提取</span>
+      <span class="lg-arrow">→</span>
+      <span class="lg-item"><i style="background:var(--brand)"></i>有文案(transcript) → 已提取文案</span>
+      <span class="lg-arrow">→</span>
+      <span class="lg-item"><i style="background:var(--ok)"></i>有标签(structured_tags) → 已打标</span>
+      <span class="lg-arrow">→</span>
+      <span class="lg-item"><i style="background:var(--warn)"></i>有二创版本(remixes) → 已产稿</span>
+      <span class="lg-arrow">→</span>
+      <span class="lg-item"><i style="background:var(--brand)"></i>已送入聊天(sentAt) → 已送草稿</span>
+    </div>
+  </div>
+</body>
+<script>
+  var t = new URLSearchParams(location.search).get('theme')
+  if (t) document.documentElement.setAttribute('data-theme', t)
+</script>
+</html>

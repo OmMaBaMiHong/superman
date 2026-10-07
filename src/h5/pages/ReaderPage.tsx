@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, BookOpen, Check, ExternalLink, Play, Plus, RefreshCw, Rss } from 'lucide-react';
-import { addSubscriptionCandidate, getSubscriptionWork, listSubscriptionFeeds, listSubscriptionWorks, markSubscriptionWorkRead } from '@/lib/api/apiClient';
+import { ArrowDownUp, ArrowLeft, BookOpen, Check, ExternalLink, Lightbulb, Play, Plus, RefreshCw, Rss } from 'lucide-react';
+import { addSubscriptionCandidate, generateProductPlanFromArticle, getSubscriptionVideoStreamUrl, getSubscriptionWork, listSubscriptionFeeds, listSubscriptionWorks, markSubscriptionWorkRead, refreshFeedsNow } from '@/lib/api/apiClient';
 import type { SubscriptionFeed, SubscriptionWork, SubscriptionWorkDetail, SubscriptionWorkFilter } from '@/types/subscriptionReader';
 import { toast } from '@/features/toast/toast';
-import VideoEmbed from '@/components/ui/video-embed';
-import MobileTabBar from '@/features/mobile/components/MobileTabBar';
-import FeedsManagerSheet from '../components/FeedsManagerSheet';
-import SubscriptionVideoPlayer from '../components/SubscriptionVideoPlayer';
+import ContentVideoDetail from '@/features/contents/components/ContentVideoDetail';
+import { HOST } from '../lib/host';
 import { cn } from '@/lib/utils';
 
 const buttonClass = 'inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full border border-border px-3 text-xs transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50';
@@ -63,8 +61,9 @@ export default function H5ReaderPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState(false);
   const [readError, setReadError] = useState(false);
+  const [fetchingNow, setFetchingNow] = useState(false);
   const [adding, setAdding] = useState<Record<string, boolean>>({});
-  const [managerOpen, setManagerOpen] = useState(false);
+  const [converting, setConverting] = useState<Record<string, boolean>>({});
   const [arrivals, setArrivals] = useState<Record<string, number>>({});
   const feedSnapshot = useRef<SubscriptionFeed[] | null>(null);
   const listVersion = useRef(0);
@@ -98,6 +97,13 @@ export default function H5ReaderPage() {
     void reloadFeeds();
     const timer = window.setInterval(() => { if (!document.hidden) void reloadFeeds(); }, 30_000);
     return () => window.clearInterval(timer);
+  }, [reloadFeeds]);
+
+  // 「添加」弹窗里订阅/取消订阅后立即刷新左侧列表
+  useEffect(() => {
+    const onFeedsChanged = () => { void reloadFeeds(); };
+    window.addEventListener('superman:feeds-changed', onFeedsChanged);
+    return () => window.removeEventListener('superman:feeds-changed', onFeedsChanged);
   }, [reloadFeeds]);
 
   const loadWorks = useCallback(async () => {
@@ -192,17 +198,54 @@ export default function H5ReaderPage() {
     </button>;
   }
 
+  async function convertToProductPlan(work: SubscriptionWork) {
+    if (converting[work.id]) return;
+    setConverting((current) => ({ ...current, [work.id]: true }));
+    try {
+      const result = await generateProductPlanFromArticle(work.id);
+      toast.success(result.alreadyExists ? '该内容已有产品计划' : `已生成产品计划：${result.plan.title}`);
+    } catch { /* apiClient displays the failure and permits retry. */ }
+    finally { setConverting((current) => ({ ...current, [work.id]: false })); }
+  }
+
+  function productPlanButton(work: SubscriptionWork) {
+    return <button type="button" aria-label={`转为产品计划：${work.title}`} disabled={converting[work.id]}
+      className={cn(buttonClass, 'shrink-0 text-warning')} onClick={() => void convertToProductPlan(work)}>
+      <Lightbulb className="h-3.5 w-3.5" />
+      {converting[work.id] ? '生成中…' : '转产品计划'}
+    </button>;
+  }
+
   function chooseFeed(id: string) { setSelectedId(null); setSelectedFeed(id); setType('all'); }
   const feed = feeds.find((entry) => entry.id === selectedFeed);
   const unread = feeds.reduce((sum, entry) => sum + entry.unreadCount, 0);
   const newCount = selectedFeed === 'all' ? Object.values(arrivals).reduce((sum, count) => sum + count, 0) : arrivals[selectedFeed ?? ''] ?? 0;
 
-  return <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background pb-[calc(5rem+env(safe-area-inset-bottom))] text-foreground md:pb-0 md:pl-20">
+  return <div className={cn(
+    'flex h-dvh min-h-0 flex-col overflow-hidden bg-background text-foreground',
+    // DSH 宿主没有 Rail/TabBar，无需给它们预留边距（导航在面板内顶部标签条）。
+    HOST !== 'dsh' && 'pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-0 md:pl-20',
+  )}>
     <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/60 px-4">
       <BookOpen className="h-4 w-4 text-primary" /><h1 className="text-sm font-semibold">阅读</h1>
       <span className="text-xs text-muted-foreground">{feeds.length} 个订阅 · {unread} 条未读</span>
-      <button className={cn(buttonClass, 'ml-auto px-2')} aria-label="刷新阅读列表" onClick={() => { void reloadFeeds(); if (selectedFeed && !selectedId) void loadWorks(); }}><RefreshCw className="h-4 w-4" /></button>
-      <button className={cn(buttonClass, 'px-2')} aria-label="订阅管理" onClick={() => setManagerOpen(true)}><Plus className="h-4 w-4" /><span className="hidden min-[400px]:inline">订阅</span></button>
+      <button
+        className={cn(buttonClass, 'ml-auto px-2')}
+        aria-label="立即抓取订阅源"
+        title="立即抓取一轮到期订阅源（不等定时器）"
+        disabled={fetchingNow}
+        onClick={() => {
+          setFetchingNow(true);
+          void refreshFeedsNow({ notifyMessage: '抓取完成' })
+            .then((r) => { toast.success(`已抓取 ${r.feeds} 个源，新收录 ${r.inserted} 条`); })
+            .then(() => { void reloadFeeds(); if (selectedFeed && !selectedId) void loadWorks(); })
+            .catch(() => {})
+            .finally(() => setFetchingNow(false));
+        }}
+      ><RefreshCw className={cn('h-4 w-4', fetchingNow && 'animate-spin')} /></button>
+      <button className={cn(buttonClass, 'px-2')} aria-label="刷新阅读列表" title="从数据库刷新列表" onClick={() => { void reloadFeeds(); if (selectedFeed && !selectedId) void loadWorks(); }}><ArrowDownUp className="h-4 w-4" /></button>
+      <span className="w-px self-stretch my-2 bg-border/60" aria-hidden="true" />
+      <button className={cn(buttonClass, 'px-2')} aria-label="添加订阅或收藏" onClick={() => window.dispatchEvent(new CustomEvent('superman:open-add'))}><Plus className="h-4 w-4" /><span className="hidden min-[400px]:inline">添加</span></button>
     </header>
     <div className="flex min-h-0 flex-1">
       <aside aria-label="订阅博主" className={cn('min-h-0 w-full shrink-0 overflow-y-auto border-r border-border/60 p-3 md:block md:w-56 xl:w-72', selectedFeed !== null ? 'hidden' : 'block')}>
@@ -228,16 +271,62 @@ export default function H5ReaderPage() {
           </button></li>;
         })}</ul>
       </aside>
-      <section aria-label="博主作品" className={cn('min-h-0 min-w-0 flex-1 flex-col border-r border-border/60 md:flex', selectedFeed === null || selectedId ? 'hidden' : 'flex', selectedId && 'md:max-w-[360px]')}>
+      <section aria-label="博主作品" className={cn('min-h-0 min-w-0 flex-1 flex-col border-r border-border/60 md:flex', selectedFeed === null || selectedId ? 'hidden' : 'flex', selectedId && 'md:max-w-[22.5rem]')}>
         {selectedFeed === null ? <div className="flex h-full items-center justify-center p-8 text-center text-sm text-muted-foreground">选择一位博主，查看他的文章和视频</div> : <>
           <div className="shrink-0 border-b border-border/60 p-3">
-            <div className="flex items-center gap-2">
+            {/* 单行工具条（md+）：筛选最左（最高频），标题+计数随后，警示/主页靠右。
+                「上次采集」降级为悬停提示；手机端筛选整行下折，保持 44px 触控高度。 */}
+            <div className="flex flex-wrap items-center gap-2 md:flex-nowrap md:gap-2.5">
               <button className={cn(buttonClass, 'px-2 md:hidden')} aria-label="返回博主列表" onClick={() => setSelectedFeed(null)}><ArrowLeft className="h-4 w-4" /></button>
-              <div className="min-w-0 flex-1"><h2 className="truncate text-sm font-semibold">{feed?.title ?? '全部动态'}</h2>{feed && <p className="mt-1 text-[11px] text-muted-foreground">{platform(feed)} · {feed.articleCount} 个作品 · {feed.unreadCount} 条未读</p>}</div>
-              {httpUrl(feed?.siteUrl) && <a className={buttonClass} href={feed!.siteUrl!} target="_blank" rel="noreferrer">主页<ExternalLink className="h-3 w-3" /></a>}
+
+              <div className="order-last w-full md:order-none md:w-auto" role="group" aria-label="作品类型筛选">
+                <div className="flex gap-0.5 rounded-full border border-border bg-secondary/60 p-0.5">
+                  {FILTERS.map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-pressed={type === value}
+                      onClick={() => { setSelectedId(null); setType(value); }}
+                      className={cn(
+                        'h-11 flex-1 rounded-full px-3 text-xs font-medium transition-colors',
+                        'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                        'md:h-8 md:flex-none',
+                        type === value ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div
+                className="min-w-0 flex-1 truncate"
+                title={feed?.lastFetchedAt ? `上次采集：${new Date(feed.lastFetchedAt).toLocaleString('zh-CN')}` : undefined}
+              >
+                <span className="text-sm font-semibold text-foreground">{feed?.title ?? '全部动态'}</span>
+                {feed && <span className="ml-1.5 text-[11px] text-muted-foreground">{platform(feed)} · {feed.articleCount} 个作品 · {feed.unreadCount} 条未读</span>}
+              </div>
+
+              {feed && (Boolean(feed.lastFetchError) || (feed.lastFetchStatus !== null && feed.lastFetchStatus >= 400)) && (
+                <span className="shrink-0 truncate text-[11px] text-warning" title={feed.lastFetchError ?? undefined}>
+                  ⚠ {feed.lastFetchError || `采集失败（${feed.lastFetchStatus}）`}
+                </span>
+              )}
+
+              {httpUrl(feed?.siteUrl) && (
+                <a
+                  className={cn(buttonClass, 'w-11 px-0 justify-center md:h-8 md:min-h-0 md:w-8')}
+                  href={feed!.siteUrl!}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="打开主页"
+                  title="打开主页"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              )}
             </div>
-            {feed?.lastFetchedAt && <p className="mt-2 text-[10px] text-muted-foreground">上次采集：{new Date(feed.lastFetchedAt).toLocaleString('zh-CN')}</p>}
-            <div className="mt-3 flex gap-2">{FILTERS.map(([value, label]) => <button key={value} aria-pressed={type === value} className={cn(buttonClass, type === value && 'border-primary/40 bg-primary/10 text-primary')} onClick={() => { setSelectedId(null); setType(value); }}>{label}</button>)}</div>
           </div>
           {newCount > 0 && <button className="shrink-0 bg-primary/10 p-3 text-xs text-primary" onClick={() => void loadWorks()}>有 {newCount} 条新作品，点击更新</button>}
           <div ref={listScroll} className="min-h-0 flex-1 overflow-y-auto p-3">
@@ -261,7 +350,7 @@ export default function H5ReaderPage() {
         </>}
       </section>
       {selectedId && <section aria-label="作品详情" className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
-        <div className="flex shrink-0 items-center gap-2 border-b border-border/60 p-3"><button className={buttonClass} aria-label="返回作品列表" onClick={() => setSelectedId(null)}><ArrowLeft className="h-4 w-4" />返回</button><span className="ml-auto">{detail && candidateButton(detail)}</span></div>
+        <div className="flex shrink-0 items-center gap-2 border-b border-border/60 p-3"><button className={buttonClass} aria-label="返回作品列表" onClick={() => setSelectedId(null)}><ArrowLeft className="h-4 w-4" />返回</button><span className="ml-auto flex flex-wrap items-center justify-end gap-2">{detail && <>{productPlanButton(detail)}{candidateButton(detail)}</>}</span></div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-8 pt-5">
           {detailLoading && <p role="status" className="p-6 text-sm text-muted-foreground">正在加载作品…</p>}
           {detailError && <div role="alert" className="space-y-3 text-center"><p>作品加载失败</p><button className={buttonClass} onClick={() => void loadDetail()}>重新加载作品</button></div>}
@@ -270,13 +359,11 @@ export default function H5ReaderPage() {
             <h2 className="mt-3 text-xl font-semibold leading-relaxed">{detail.title}</h2>
             <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground"><time>{detail.publishedAt ? new Date(detail.publishedAt).toLocaleString('zh-CN') : '发布日期未知'}</time>{httpUrl(detail.sourceUrl) && <a href={detail.sourceUrl!} target="_blank" rel="noreferrer" className="text-primary">查看原文 ↗</a>}</div>
             {readError && <button className="mt-3 text-xs text-warning underline" onClick={() => void markRead(detail)}>已读状态保存失败，点击重试</button>}
-            {detail.hasPlayableVideo ? <SubscriptionVideoPlayer key={detail.id} id={detail.id} title={detail.title} poster={httpUrl(detail.previewImage)} /> : detail.contentType === 'video' ? <VideoEmbed sourceUrl={detail.sourceUrl} previewImage={detail.previewImage} title={detail.title} /> : null}
+            {detail.hasPlayableVideo || detail.contentType === 'video' ? <ContentVideoDetail key={detail.id} articleId={detail.id} streamUrl={detail.hasPlayableVideo ? getSubscriptionVideoStreamUrl(detail.id) : null} title={detail.title} className="mt-5" /> : null}
             {detail.content ? <div data-testid="reader-content" className="prose mt-5 max-w-none break-words text-[15px] prose-img:max-w-full prose-video:max-w-full dark:prose-invert" dangerouslySetInnerHTML={{ __html: detail.content }} /> : <p className="mt-5 text-sm leading-relaxed text-muted-foreground">{detail.summary || '暂未获取正文，可通过原文链接查看。'}</p>}
           </article>}
         </div>
       </section>}
     </div>
-    <FeedsManagerSheet open={managerOpen} onClose={() => setManagerOpen(false)} onChanged={() => { void reloadFeeds(); }} />
-    <MobileTabBar />
   </div>;
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Bell, CheckCheck, PenLine, RefreshCw, Rss, Stamp } from 'lucide-react';
+import { Bell, CheckCheck, Lightbulb, PenLine, RefreshCw, Rss, Stamp } from 'lucide-react';
 import {
   listNotifications,
   markAllNotificationsRead,
@@ -21,6 +21,7 @@ const KIND_META: Record<NotificationKind, { label: string; Icon: typeof Bell; do
   pipeline_done: { label: '流水线', Icon: PenLine, dotClass: 'bg-primary' },
   redraft_done: { label: '重拟完成', Icon: RefreshCw, dotClass: 'bg-primary' },
   system: { label: '系统', Icon: Bell, dotClass: 'bg-muted-foreground' },
+  product_plan: { label: '产品机会', Icon: Lightbulb, dotClass: 'bg-warning' },
 };
 
 /** 相对时间：x 分钟前 / x 小时前 / x 天前。 */
@@ -106,7 +107,7 @@ export default function NotificationsPage() {
     <div className="min-h-screen bg-background text-foreground">
       {/* 顶部指挥条 */}
       <header className="glass-surface-strong sticky top-0 z-10 rounded-none border-x-0 border-t-0">
-        <div className="mx-auto flex h-14 max-w-2xl items-center justify-between gap-4 px-4 sm:px-6">
+        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
           <div className="flex min-w-0 items-center gap-2">
             <Bell aria-hidden="true" className="h-4 w-4 text-primary" />
             <div className="min-w-0">
@@ -130,7 +131,7 @@ export default function NotificationsPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-2xl px-4 pb-28 pt-5 sm:px-6 md:pb-10">
+      <main className="mx-auto max-w-6xl px-4 pb-28 pt-5 sm:px-6 md:pb-10">
         {loading ? (
           <div className="space-y-2.5">
             {Array.from({ length: 4 }, (_, index) => (
@@ -150,7 +151,7 @@ export default function NotificationsPage() {
             {groups.map((group) => (
               <section key={group.day} aria-label={group.day}>
                 <h2 className="mb-2 px-1 text-[12px] font-semibold text-muted-foreground">{group.day}</h2>
-                <ul className="space-y-2">
+                <ul className="space-y-2 md:grid md:grid-cols-2 md:gap-2 md:space-y-0">
                   {group.entries.map((item) => {
                     const meta = KIND_META[item.kind] ?? KIND_META.system;
                     const unread = item.readAt === null;

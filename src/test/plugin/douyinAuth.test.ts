@@ -16,6 +16,11 @@ const getAccountMock = vi.fn();
 vi.mock('@/core/platform-accounts/sau/sauProvider', () => ({
   startSauLoginSession: (...args: unknown[]) => startSessionMock(...args),
   getSauLoginSession: (...args: unknown[]) => getSessionMock(...args),
+  // 纯函数直通（P2e-4 四平台）：路由侧用 isSauPlatform 分流 verify
+  isSauPlatform: (value: unknown) =>
+    value === 'douyin' || value === 'xhs' || value === 'channels' || value === 'kuaishou',
+  sauPlatformFromType: (type: number) =>
+    type === 1 ? 'xhs' : type === 2 ? 'channels' : type === 3 ? 'douyin' : type === 4 ? 'kuaishou' : null,
 }));
 vi.mock('@/core/platform-accounts/sau/sauService', () => ({
   confirmSauLoginSession: (...args: unknown[]) => confirmSessionMock(...args),

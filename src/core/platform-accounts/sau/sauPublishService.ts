@@ -181,7 +181,7 @@ async function resolveVendorFilename(
   throw new ValidationError('缺少视频来源', { videoPath: 'videoPath 与 videoUrl 至少提供一个' });
 }
 
-const PLATFORM_NAME: Record<SauPlatform, string> = { douyin: '抖音', xhs: '小红书' };
+const PLATFORM_NAME: Record<SauPlatform, string> = { douyin: '抖音', xhs: '小红书', channels: '视频号', kuaishou: '快手' };
 
 export async function publishDraftVideoToSau(
   db: DbClient,

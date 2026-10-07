@@ -15,10 +15,12 @@ import {
   getTrendRadarItemDetail,
   getTrendRadarToday,
   promoteTrendRadarItem,
+  syncTrendRadarNow,
   type TrendRadarItem,
   type TrendRadarItemDetail,
   type TrendRadarToday,
 } from '@/lib/api/apiClient';
+import { toast } from '@/features/toast/toast';
 import ContentTypeBadge from '@/components/ui/content-type-badge';
 import DirectionBadge from '@/components/ui/direction-badge';
 import GlassDetailSheet from '@/components/ui/glass-detail-sheet';
@@ -231,6 +233,21 @@ export default function TrendingConsole() {
     }
   }, []);
 
+  // 立即同步：不等调度器周期，直接读 TrendRadar 当日 SQLite upsert 进库
+  const [syncing, setSyncing] = useState(false);
+  const handleSyncNow = useCallback(() => {
+    setSyncing(true);
+    void syncTrendRadarNow()
+      .then((r) => {
+        toast.success(r.status === 'ok'
+          ? `已同步 ${r.upserted} 条热榜（${r.platforms} 个平台）`
+          : 'TrendRadar 今天还没有数据：等它跑完一轮再同步');
+        return load(true);
+      })
+      .catch(() => toast.error('同步失败，请确认 TrendRadar 与执行器状态'))
+      .finally(() => setSyncing(false));
+  }, [load]);
+
   useEffect(() => {
     void load();
     const timer = window.setInterval(() => void load(true), POLL_MS);
@@ -394,6 +411,16 @@ export default function TrendingConsole() {
                 {data.date} · {data.platforms.length} 平台 · {data.total} 条
               </span>
             ) : null}
+            <button
+              type="button"
+              onClick={handleSyncNow}
+              disabled={syncing}
+              aria-label="立即同步热榜"
+              title="立即读取 TrendRadar 当日数据入仓"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-primary/40 bg-primary/10 text-primary transition-colors duration-150 hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50 sm:h-9 sm:w-9"
+            >
+              <RefreshCw aria-hidden="true" className={cn('h-4 w-4', syncing && 'animate-spin')} />
+            </button>
             <button
               type="button"
               onClick={() => void load()}

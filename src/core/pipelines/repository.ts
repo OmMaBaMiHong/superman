@@ -49,6 +49,8 @@ export interface PipelineArticleRow {
   contentHtml: string | null;
   contentFullHtml: string | null;
   governanceStatus: string;
+  /** 用户收藏时/事后补充的备注与想法（参与生成提示词）。 */
+  userNote: string;
 }
 
 export async function getPipelineArticle(
@@ -65,7 +67,8 @@ export async function getPipelineArticle(
         link,
         content_html as "contentHtml",
         content_full_html as "contentFullHtml",
-        governance_status as "governanceStatus"
+        governance_status as "governanceStatus",
+        user_note as "userNote"
       from articles
       where id = $1
         and user_id = $2

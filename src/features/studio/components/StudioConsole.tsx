@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, PenLine, RefreshCw, Search } from 'lucide-react';
+import { ArrowLeft, Kanban, LayoutGrid, PenLine, RefreshCw, Search } from 'lucide-react';
 import {
   acceptDraft,
   createRewriteJobs,
@@ -20,6 +20,7 @@ import {
   type RewritePlatform,
 } from '@/lib/api/apiClient';
 import GlassDetailSheet from '@/components/ui/glass-detail-sheet';
+import ContentDetailSheet from '@/features/contents/components/ContentDetailSheet';
 import PerformanceSection from './PerformanceSection';
 import GovernanceConsole from '@/features/governance/components/GovernanceConsole';
 import MobileTabBar from '@/features/mobile/components/MobileTabBar';
@@ -27,7 +28,9 @@ import { cn } from '@/lib/utils';
 import DraftCompareView from './DraftCompareView';
 import PipelineJobList from './PipelineJobList';
 import PlatformPickerSheet from './PlatformPickerSheet';
+import ProductPlanSection from './ProductPlanSection';
 import TopicPoolCard from './TopicPoolCard';
+import TopicKanbanBoard from './TopicKanbanBoard';
 import {
   formatSimilarity,
   ORIGINALITY_META,
@@ -36,13 +39,14 @@ import {
   similarityToneClass,
 } from '../lib/platforms';
 
-type StudioSection = 'queue' | 'topics' | 'jobs' | 'drafts' | 'performance';
+type StudioSection = 'queue' | 'topics' | 'jobs' | 'drafts' | 'plans' | 'performance';
 
 const SECTIONS: Array<{ id: StudioSection; name: string }> = [
   { id: 'queue', name: '审批' },
   { id: 'topics', name: '选题池' },
   { id: 'jobs', name: '流水线任务' },
   { id: 'drafts', name: '草稿箱' },
+  { id: 'plans', name: '产品计划' },
   { id: 'performance', name: '表现' },
 ];
 
@@ -61,9 +65,9 @@ function triggerDownload(fileName: string, content: string) {
   URL.revokeObjectURL(url);
 }
 
-/** 创作页主控台：审批 / 选题池 / 流水线任务 / 草稿箱 四分区（审批台整体嵌入）。 */
-export default function StudioConsole({ initialSection }: { initialSection?: 'queue' }) {
-  const [section, setSection] = useState<StudioSection>(initialSection === 'queue' ? 'queue' : 'topics');
+/** 创作页主控台：审批 / 选题池 / 流水线任务 / 草稿箱 / 产品计划 / 表现 分区（审批台整体嵌入）。 */
+export default function StudioConsole({ initialSection }: { initialSection?: StudioSection }) {
+  const [section, setSection] = useState<StudioSection>(initialSection ?? 'topics');
 
   // ── 选题池（archived 文章）──
   const [topics, setTopics] = useState<GovernanceQueueItem[]>([]);
@@ -73,6 +77,24 @@ export default function StudioConsole({ initialSection }: { initialSection?: 'qu
   const [topicsLoadingMore, setTopicsLoadingMore] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [debouncedKeyword, setDebouncedKeyword] = useState('');
+
+  // ── 选题池视图：看板(默认) / 网格，localStorage 记忆（SSR 安全：挂载后再读）──
+  const [topicsView, setTopicsView] = useState<'kanban' | 'grid'>('kanban');
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('studio_topics_view') === 'grid') setTopicsView('grid');
+    } catch {
+      // 隐私模式下 localStorage 不可用，保持默认看板
+    }
+  }, []);
+  const switchTopicsView = useCallback((next: 'kanban' | 'grid') => {
+    setTopicsView(next);
+    try {
+      localStorage.setItem('studio_topics_view', next);
+    } catch {
+      // 忽略
+    }
+  }, []);
 
   // ── 流水线任务 ──
   const [jobs, setJobs] = useState<PipelineJobItem[]>([]);
@@ -88,6 +110,9 @@ export default function StudioConsole({ initialSection }: { initialSection?: 'qu
   // ── 平台多选 sheet ──
   const [pickerItem, setPickerItem] = useState<GovernanceQueueItem | null>(null);
   const [pickerSubmitting, setPickerSubmitting] = useState(false);
+
+  // ── 内容详情 sheet（查看正文/视频文案）──
+  const [detailItem, setDetailItem] = useState<GovernanceQueueItem | null>(null);
 
   // ── 草稿对照 sheet ──
   const [compareItem, setCompareItem] = useState<DraftItem | null>(null);
@@ -329,25 +354,60 @@ export default function StudioConsole({ initialSection }: { initialSection?: 'qu
           </section>
         ) : null}
 
+        {/* ── 产品计划（商业决策 MVP 规划） ── */}
+        {section === 'plans' ? <ProductPlanSection /> : null}
+
         {/* ── 表现（发布后作品数据追踪，P2d） ── */}
         {section === 'performance' ? <PerformanceSection /> : null}
 
         {/* ── 选题卡池 ── */}
         {section === 'topics' ? (
           <section aria-label="选题池">
-            <div className="relative mb-4">
-              <Search
-                aria-hidden="true"
-                className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-              />
-              <input
-                type="search"
-                value={keyword}
-                onChange={(event) => setKeyword(event.target.value)}
-                placeholder="搜索选题（标题 / 摘要）…"
-                aria-label="搜索选题"
-                className="h-11 w-full rounded-full border border-border bg-card pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              />
+            <div className="mb-4 flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+                />
+                <input
+                  type="search"
+                  value={keyword}
+                  onChange={(event) => setKeyword(event.target.value)}
+                  placeholder="搜索选题（标题 / 摘要）…"
+                  aria-label="搜索选题"
+                  className="h-11 w-full rounded-full border border-border bg-card pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                />
+              </div>
+              <div
+                role="group"
+                aria-label="视图切换"
+                className="flex flex-none items-center gap-1 rounded-full border border-border bg-card p-1"
+              >
+                <button
+                  type="button"
+                  aria-label="看板视图"
+                  aria-pressed={topicsView === 'kanban'}
+                  onClick={() => switchTopicsView('kanban')}
+                  className={cn(
+                    'flex h-8 w-8 items-center justify-center rounded-full transition-colors duration-150',
+                    topicsView === 'kanban' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  <Kanban aria-hidden="true" className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="网格视图"
+                  aria-pressed={topicsView === 'grid'}
+                  onClick={() => switchTopicsView('grid')}
+                  className={cn(
+                    'flex h-8 w-8 items-center justify-center rounded-full transition-colors duration-150',
+                    topicsView === 'grid' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  <LayoutGrid aria-hidden="true" className="h-4 w-4" />
+                </button>
+              </div>
             </div>
 
             {topicsLoading ? (
@@ -365,6 +425,16 @@ export default function StudioConsole({ initialSection }: { initialSection?: 'qu
                   {debouncedKeyword ? '换个关键词试试。' : '先去审批台准奏一些内容，归档后就能在这里改写。'}
                 </p>
               </div>
+            ) : topicsView === 'kanban' ? (
+              <TopicKanbanBoard
+                topics={topics}
+                activeJobsByArticle={activeJobsByArticle}
+                drafts={drafts}
+                publishedDraftIds={publishedDraftIds}
+                onGenerate={setPickerItem}
+                onOpenDetail={setDetailItem}
+                onOpenDraft={openCompare}
+              />
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {topics.map((item) => (
@@ -373,6 +443,7 @@ export default function StudioConsole({ initialSection }: { initialSection?: 'qu
                     item={item}
                     activeJobs={activeJobsByArticle.get(item.id) ?? []}
                     onGenerate={setPickerItem}
+                    onOpenDetail={setDetailItem}
                   />
                 ))}
               </div>
@@ -513,6 +584,18 @@ export default function StudioConsole({ initialSection }: { initialSection?: 'qu
         submitting={pickerSubmitting}
         onClose={() => setPickerItem(null)}
         onConfirm={handleConfirmPlatforms}
+      />
+
+      {/* 内容详情 sheet（查看正文/视频文案 + 重试提取） */}
+      <ContentDetailSheet
+        articleId={detailItem?.id ?? null}
+        onClose={() => setDetailItem(null)}
+        onGenerate={() => {
+          if (detailItem) {
+            setPickerItem(detailItem);
+            setDetailItem(null);
+          }
+        }}
       />
 
       {/* 草稿对照 sheet */}

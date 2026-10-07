@@ -23,6 +23,8 @@ import { startPluginScheduler, fetchDueFeedsOnce, type PluginSchedulerConfig } f
 import { runTrendRadarScheduleTick } from './servicesKeeper.js'
 import { registerSkills } from './skills.js'
 import { registerHostIdentityBridge, getHostIdentity } from './hostIdentity.js'
+import { registerRelayLlm, getRelayLlmState } from './relayLlm.js'
+import { Config as PluginConfigSchema } from './relayLlmConfig.js'
 import { findServicesConfig, saveServicesConfig, getServicesConfig } from '@/core/services/serviceConfig'
 import { getAuthSettings } from '@/server/domains/settings/repositories/settingsRepo'
 import { registerDshLlm } from '@/server/integrations/ai/dshLlmBridge'
@@ -30,6 +32,7 @@ import { registerDshLlm } from '@/server/integrations/ai/dshLlmBridge'
 export const name = 'superman'
 // webServer/tools 均为 scoped inject（见各模块），headless profile 下不会空等。
 export const inject: string[] = []
+export const Config = PluginConfigSchema
 
 export interface SupermanConfig extends PluginSchedulerConfig {
   databaseUrl?: string
@@ -55,6 +58,9 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
   const log = (msg: string) => ctx.logger?.info?.(`[superman] ${msg}`)
   const warn = (msg: unknown) => ctx.logger?.warn?.(msg)
 
+  // relay 段快照：relayLlm 的 options()（同步）从这里读中转站连接配置
+  let relayConnection: Record<string, unknown> | null = null
+
   // 接入 DSH 宿主模型服务（ctx.llm）：插件复用 DSH 模型配置，不另设 AI 配置。
   // 用 scoped inject：服务不可用时回调不执行，插件其余部分照常挂载。
   if (typeof ctx.inject === 'function') {
@@ -63,6 +69,14 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
       log('已接入 DSH 模型服务（ctx.llm），AI 能力走宿主模型')
     }) as never)
   }
+
+  // 中转站模型注入（P2e-6 二期）：DSH 模型列表出现「中转站」路由；
+  // 用户授权登录中转站后即可在 agent/会话模型选择里使用。
+  registerRelayLlm(ctx, {
+    getDb: () => db,
+    getRelayConnection: () => relayConnection,
+    getDefaultModel: () => process.env.RELAY_DEFAULT_MODEL?.trim() || 'deepseek-chat',
+  })
 
   // 宿主身份直通（免登录）：桌面 profile 挂了 deepseekAccount 服务即可用，
   // headless/web profile 下 inject 不命中、整条通道静默降级，口令登录不受影响。
@@ -185,6 +199,7 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
     staticRoot,
     apiList: BUSINESS_API_LIST,
     projectRoot: PROJECT_ROOT,
+    relayLlmState: () => getRelayLlmState(),
   }
   registerRoutes(ctx, deps)
   registerTools(ctx, {

@@ -14,7 +14,8 @@ export type NotificationKind =
   | 'redraft_done'
   | 'system'
   | 'performance_hot'
-  | 'comment_intel';
+  | 'comment_intel'
+  | 'product_plan';
 
 export const NOTIFICATION_KINDS: readonly NotificationKind[] = [
   'fetch_failed',
@@ -24,6 +25,7 @@ export const NOTIFICATION_KINDS: readonly NotificationKind[] = [
   'system',
   'performance_hot',
   'comment_intel',
+  'product_plan',
 ];
 
 export interface NotificationRow {

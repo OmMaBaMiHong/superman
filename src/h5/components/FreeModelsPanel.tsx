@@ -22,7 +22,7 @@ export default function FreeModelsPanel() {
 
   const refreshModels = useCallback(async () => {
     setLoading(true); setError('');
-    try { setModels((await listFreeModels()).items); } catch (err) { setError(err instanceof Error ? err.message : '模型列表加载失败'); }
+    try { setModels((await listFreeModels()).items ?? []); } catch (err) { setError(err instanceof Error ? err.message : '模型列表加载失败'); }
     finally { setLoading(false); }
   }, []);
 

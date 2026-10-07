@@ -238,7 +238,7 @@ export default function PlatformAccountsPanel() {
         onClose={() => setAddOpen(false)}
         onSubmit={handleCreate}
         onDouyinAdded={() => {
-          toast.success('抖音扫码授权成功，账号已加密落库');
+          toast.success('扫码授权成功，账号已加密落库');
           setAddOpen(false);
           void load(true);
         }}

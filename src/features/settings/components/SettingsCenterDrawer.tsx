@@ -40,6 +40,7 @@ import FeverAccountSettingsPanel from '../panels/FeverAccountSettingsPanel';
 import GithubSettingsPanel from '../panels/GithubSettingsPanel';
 import OAuthSettingsPanel from '../panels/OAuthSettingsPanel';
 import RssHubCookiesSettingsPanel from '../panels/RssHubCookiesSettingsPanel';
+import CredentialCenterSettingsPanel from '../panels/CredentialCenterSettingsPanel';
 import type { OpmlTransferResultSummary } from '../panels/OpmlTransferSection';
 import { useSettingsAutosave } from '../hooks';
 import {
@@ -382,7 +383,10 @@ export default function SettingsCenterDrawer({ onClose, initialSection }: Settin
                         />
                       </TabsContent>
                       <TabsContent value="rsshub" className="mt-0 h-full overflow-y-auto">
-                        <RssHubCookiesSettingsPanel />
+                        <div className="space-y-4">
+                          <CredentialCenterSettingsPanel />
+                          <RssHubCookiesSettingsPanel />
+                        </div>
                       </TabsContent>
                       <TabsContent value="ai" className="mt-0 h-full overflow-y-auto">
                         <AISettingsPanel

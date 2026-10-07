@@ -1,12 +1,15 @@
 /**
  * superman client 半（浏览器 bundle，手写 window.__ModuleLoader__.load 协议，零构建）。
  *
- * K1 最小 slot 注册：
- *   - sidebar.footer.action → 侧栏底部一个 🦸 按钮，点击开关 Superman 面板
- *   - shell.overlay         → 悬浮面板，内嵌 iframe 指向 /s/app（host 半伺服的 H5）
+ * 入口席位：sidebar.panellist —— 与「插件」「自动化任务」同属侧栏那一列。
+ *   自动化任务（schedules）占 order 10，本入口占 order 11，正好落在它下面。
+ *   自动化任务那个面板自己不对外开插槽（只 inject 上游席位、没有 define），
+ *   所以「放进它内部」做不到，能做到的是同列相邻。
  *
- * 两个席位都是上游 ui-layout / ui-sidebar 原生声明的 list 席位，不需要禁用
- * 任何内置插件，也不需要改 DSH 源码。
+ * 面板席位：main（key = 'superman'）—— 工作台页面本体，内嵌 /s/app。
+ * 输入桥　：conversation.input.dock —— 快捷指令送文本进当前会话输入框。
+ *
+ * 入口不带图标，只出中文名（见 .sm-nav-label 与下面的去重规则）。
  */
 window.__ModuleLoader__.load({
   id: 'superman',
@@ -17,28 +20,10 @@ window.__ModuleLoader__.load({
 
     var react = require('react')
     var h = react.createElement
-    var useState = react.useState
     var useEffect = react.useEffect
 
-    // 面板开关状态：footer 按钮与 overlay 面板共享一个模块级 store。
-    var listeners = []
-    var open = false
-    function isOpen() { return open }
-    function setOpen(next) {
-      open = next
-      listeners.forEach(function (fn) { fn(open) })
-    }
-    function useOpen() {
-      var pair = useState(isOpen)
-      var v = pair[0]
-      var setV = pair[1]
-      useEffect(function () {
-        function onChange(s) { setV(s) }
-        listeners.push(onChange)
-        return function () { listeners = listeners.filter(function (x) { return x !== onChange }) }
-      }, [])
-      return v
-    }
+    var PANEL_ID = 'superman'
+    var PANEL_LABEL = '工作台'
 
     function injectCss(css) {
       var el = document.createElement('style')
@@ -48,21 +33,37 @@ window.__ModuleLoader__.load({
       return function () { if (el.parentNode) el.parentNode.removeChild(el) }
     }
 
-    /** 侧栏底部触发按钮（席位：sidebar.footer.action）。 */
-    function SupermanFooterAction() {
-      var v = useOpen()
-      return h('button', {
-        className: 'sm-trigger' + (v ? ' on' : ''),
-        title: 'Superman 面板',
-        onClick: function () { setOpen(!v) },
-      }, '🦸')
+    /**
+     * 工作台字形（席位：sidebar.panellist 的字形位）。
+     *
+     * 与另外三个条目同族：16×16 视框、fill:none、stroke:currentColor、
+     * stroke-width 1（宿主 Regular 档，插件与自动化任务用的就是这一档）、
+     * 圆角连接。
+     * 「控制台」轮廓——外框 + 顶栏 + 左侧栏——一眼是工作台，且不和
+     * 插件（风车）、自动化任务（时钟）、技能中心（书）撞车。
+     *
+     * 内联 SVG，不用外部图片：跟随 currentColor 自动适配主题与 hover/active，
+     * 任意 DPI 都不糊，也省掉一条静态资源服务路径。
+     */
+    function WorkbenchGlyph(props) {
+      var size = props && props.size ? props.size : 18
+      return h('svg', {
+        viewBox: '0 0 16 16',
+        width: size,
+        height: size,
+        fill: 'none',
+        stroke: 'currentColor',
+        strokeWidth: 1,
+        strokeLinecap: 'round',
+        strokeLinejoin: 'round',
+        'aria-hidden': 'true',
+      },
+        h('rect', { x: 2.1, y: 2.6, width: 11.8, height: 10.8, rx: 1.6 }),
+        h('path', { d: 'M2.1 5.9h11.8' }),
+        h('path', { d: 'M6.3 5.9v7.5' }))
     }
 
-    /** 悬浮面板（席位：shell.overlay）：iframe → /s/app。 */
-    /**
-     * 会话输入桥（席位：conversation.input.dock）：捕获 inputActions.setDraft，
-     * 供指挥台快捷指令把指令文本送进聊天输入框（agent 会话由 DSH 主界面承担）。
-     */
+    /** 会话输入桥（席位：conversation.input.dock）：拿到 setDraft 供快捷指令投递。 */
     var bridge = { setDraft: null }
     function sendCommand(text) {
       if (typeof bridge.setDraft === 'function') bridge.setDraft(text)
@@ -74,24 +75,42 @@ window.__ModuleLoader__.load({
       return null
     }
 
-    /** 指挥台快捷指令（点按送入聊天输入框）。 */
+    /** 快捷指令（点按把指令文本送进当前会话输入框）。 */
     var QUICK_COMMANDS = [
       { icon: '📊', label: '今日概况', text: '今日概况' },
       { icon: '✅', label: '审批代办', text: '看看今天待批队列，逐条给我审批建议' },
       { icon: '🔥', label: '热点选题', text: '今天热榜上有什么值得做的选题？挑 3 个转进审批台' },
     ]
 
-    function SupermanOverlay() {
-      var v = useOpen()
-      if (!v) return null
-      return h('div', { className: 'sm-panel' },
-        h('div', { className: 'sm-panel-bar' },
-          h('span', { className: 'sm-panel-title' }, '🦸 Superman'),
-          h('a', { className: 'sm-panel-open', href: '/s/app', target: '_blank', rel: 'noopener noreferrer' }, '↗ 新窗口'),
-          h('button', { className: 'sm-panel-close', onClick: function () { setOpen(false) } }, '✕')),
-        h('div', { className: 'sm-cmd' },
-          h('div', { className: 'sm-cmd-title' }, '指挥台 · 快捷指令（送入当前会话）'),
-          h('div', { className: 'sm-cmd-row' },
+    /**
+     * 工作台的绝对地址（给「独立窗口」用）。
+     *
+     * 桌面客户端把整个界面装在 `dsh-app://app` 自定义协议下，主进程转发本地请求时
+     * 会删掉请求里的 `cookie`、并用桌面端自己的 hostCookie 顶替，同时把响应里的
+     * `set-cookie` 剥掉（见 Electron 主进程 forwardWebRequest / WITHHELD_RESPONSE_HEADERS）。
+     * 内置 iframe 因此不能再依赖 cookie 会话 —— H5 已经改成把登录令牌存 localStorage、
+     * 每个 /s/api 请求走 `Authorization: Bearer`（请求头是原样透传的）。
+     * 想在外面的真浏览器里打开时，地址得是绝对 http 源：它由客户端启动时挂在
+     * globalThis.__DSH_TRANSPORT__.streamBaseUrl 上；拿不到就退回相对路径（Web 场景够用）。
+     */
+    function workbenchUrl() {
+      var t = globalThis.__DSH_TRANSPORT__
+      var base = (t && typeof t.streamBaseUrl === 'string') ? t.streamBaseUrl.replace(/\/+$/, '') : ''
+      return base + '/s/app'
+    }
+
+    /** 桌面端会把 http(s) 的 window.open 交给 shell.openExternal，落到系统浏览器。 */
+    function openWorkbench() {
+      window.open(workbenchUrl(), '_blank', 'noopener,noreferrer')
+    }
+
+    /** 工作台页面（席位：main，key = 'superman'）。 */
+    function WorkbenchPage() {
+      return h('div', { className: 'sm-page' },
+        h('div', { className: 'sm-page-bar' },
+          h('span', { className: 'sm-page-mark' }, WorkbenchGlyph({ size: 16 })),
+          h('span', { className: 'sm-page-title' }, PANEL_LABEL),
+          h('div', { className: 'sm-page-actions' },
             QUICK_COMMANDS.map(function (c) {
               return h('button', {
                 key: c.label,
@@ -99,19 +118,30 @@ window.__ModuleLoader__.load({
                 title: c.text,
                 onClick: function () { sendCommand(c.text) },
               }, c.icon + ' ' + c.label)
-            }))),
-        h('iframe', { className: 'sm-panel-frame', src: '/s/app', title: 'Superman' }))
+            }),
+            h('button', { className: 'sm-cmd-btn sm-open-btn', onClick: openWorkbench }, '↗ 独立窗口'))),
+        // ?host=dsh：DSH Web 客户端（http 源）里 iframe 无法自证宿主身份，
+        // 显式标记后 H5 启用免登录通道与面板内导航（dsh-app:// 桌面壳靠协议名自证，无需参数）。
+        h('iframe', { className: 'sm-page-frame', src: '/s/app?host=dsh', title: PANEL_LABEL }))
     }
 
     function apply(ctx) {
       var removeCss = injectCss(CSS)
 
-      ctx.slots.inject('sidebar.footer.action', function () {
-        return ctx.slots.register({ name: 'sidebar.footer.action', id: 'superman-trigger', order: 40 }, SupermanFooterAction)
+      ctx.slots.inject('sidebar.panellist', function () {
+        return ctx.slots.register({
+          name: 'sidebar.panellist',
+          id: PANEL_ID,
+          order: 11,
+          label: function () { return PANEL_LABEL },
+        }, WorkbenchGlyph)
       })
 
-      ctx.slots.inject('shell.overlay', function () {
-        return ctx.slots.register({ name: 'shell.overlay', id: 'superman-overlay', order: 80 }, SupermanOverlay)
+      ctx.slots.inject('main', function () {
+        return ctx.slots.register({
+          name: 'main',
+          key: PANEL_ID,
+        }, WorkbenchPage)
       })
 
       ctx.slots.inject('conversation.input.dock', function () {
@@ -122,22 +152,21 @@ window.__ModuleLoader__.load({
     }
 
     var CSS = [
-      '.sm-trigger{width:32px;height:32px;border-radius:9px;border:1px solid var(--dsw-alias-border-l1);background:transparent;cursor:pointer;font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;transition:.14s}',
-      '.sm-trigger:hover{background:color-mix(in srgb,var(--dsw-alias-label-primary) 7%,transparent)}',
-      '.sm-trigger.on{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 18%,transparent);border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 50%,transparent)}',
-      '.sm-panel{position:fixed;right:16px;bottom:16px;top:64px;width:min(480px,92vw);z-index:999;display:flex;flex-direction:column;border-radius:16px;overflow:hidden;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-background-primary,#1e293b);box-shadow:0 24px 70px rgba(0,0,0,.45)}',
-      '.sm-panel-bar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--dsw-alias-border-l1);flex-shrink:0}',
-      '.sm-panel-title{flex:1;font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary)}',
-      '.sm-panel-open{font-size:12px;color:var(--dsw-alias-label-secondary);text-decoration:none}',
-      '.sm-panel-open:hover{color:var(--dsw-alias-label-primary)}',
-      '.sm-panel-close{border:none;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;font-size:13px;padding:2px 6px}',
-      '.sm-panel-close:hover{color:var(--dsw-alias-label-primary)}',
-      '.sm-panel-frame{flex:1;border:none;width:100%;min-height:0}',
-      '.sm-cmd{padding:8px 12px;border-bottom:1px solid var(--dsw-alias-border-l1);flex-shrink:0}',
-      '.sm-cmd-title{font-size:11px;color:var(--dsw-alias-label-secondary);margin-bottom:6px}',
-      '.sm-cmd-row{display:flex;gap:6px;flex-wrap:wrap}',
+      // 入口不写任何样式：字形 + 标题交给 sidebar.panellist 席位自己的行布局
+      // （36px 行高、8px 间距、hover / active / focus-visible 全是宿主给的），
+      // 这样它跟插件、自动化任务、技能中心三个条目完全一致。
+      //
+      // 工作台页面本体。
+      '.sm-page{display:flex;flex-direction:column;height:100%;min-height:0}',
+      '.sm-page-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:none;padding:10px 14px;border-bottom:1px solid var(--dsw-alias-border-l1)}',
+      '.sm-page-title{font-size:14px;font-weight:600;color:var(--dsw-alias-label-primary)}',
+      '.sm-page-mark{display:inline-flex;align-items:center;flex:none;color:var(--dsw-alias-label-secondary)}',
+      '.sm-page-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-left:auto}',
       '.sm-cmd-btn{font-size:12px;padding:5px 10px;border-radius:999px;border:1px solid var(--dsw-alias-border-l2);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 10%,transparent);color:var(--dsw-alias-label-primary);cursor:pointer;transition:.14s}',
       '.sm-cmd-btn:hover{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 50%,transparent)}',
+      '.sm-cmd-btn:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}',
+      '.sm-open-btn{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 45%,transparent);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 16%,transparent)}',
+      '.sm-page-frame{flex:1;width:100%;min-height:0;border:none}',
     ].join('\n')
 
     exports.apply = apply

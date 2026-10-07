@@ -12,6 +12,7 @@ import {
 import GlassDetailSheet from '@/components/ui/glass-detail-sheet';
 import { toast } from '@/features/toast/toast';
 import { cn } from '@/lib/utils';
+import SmartUrlSubscribe from './SmartUrlSubscribe';
 
 const PLATFORM_BADGE: Record<string, { label: string; className: string }> = {
   bilibili: { label: 'B站', className: 'border-primary/40 bg-primary/10 text-primary' },
@@ -122,7 +123,16 @@ export default function FeedsManagerSheet({ open, onClose, onChanged }: FeedsMan
 
         {tab === 'mine' ? (
           <div className="mt-4 space-y-4">
-            {/* 新增订阅表单 */}
+            {/* 智能 URL 订阅 */}
+            <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
+              <p className="text-[13px] font-semibold text-foreground">🔗 智能订阅</p>
+              <p className="text-[11px] text-muted-foreground">粘贴任意博主链接，自动识别平台并订阅</p>
+              <div className="mt-3">
+                <SmartUrlSubscribe onSubscribed={() => { void load(); onChanged?.(); }} />
+              </div>
+            </div>
+
+            {/* 手动新增订阅表单 */}
             <form
               className="space-y-2.5 rounded-2xl border border-border/60 bg-secondary/40 p-4"
               onSubmit={(event) => {
@@ -130,7 +140,7 @@ export default function FeedsManagerSheet({ open, onClose, onChanged }: FeedsMan
                 void subscribe({ title, url, categoryName });
               }}
             >
-              <p className="text-[13px] font-semibold text-foreground">新增订阅</p>
+              <p className="text-[13px] font-semibold text-foreground">手动订阅</p>
               <input
                 type="text"
                 value={title}

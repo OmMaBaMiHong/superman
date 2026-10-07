@@ -3086,6 +3086,66 @@ export function restartSauExecutor(options?: RequestApiOptions): Promise<{ resta
   return requestApi('/api/services/sau/restart', { method: 'POST' }, options);
 }
 
+/* ── 中转站会员（P2e-6 relay）── */
+
+export interface RelaySubscriptionView {
+  id: number | null;
+  plan: string | null;
+  groupId: number | null;
+  status: string;
+  expiresAt: string | null;
+}
+
+export interface RelayStatus {
+  loggedIn: boolean;
+  user: Record<string, unknown> | null;
+  tokenMasked: string | null;
+  isMember: boolean;
+  plan: string | null;
+  expiresAt: string | null;
+  entitlements: string[];
+  subscriptions: Array<{ id: number | null; plan: string | null; groupId: number | null; status: string; expiresAt: string | null }>;
+  keys: Array<{ id: string; name: string; last4: string; status: string; groupName: string | null; selected: boolean }>;
+  selectedModel: string;
+  endpoints: { apiUrl: string; llmBaseUrl: string; defaultModel: string };
+  entitlementCatalog: Record<string, string>;
+}
+
+export function getRelayStatus(options?: RequestApiOptions): Promise<RelayStatus> {
+  return requestApi('/api/relay/status', undefined, options);
+}
+
+export function relayLogin(input: { email: string; password: string }, options?: RequestApiOptions): Promise<{ isMember: boolean; plan: string | null }> {
+  return requestApi('/api/relay/login', { method: 'POST', body: JSON.stringify(input) }, options);
+}
+
+export function relayLogout(options?: RequestApiOptions): Promise<{ ok: boolean }> {
+  return requestApi('/api/relay/logout', { method: 'POST' }, options);
+}
+
+export function relaySync(options?: RequestApiOptions): Promise<{ isMember: boolean; plan: string | null; entitlements: string[] }> {
+  return requestApi('/api/relay/sync', { method: 'POST' }, options);
+}
+
+export function selectRelayKeyId(keyId: string, options?: RequestApiOptions): Promise<{ ok: boolean }> {
+  return requestApi('/api/relay/keys/select', { method: 'POST', body: JSON.stringify({ keyId }) }, options);
+}
+
+export function selectRelayModelId(model: string, options?: RequestApiOptions): Promise<{ ok: boolean }> {
+  return requestApi('/api/relay/model/select', { method: 'POST', body: JSON.stringify({ model }) }, options);
+}
+
+export function listRelayModels(options?: RequestApiOptions): Promise<{ items: Array<{ id: string; name?: string }> }> {
+  return requestApi('/api/relay/models', undefined, options);
+}
+
+export function saveRelayConfig(
+  input: { apiUrl?: string; llmBaseUrl?: string; defaultModel?: string },
+  options?: RequestApiOptions,
+): Promise<{ apiUrl: string; llmBaseUrl: string; defaultModel: string }> {
+  return requestApi('/api/relay/config', { method: 'POST', body: JSON.stringify(input) }, options);
+}
+
 /** 手动触发一轮到期订阅源抓取（与调度器 tick 同一实现，不等周期）。 */
 export function refreshFeedsNow(options?: RequestApiOptions): Promise<{ feeds: number; inserted: number }> {
   return requestApi('/api/feeds/refresh-now', { method: 'POST' }, options);

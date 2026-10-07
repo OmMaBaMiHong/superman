@@ -5,6 +5,7 @@
  * token 围栏影响——应用鉴权由 auth.ts 自己守）：
  *   /s/api/health        GET  公开，{ ok: true, name: 'superman' }
  *   /s/api/auth/login    POST dev 登录，签发 session cookie
+ *   /s/api/auth/host-session POST DSH 宿主身份换会话（免登录；宿主不可用时 404）
  *   /s/api/auth/logout   POST 登出
  *   /s/api/auth/session  GET  当前 session 状态
  *   /s/api/heartbeat     GET  最近心跳（需登录；K1 验收数据库链路用）
@@ -17,6 +18,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Auth } from './auth.js'
 import type { Queryable } from './db.js'
 import { handleBusinessApi } from './api.js'
+import { isDshLlmAvailable } from '@/server/integrations/ai/dshLlmBridge'
 
 export const PLUGIN_NAME = 'superman'
 
@@ -34,6 +36,21 @@ export interface RoutesDeps {
   pluginName?: string
   /** 自检清单：已翻译的业务 API（health 端点与 H5 页展示）。 */
   apiList?: readonly string[]
+  /** 内部端点共享密钥（= auth_session_secret）；独立 worker 复用 DSH 模型时校验。 */
+  internalToken?: string
+  /**
+   * DSH 宿主身份直通（免登录通道）：进程内读 deepseekAccount → 账号 ID/昵称。
+   * 浏览器/Web 宿主未注入该依赖（或返回 null）时，auth/host-session 回 404，
+   * H5 据此回落口令登录页。
+   */
+  hostIdentity?: () => Promise<{ dshAccountId: string; displayName: string | null } | null>
+  /** 调度器热切换（P2e-5 服务面板）：设置页开关即时生效，免重启。 */
+  schedulerControl?: { isRunning(): boolean; setRunning(enabled: boolean): void }
+  /** 中转站模型注入状态（health 上报用）。 */
+  relayLlmState?: () => { state: string; error: string | null }
+
+  /** 项目根（透传给业务 API 的 keeper 重启脚本用）。 */
+  projectRoot?: string
 }
 
 export function json(res: ServerResponse, status: number, body: unknown): void {
@@ -88,8 +105,10 @@ export function createApiHandler(deps: RoutesDeps) {
         const body = await readJsonBody(req)
         const session = await deps.auth.login(String(body.username ?? ''), String(body.password ?? ''))
         if (!session) return json(res, 401, { ok: false, error: '用户名或密码错误' })
-        deps.auth.issueCookie(res, session)
-        return json(res, 200, { ok: true, username: session.username ?? session.userId })
+        // 同一枚令牌既进 cookie，也回给页面存起来：dsh-app:// 壳里 cookie 到不了浏览器，
+        // H5 只能靠这个 token 走 Authorization 头（见 host/auth.ts 的 SESSION_HEADER）。
+        const token = deps.auth.issueCookie(res, session)
+        return json(res, 200, { ok: true, username: session.username ?? session.userId, token })
       }
       if (req.method === 'POST' && op === 'auth/logout') {
         const session = await deps.auth.authenticate(req)
@@ -97,12 +116,59 @@ export function createApiHandler(deps: RoutesDeps) {
         deps.auth.clearCookie(res)
         return json(res, 200, { ok: true })
       }
+      if (req.method === 'POST' && op === 'auth/host-session') {
+        // 免登录：DSH 宿主已登录 DeepSeek 时凭宿主身份换会话。webServer 只在本机
+        // 回环伺服（DSH webserver 前缀路由），能打到这里的调用方即可信；身份本身
+        // 由 hostIdentity 在进程内读取，HTTP 层不携带也无法伪造。
+        if (!deps.hostIdentity) return json(res, 404, { ok: false, error: '宿主身份通道未启用' })
+        const identity = await deps.hostIdentity()
+        if (!identity) return json(res, 404, { ok: false, error: 'DSH 宿主不可用或 DeepSeek 未登录' })
+        if (!deps.db) return json(res, 503, { ok: false, error: '数据库未连接' })
+        const session = await deps.auth.loginWithHostIdentity(identity)
+        if (!session) return json(res, 401, { ok: false, error: '宿主会话签发失败' })
+        // 与口令登录同构：同一枚令牌进 cookie 并回传页面（dsh-app:// 壳里只有头通道能用）。
+        const token = deps.auth.issueCookie(res, session)
+        return json(res, 200, { ok: true, username: session.username ?? session.userId, token })
+      }
+
+      // 内部端点（独立 worker 进程复用 DSH 模型）：用共享密钥鉴权，不走 session。
+      if (req.method === 'POST' && op === 'internal/llm-complete') {
+        const token = String(req.headers['x-superman-internal-token'] ?? '')
+        if (!deps.internalToken || token !== deps.internalToken) {
+          return json(res, 401, { ok: false, error: '内部令牌无效' })
+        }
+        const { dshComplete } = await import('@/server/integrations/ai/dshLlmBridge')
+        const body = await readJsonBody(req)
+        try {
+          const text = await dshComplete({
+            ...(typeof body.system === 'string' ? { system: body.system } : {}),
+            messages: Array.isArray(body.messages)
+              ? (body.messages as Array<{ role: 'user' | 'assistant'; content: string }>)
+              : [],
+            ...(typeof body.temperature === 'number' ? { temperature: body.temperature } : {}),
+            ...(typeof body.maxTokens === 'number' ? { maxTokens: body.maxTokens } : {}),
+            ...(typeof body.reasoningEffort === 'string' ? { reasoningEffort: body.reasoningEffort } : {}),
+          })
+          return json(res, 200, { ok: true, text })
+        } catch (err) {
+          return json(res, 200, { ok: false, error: err instanceof Error ? err.message : String(err) })
+        }
+      }
+
       // 业务 API（治理/热点/洗稿/草稿，K2 批次 2）：全部要求 session，先于此处的方法门。
       if (await handleBusinessApi(req, res, deps)) return
       if (req.method !== 'GET') return json(res, 405, { ok: false, error: '仅支持 GET/POST' })
 
       if (op === 'health') {
-        return json(res, 200, { ok: true, name: pluginName, db: deps.db !== null, apis: deps.apiList ?? [] })
+        return json(res, 200, {
+          ok: true,
+          name: pluginName,
+          buildTag: 'relay-llm-v3',
+          db: deps.db !== null,
+          dshLlm: isDshLlmAvailable(),
+          relayLlm: deps.relayLlmState?.() ?? null,
+          apis: deps.apiList ?? [],
+        })
       }
       if (op === 'auth/session') {
         const session = await deps.auth.authenticate(req)

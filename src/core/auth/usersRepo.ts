@@ -83,6 +83,115 @@ export async function findUserByUsername(
   return rows[0] ?? null;
 }
 
+export async function findUserByDshAccount(
+  db: DbClient,
+  dshAccountId: string,
+): Promise<UserRow | null> {
+  const { rows } = await db.query<UserRow>(
+    `
+      select ${userColumns}
+      from users
+      where dsh_account_id = $1
+      limit 1
+    `,
+    [dshAccountId],
+  );
+
+  return rows[0] ?? null;
+}
+
+/**
+ * 宿主代管用户：按 DSH 账号 ID 自动建号或返回已绑定用户。
+ *
+ * - `password_hash = ''`：不可口令登录（登录链路只认非空 hash），会话只能由宿主身份换发；
+ * - 首个绑定的宿主账号视为产品主人（admin），其后为 member；
+ * - 昵称只做展示（username），宿主侧改名且不撞名时跟随更新，不 bump session_version。
+ */
+export async function ensureHostUser(
+  db: Pool,
+  input: { dshAccountId: string; displayName: string | null },
+): Promise<UserRow> {
+  const existing = await findUserByDshAccount(db, input.dshAccountId);
+  if (existing) {
+    const name = normalizeUsername(input.displayName ?? '');
+    if (name && name.toLowerCase() !== existing.username.toLowerCase()) {
+      // 目标昵称被其他用户占用时保持原名，不做破坏性改名。
+      const { rows } = await db.query<UserRow>(
+        `
+          update users
+          set username = $2, updated_at = now()
+          where id = $1
+            and not exists (
+              select 1 from users u2
+              where lower(u2.username) = lower($2) and u2.id <> $1
+            )
+          returning ${userColumns}
+        `,
+        [existing.id, name],
+      );
+      return rows[0] ?? existing;
+    }
+    return existing;
+  }
+
+  const { rowCount: hasHostUser } = await db.query(
+    'select 1 from users where dsh_account_id is not null limit 1',
+  );
+  const role: UserRole = (hasHostUser ?? 0) > 0 ? 'member' : 'admin';
+  const fallback = `dsh-${input.dshAccountId.slice(0, 12)}`;
+  const base = normalizeUsername(input.displayName ?? '') || fallback;
+  // 昵称被占用时逐级退到带账号片段的确定性名字；账号列冲突（并发绑定）直接复用已有行。
+  const candidates = [base, `${base}-${input.dshAccountId.slice(0, 6)}`, fallback];
+
+  let lastError: unknown = new Error('ensureHostUser: 用户名候选全部冲突');
+  for (const username of candidates) {
+    const client = await db.connect();
+    try {
+      await client.query('begin');
+      const { rows } = await client.query<UserRow>(
+        `
+          insert into users(username, password_hash, role, status, dsh_account_id)
+          values ($1, '', $2, 'active', $3)
+          on conflict do nothing
+          returning ${userColumns}
+        `,
+        [username, role, input.dshAccountId],
+      );
+      if (!rows[0]) {
+        await client.query('rollback');
+        const raced = await findUserByDshAccount(db, input.dshAccountId);
+        if (raced) return raced;
+        lastError = new Error(`ensureHostUser: 用户名 ${username} 已被占用`);
+        continue;
+      }
+      const user = rows[0];
+      await ensureUserSettings(client, user.id);
+      await client.query('commit');
+      return user;
+    } catch (err) {
+      await client.query('rollback').catch(() => {});
+      lastError = err;
+    } finally {
+      client.release();
+    }
+  }
+  throw lastError;
+}
+
+/** 宿主账号登出/凭据失效时作废其全部会话（session_version 跳变使已签发令牌全部失效）。 */
+export async function bumpDshAccountSessions(db: DbClient, dshAccountId: string): Promise<boolean> {
+  const result = await db.query(
+    `
+      update users
+      set session_version = session_version + 1, updated_at = now()
+      where dsh_account_id = $1
+    `,
+    [dshAccountId],
+  );
+
+  return (result.rowCount ?? 0) > 0;
+}
+
 export async function getUserById(db: DbClient, userId: string): Promise<UserRow | null> {
   const { rows } = await db.query<UserRow>(
     `

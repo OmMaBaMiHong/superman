@@ -474,7 +474,7 @@ export async function listGovernanceQueue(
     `
       select count(*)::int as count
       from articles a
-      join feeds f on f.id = a.feed_id and f.user_id = a.user_id
+      left join feeds f on f.id = a.feed_id and f.user_id = a.user_id
       where ${whereSql}
     `,
     values,
@@ -500,7 +500,7 @@ export async function listGovernanceQueue(
         a.direction_reason as "directionReason",
         ${contentTypeSignalSelectSql}
       from articles a
-      join feeds f on f.id = a.feed_id and f.user_id = a.user_id
+      left join feeds f on f.id = a.feed_id and f.user_id = a.user_id
       left join categories c
         on c.id = f.category_id and c.user_id = a.user_id
       where ${whereSql}

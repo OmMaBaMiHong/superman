@@ -14,7 +14,8 @@ import GlassDetailSheet from '@/components/ui/glass-detail-sheet';
 import { cn } from '@/lib/utils';
 import { ACCOUNT_PLATFORM_META } from '../lib/accountPlatforms';
 
-const PLATFORM_IDS: AccountPlatform[] = ['wechat', 'douyin', 'xhs', 'bilibili', 'channels'];
+const PLATFORM_IDS: AccountPlatform[] = ['wechat', 'douyin', 'xhs', 'channels', 'kuaishou', 'bilibili'];
+const SAU_QR_PLATFORMS: readonly string[] = ['douyin', 'xhs', 'channels', 'kuaishou'];
 
 interface AddAccountSheetProps {
   open: boolean;
@@ -26,7 +27,7 @@ interface AddAccountSheetProps {
     credKind: 'app_secret' | 'cookie';
     credential: Record<string, unknown>;
   }) => void;
-  /** 抖音扫码落库成功（账号已由后端写入，父级只需刷新列表并关闭）。 */
+  /** SAU 扫码落库成功（账号已由后端写入，父级只需刷新列表并关闭）。 */
   onDouyinAdded?: () => void;
 }
 
@@ -46,12 +47,12 @@ export default function AddAccountSheet({ open, submitting, onClose, onSubmit, o
   const [cookie, setCookie] = useState('');
   const [showAdvancedCookie, setShowAdvancedCookie] = useState(false);
   const [sauQr, setSauQr] = useState<SauQrState | null>(null);
-  const [douyinBusy, setDouyinBusy] = useState(false);
+  const [qrBusy, setQrBusy] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const meta = ACCOUNT_PLATFORM_META[platform];
   const isWechat = platform === 'wechat';
-  const isSauQr = platform === 'douyin' || platform === 'xhs';
+  const isSauQr = SAU_QR_PLATFORMS.includes(platform);
   const canSubmit = isWechat
     ? appid.trim() !== '' && secret.trim() !== ''
     : cookie.trim() !== '';
@@ -63,7 +64,7 @@ export default function AddAccountSheet({ open, submitting, onClose, onSubmit, o
     }
   }, []);
 
-  // 关闭 sheet 时停止轮询；抖音会话状态在下次打开扫码流时重建。
+  // 关闭 sheet 时停止轮询；扫码会话状态在下次打开扫码流时重建。
   useEffect(() => {
     if (!open) stopPolling();
   }, [open, stopPolling]);
@@ -78,9 +79,9 @@ export default function AddAccountSheet({ open, submitting, onClose, onSubmit, o
 
   const handleStartSauQr = useCallback(() => {
     if (!isSauQr) return;
-    const sauPlatform: SauQrPlatform = platform === 'xhs' ? 'xhs' : 'douyin';
+    const sauPlatform = platform as SauQrPlatform; // isSauQr 已保证是四扫码平台之一
     const name = accountName.trim() || `${meta.name}账号`;
-    setDouyinBusy(true);
+    setQrBusy(true);
     void createSauLoginSession(sauPlatform, { accountName: name })
       .then(({ sessionId }) => {
         setSauQr({ sessionId, qrSrc: null, status: 'pending', error: null });
@@ -105,7 +106,7 @@ export default function AddAccountSheet({ open, submitting, onClose, onSubmit, o
       .catch(() => {
         setSauQr({ sessionId: '', qrSrc: null, status: 'expired', error: '登录会话创建失败，请确认执行器已启动' });
       })
-      .finally(() => setDouyinBusy(false));
+      .finally(() => setQrBusy(false));
   }, [platform, isSauQr, meta.name, accountName, onDouyinAdded, stopPolling]);
 
   const handleSubmit = useCallback(
@@ -196,7 +197,7 @@ export default function AddAccountSheet({ open, submitting, onClose, onSubmit, o
           </div>
         ) : isSauQr ? (
           <div className="space-y-3">
-            {/* 抖音：扫码授权（主路径） */}
+            {/* 扫码授权（主路径）：抖音/小红书/视频号/快手 */}
             <div className="rounded-2xl border border-border/70 bg-card/60 p-3.5">
               <div className="flex items-center gap-2">
                 <QrCode aria-hidden="true" className="h-4 w-4 text-primary" />
@@ -239,7 +240,7 @@ export default function AddAccountSheet({ open, submitting, onClose, onSubmit, o
               ) : (
                 <button
                   type="button"
-                  disabled={douyinBusy}
+                  disabled={qrBusy}
                   onClick={handleStartSauQr}
                   className={cn(
                     'mt-3 inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-primary/40 bg-primary/10',
@@ -249,7 +250,7 @@ export default function AddAccountSheet({ open, submitting, onClose, onSubmit, o
                   )}
                 >
                   <QrCode aria-hidden="true" className="h-4 w-4" />
-                  {douyinBusy ? '正在生成二维码…' : '生成登录二维码'}
+                  {qrBusy ? '正在生成二维码…' : '生成登录二维码'}
                 </button>
               )}
               <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">

@@ -223,7 +223,7 @@ export interface ArticleGovernanceInput {
 export async function insertArticleIgnoreDuplicate(
   pool: DbClient,
   input: {
-    feedId: string;
+    feedId: string | null;
     dedupeKey: string;
     title: string;
     titleOriginal?: string | null;
@@ -327,6 +327,32 @@ export async function insertArticleIgnoreDuplicate(
     );
   }
   return article;
+}
+
+/**
+ * 更新收藏备注 / 想法（user_note），可选同时改标题。
+ * 用于「收藏后事后补充产品思路 / 备案信息」，也会作为生成稿件的用户要求注入提示词。
+ */
+export async function updateArticleUserNote(
+  pool: DbClient,
+  input: { id: string; userId?: string; note?: string; title?: string },
+): Promise<boolean> {
+  const fields: string[] = [];
+  const values: Array<string> = [input.id, normalizeUserId(input.userId)];
+  if (typeof input.note === 'string') {
+    values.push(input.note.slice(0, 4000));
+    fields.push(`user_note = $${values.length}`);
+  }
+  if (typeof input.title === 'string' && input.title.trim()) {
+    values.push(input.title.trim().slice(0, 300));
+    fields.push(`title = $${values.length}`);
+  }
+  if (fields.length === 0) return false;
+  const res = await pool.query(
+    `update articles set ${fields.join(', ')} where id = $1 and user_id = $2`,
+    values,
+  );
+  return (res.rowCount ?? 0) > 0;
 }
 
 export async function getArticleByFeedAndDedupeKey(
@@ -501,10 +527,10 @@ export async function searchArticles(
         ) as "bodyText",
         articles.published_at as "publishedAt"
       from articles
-      inner join feeds on feeds.id = articles.feed_id
+      left join feeds on feeds.id = articles.feed_id
       where articles.filter_status = any('{passed,error}'::text[])
         and articles.user_id = $1
-        and feeds.user_id = $1
+        and (feeds.user_id = $1 or articles.feed_id is null)
         and ${searchConditions.join('\n        and ')}
       order by
         case

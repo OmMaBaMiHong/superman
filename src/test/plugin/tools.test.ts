@@ -66,9 +66,9 @@ function toolsOf(deps: Partial<Parameters<typeof buildSupermanTools>[0]> = {}) {
 }
 
 describe('plugin/host/tools · 工具表结构', () => {
-  it('注册全部 13 个工具，命名纪律：新工具下划线命名', () => {
+  it('注册全部 17 个工具，命名纪律：新工具下划线命名', () => {
     const tools = buildSupermanTools({ db: fakeDb });
-    expect(tools).toHaveLength(13);
+    expect(tools).toHaveLength(17);
     for (const tool of tools) {
       expect(tool.description.length).toBeGreaterThan(10);
       expect(tool.parameters).toMatchObject({ type: 'object' });
@@ -97,8 +97,8 @@ describe('plugin/host/tools · 工具表结构', () => {
       },
     };
     registerTools(ctx as never, { db: fakeDb });
-    expect(registered).toHaveLength(13);
-    expect(disposers).toHaveLength(13);
+    expect(registered).toHaveLength(17);
+    expect(disposers).toHaveLength(17);
     disposers.forEach((d) => expect(() => d()).not.toThrow());
   });
 });

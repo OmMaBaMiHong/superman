@@ -141,6 +141,7 @@ export async function executeRewriteJob(
       title: article.title,
       contentText: originalText,
       sourceUrl: article.link,
+      userNote: article.userNote,
     };
 
     // 第一轮改写。

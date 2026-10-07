@@ -1,6 +1,8 @@
 import { getRssHubRoutePath, isRssHubUrl } from '@/lib/rsshub/url';
 import { isSafeExternalUrl } from '@/server/integrations/rss/ssrfGuard';
+import { normalizeUrlInput } from '@/lib/url/extractUrl';
 import { fetchEmbeddedRssHubRoute } from './embeddedRssHubApp';
+import { resolveDouyinVideoAuthor } from './douyinAuthorResolver';
 
 // 请求 RSS 源并解析 <title> 作为订阅名称
 async function fetchRssHubFeedTitle(routePath: string): Promise<string | null> {
@@ -40,6 +42,8 @@ interface ResolveDependencies {
   fetchFinalUrl?: (url: string) => Promise<string>;
   fetchRadarRules?: (domain: string) => Promise<unknown>;
   isSafeUrl?: (url: string) => Promise<boolean>;
+  /** 抖音作品链接缺少 sec_uid 时，用浏览器反推作者（可注入以便测试）。 */
+  resolveDouyinVideoAuthor?: (videoId: string) => Promise<{ success: boolean; secUid?: string; nickname?: string; error?: string }>;
 }
 
 const resolveSafetyOptions = { allowUnresolvedHostname: true } as const;
@@ -177,7 +181,11 @@ function isDouyinHostname(hostname: string): boolean {
   );
 }
 
-function resolveDouyinShareUrl(inputUrl: string, finalUrl: URL): RssHubSourceResolveResult | null {
+async function resolveDouyinShareUrl(
+  inputUrl: string,
+  finalUrl: URL,
+  resolveVideoAuthor: NonNullable<ResolveDependencies['resolveDouyinVideoAuthor']>,
+): Promise<RssHubSourceResolveResult | null> {
   const hostname = finalUrl.hostname.toLowerCase();
   if (!isDouyinHostname(hostname)) {
     return null;
@@ -210,12 +218,13 @@ function resolveDouyinShareUrl(inputUrl: string, finalUrl: URL): RssHubSourceRes
     });
   }
 
-  // 3) /share/video/{id} 或 /video/{id} —— 视频页，依赖 sec_uid 反推作者
+  // 3) /share/video/{id} 或 /video/{id} —— 视频页
   const shareVideoIndex = segments.findIndex(
     (segment, index) => segment === 'share' && segments[index + 1] === 'video',
   );
-  const videoIndex = shareVideoIndex >= 0 ? shareVideoIndex : segments.indexOf('video');
-  const videoId = videoIndex >= 0 ? segments[videoIndex + 1] : undefined;
+  // 指向 'video' 段本身（share 场景下为 shareVideoIndex + 1）
+  const videoSegmentIndex = shareVideoIndex >= 0 ? shareVideoIndex + 1 : segments.indexOf('video');
+  const videoId = videoSegmentIndex >= 0 ? segments[videoSegmentIndex + 1] : undefined;
   const secUid = finalUrl.searchParams.get('sec_uid');
   if (videoId) {
     if (secUid) {
@@ -225,13 +234,22 @@ function resolveDouyinShareUrl(inputUrl: string, finalUrl: URL): RssHubSourceRes
         sourceDomain,
       });
     }
-    // 视频页缺少 sec_uid 无法反推作者，引导用户改贴主页链接。
+    // 视频页缺少 sec_uid：尝试用浏览器反推作者
+    const author = await resolveVideoAuthor(videoId);
+    if (author.success && author.secUid) {
+      return createResolvedResult(inputUrl, `/douyin/user/${encodeURIComponent(author.secUid)}`, {
+        finalUrl: finalUrl.toString(),
+        title: author.nickname ? `抖音 · ${author.nickname}` : '抖音博主',
+        sourceDomain,
+      });
+    }
+    // 反推失败，引导用户改贴主页链接
     return {
       resolved: false,
       inputUrl,
       finalUrl: finalUrl.toString(),
       sourceDomain,
-      message: '这是一个抖音视频链接，缺少作者信息，无法生成订阅。请改用作者主页链接（douyin.com/user/…）。',
+      message: '这是一个抖音视频链接，未能自动解析出作者，请改用作者主页链接（douyin.com/user/…）。',
     };
   }
 
@@ -281,7 +299,7 @@ export async function resolveRssHubSourceUrl(
   value: string,
   deps: ResolveDependencies = {},
 ): Promise<RssHubSourceResolveResult> {
-  const inputUrl = value.trim();
+  const inputUrl = normalizeUrlInput(value);
   if (!inputUrl) {
     return { resolved: false, inputUrl, message: '请输入要识别的链接。' };
   }
@@ -316,7 +334,11 @@ export async function resolveRssHubSourceUrl(
     return { resolved: false, inputUrl, finalUrl: finalUrl.toString(), message: '跳转后的链接不可访问。' };
   }
 
-  const douyinResult = resolveDouyinShareUrl(inputUrl, finalUrl);
+  const douyinResult = await resolveDouyinShareUrl(
+    inputUrl,
+    finalUrl,
+    deps.resolveDouyinVideoAuthor ?? resolveDouyinVideoAuthor,
+  );
   if (douyinResult) return douyinResult;
 
   const radarResult = await resolveByRadarRules(
