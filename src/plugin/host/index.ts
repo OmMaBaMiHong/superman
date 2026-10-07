@@ -24,6 +24,9 @@ import { runTrendRadarScheduleTick } from './servicesKeeper.js'
 import { registerSkills } from './skills.js'
 import { registerHostIdentityBridge, getHostIdentity } from './hostIdentity.js'
 import { registerRelayHostBridge, relayBridgeApi, getRelayHostBridgeState } from './relayHostBridge.js'
+import { writeBoardSlices } from './boardCache.js'
+import { buildStudioBoardSlices } from './studioBoard.js'
+import { listUsers } from '@/core/auth/usersRepo'
 import { createQueryableStorage, resolveStorageMode, type StorageMode } from './pgliteAdapter.js'
 import { createLocalQueueDriver, setQueueDriver } from '@/server/infra/queue/localDriver'
 import { findServicesConfig, saveServicesConfig, getServicesConfig } from '@/core/services/serviceConfig'
@@ -137,6 +140,21 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
       )
       schedulerRunning = schedulerEnabled
       log(schedulerEnabled ? '插件调度器已开启（采集/热点同步/评论/洗稿/追踪 + 服务 keeper）' : '插件调度器未开启（设置页可热切换）')
+
+      // 看板缓存预热（服务启动即构建读模型进本地 SQLite）：面板首开直接吃缓存渲染，
+      // 无需等源库查询；之后的刷新仍是面板打开时的后台整片重建
+      void (async () => {
+        const users = await listUsers(pool as never)
+        for (const user of users.filter((u) => u.status === 'active')) {
+          try {
+            const slices = await buildStudioBoardSlices(pool as never, user.id)
+            writeBoardSlices(slices as unknown as Record<string, unknown>)
+          } catch (error) {
+            warn(`[superman] 看板缓存预热失败 user=${user.id}: ${error instanceof Error ? error.message : String(error)}`)
+          }
+        }
+        log('看板读模型缓存已预热（按活跃用户）')
+      })()
     })
     .catch((error: unknown) => {
       warn(`[superman] 存储 ${storageMode} 初始化失败：${error instanceof Error ? error.message : String(error)}；路由与工具继续可用（dev 鉴权），心跳/调度关闭`)
