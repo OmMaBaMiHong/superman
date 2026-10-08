@@ -1,0 +1,1 @@
+var e=`superman.session.token`,t=null;function n(){try{let t=window.localStorage.getItem(e);if(t!==null)return t}catch{}return t}function r(n){t=n;try{n?window.localStorage.setItem(e,n):window.localStorage.removeItem(e)}catch{}}function i(e){let t=n();return t?`${e}${e.includes(`?`)?`&`:`?`}access_token=${encodeURIComponent(t)}`:e}export{i as n,r,n as t};

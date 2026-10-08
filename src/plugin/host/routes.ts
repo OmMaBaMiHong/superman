@@ -190,6 +190,13 @@ export function createApiHandler(deps: RoutesDeps) {
       }
       // 业务 API（治理/热点/洗稿/草稿，K2 批次 2）：全部要求 session。
       if (await handleBusinessApi(req, res, deps)) return
+      // 生成同款视频（WaveForge 引擎通道）：要求 session，子路由见 waveforgeRoutes。
+      if (op.startsWith('waveforge/')) {
+        const session = await deps.auth.authenticate(req)
+        if (!session) return json(res, 401, { ok: false, error: '未登录' })
+        const { handleWaveforgeRoute } = await import('./waveforgeRoutes.js')
+        return handleWaveforgeRoute(op.slice('waveforge/'.length), req, res)
+      }
       return json(res, 404, { ok: false, error: `未知端点 ${op}` })
     } catch (error) {
       return json(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) })

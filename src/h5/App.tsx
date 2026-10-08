@@ -16,6 +16,7 @@ const StudioConsole = lazy(() => import('@/features/studio/components/StudioCons
 const H5ReaderPage = lazy(() => import('./pages/ReaderPage'));
 const H5NotificationsPage = lazy(() => import('./pages/NotificationsPage'));
 const H5ProfilePage = lazy(() => import('./pages/ProfilePage'));
+const H5RemakePage = lazy(() => import('./pages/RemakePage'));
 
 function AskAiEntry() {
   return (
@@ -122,6 +123,8 @@ function App() {
         ? tabParam
         : undefined;
     view = <StudioConsole initialSection={studioTab} />;
+  } else if (route === '/remake') {
+    view = <H5RemakePage />;
   } else if (route === '/notifications') {
     view = <H5NotificationsPage />;
   } else if (route === '/profile') {
