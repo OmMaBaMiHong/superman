@@ -45,7 +45,21 @@ export async function injectRssHubCookieHeader(
     return headers;
   }
 
-  const cookie = await getPlainRssHubCookie(getPool(), userId, provider);
+  let cookie = await getPlainRssHubCookie(getPool(), userId, provider);
+  if (!cookie && provider === 'douyin') {
+    // 回退：发布授权存于 platform_accounts 的本人抖音 cookie。
+    // 收藏列表仅本人可见、喜欢列表依赖登录态——这些"本人数据"订阅靠它才有数据。
+    const { listPlatformAccounts, getDecryptedCredential } = await import('@/core/platform-accounts/repository');
+    const accounts = await listPlatformAccounts(getPool(), { userId, platform: 'douyin' });
+    for (const account of accounts) {
+      if (account.status !== 'active') continue;
+      const credential = await getDecryptedCredential(getPool(), account.id, userId);
+      if (credential?.credentialPlaintext) {
+        cookie = credential.credentialPlaintext;
+        break;
+      }
+    }
+  }
   if (!cookie) {
     return headers;
   }
