@@ -4,9 +4,7 @@ import ReaderApp from './ReaderApp';
 import type { ViewType } from '../../types';
 
 interface ReaderPageProps {
-  searchParams?:
-    | Promise<Record<string, string | string[] | undefined>>
-    | Record<string, string | string[] | undefined>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }
 
 function normalizeViewSearchParam(input: string | string[] | undefined): ViewType | undefined {
@@ -15,7 +13,7 @@ function normalizeViewSearchParam(input: string | string[] | undefined): ViewTyp
   return normalized ? normalized : undefined;
 }
 
-export default async function ReaderPage({ searchParams }: ReaderPageProps = {}) {
+export default async function ReaderPage({ searchParams }: ReaderPageProps) {
   if (!(await isAuthenticated())) {
     redirect('/login');
   }

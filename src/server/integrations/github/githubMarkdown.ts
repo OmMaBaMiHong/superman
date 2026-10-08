@@ -38,7 +38,7 @@ export function renderReleaseBody(input: RenderReleaseBodyInput): string {
 
   const serverHtml = input.bodyHtml?.trim();
   if (serverHtml) {
-    return sanitizeContent(serverHtml, { baseUrl });
+    return sanitizeContent(serverHtml, { baseUrl }) ?? '';
   }
 
   const markdown = input.bodyMarkdown?.trim();
@@ -51,5 +51,5 @@ export function renderReleaseBody(input: RenderReleaseBodyInput): string {
     return '';
   }
 
-  return sanitizeContent(rendered, { baseUrl });
+  return sanitizeContent(rendered, { baseUrl }) ?? '';
 }

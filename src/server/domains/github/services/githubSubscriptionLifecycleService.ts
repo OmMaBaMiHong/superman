@@ -1,4 +1,4 @@
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { GITHUB_ICON_URL } from '@/lib/feeds/feedIcons';
 import { resolveEffectiveIntervalMinutes } from '@/server/integrations/github/githubRateLimit';
 import { getRepository } from '@/server/integrations/github/githubClient';
@@ -28,7 +28,7 @@ import {
   updateGithubSubscription,
 } from '@/server/domains/github/repositories/githubSubscriptionsRepo';
 
-type DbClient = Pool;
+type DbClient = Pool | PoolClient;
 
 async function resolveCategoryId(
   client: DbClient,
@@ -67,7 +67,7 @@ async function cleanupCategoryIfEmpty(
 ): Promise<void> {
   if (!categoryId) return;
   const { countFeedsByCategoryId } = await import(
-    '@/server/domains/feeds/repositories/categoriesRepo'
+    '@/server/domains/feeds/repositories/feedsRepo'
   );
   const remaining = await countFeedsByCategoryId(client as never, categoryId, userId);
   if (remaining === 0) {
