@@ -67,6 +67,7 @@ import {
 import { ENTITLEMENTS, requireEntitled, type Entitlement } from '@/core/relay/entitlements'
 import { listRelayModels } from '@/core/relay/client'
 import { relayBridgeApi } from './relayHostBridge.js'
+import { readChaosConfig, readChaos, readChaosChannels, readChaosMaterials, readChaosRankings } from '@/server/integrations/chaos/client'
 import { readBoardSlices, writeBoardSlices, boardCacheInfo } from './boardCache.js'
 import { buildStudioBoardSlices, pickBoardSlices, unwrapBoardSlices } from './studioBoard.js'
 import {
@@ -550,6 +551,35 @@ const ROUTES: RouteDef[] = [
   }),
 
   // —— 热点 ——
+  // —— Chaos 数据中台（/open/v1 消费，OpenSkoob 同模式；中台不可用时降级，不阻塞面板）——
+  route('GET', '/chaos/status', async ({ res, db }) => {
+    const config = await readChaosConfig(db as never)
+    if (!config) return json(res, 200, { ok: true, data: { configured: false } })
+    const started = Date.now()
+    try {
+      await readChaos(config, '/channels')
+      json(res, 200, { ok: true, data: { configured: true, ready: true, latencyMs: Date.now() - started, productSlug: config.productSlug } })
+    } catch (error) {
+      json(res, 200, { ok: true, data: { configured: true, ready: false, latencyMs: Date.now() - started, error: error instanceof Error ? error.message : 'unavailable' } })
+    }
+  }),
+  route('GET', '/chaos/materials', async ({ res, query, db }) => {
+    const limit = parsePositiveInt(query.get('limit')) ?? 20
+    const before = query.get('before')?.trim() || undefined
+    const tag = query.get('tag')?.trim() || undefined
+    const result = await readChaosMaterials(db as never, { limit, before, tag })
+    json(res, 200, { ok: true, data: result })
+  }),
+  route('GET', '/chaos/channels', async ({ res, db }) => {
+    const result = await readChaosChannels(db as never)
+    json(res, 200, { ok: true, data: result })
+  }),
+  route('GET', '/chaos/rankings', async ({ res, query, db }) => {
+    const entityType = query.get('entityType')?.trim() || undefined
+    const result = await readChaosRankings(db as never, { entityType })
+    json(res, 200, { ok: true, data: result })
+  }),
+
   route('GET', '/trend-radar/today', async ({ res, query, session, db }) => {
     const dateParam = query.get('date')?.trim()
     if (dateParam && !DATE_PATTERN.test(dateParam)) {
