@@ -254,14 +254,19 @@ function DshLoginFallback({ onSignedIn }: { onSignedIn: (session: H5Session) => 
         className="fixed inset-x-0 top-0 z-50 flex flex-col items-center gap-2 px-4"
         style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}
       >
-        <button
-          type="button"
-          onClick={() => void tryHost()}
-          disabled={busy}
-          className="rounded-full bg-primary px-5 py-2.5 text-xs font-medium text-primary-foreground shadow-lg backdrop-blur-md transition-all hover:brightness-110 disabled:opacity-50"
-        >
-          {busy ? '正在获取宿主身份…' : '🔑 使用 DeepSeek 账号进入'}
-        </button>
+        <div className="flex flex-col items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => void tryHost()}
+            disabled={busy}
+            className="rounded-full bg-primary px-5 py-2.5 text-xs font-medium text-primary-foreground shadow-lg backdrop-blur-md transition-all hover:brightness-110 disabled:opacity-50"
+          >
+            {busy ? '正在获取宿主身份…' : '🔑 使用 DeepSeek 账号进入'}
+          </button>
+          <p className="text-[10.5px] leading-relaxed text-muted-foreground/80 backdrop-blur-sm">
+            进入后自动创建本机身份，并可一键开通中转站会员
+          </p>
+        </div>
         {error ? (
           <p role="alert" className="max-w-md rounded-xl border border-error/30 bg-error/10 px-3 py-2 text-center text-xs text-error backdrop-blur-md">
             {error}
