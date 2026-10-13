@@ -11,11 +11,32 @@ const execFileAsync = promisify(execFile);
 
 // @whisper-cpp-node/core@0.2.0 的 exports 里 import 指向不存在的 dist/index.mjs（仅打包了 CJS index.js），
 // 用 createRequire 走 CJS 加载以规避 ESM 解析失败。
+// 绑定为懒加载探测：原生包只有 darwin-arm64/win32-x64 发布，Linux 服务器缺失——
+// 缺失时语音识别不可用，字幕路径照常，且不能让模块加载即崩（服务器部署硬要求）。
 const require = createRequire(import.meta.url);
-const { createWhisperContext, transcribeAsync } = require('@whisper-cpp-node/core') as {
+
+interface WhisperBinding {
   createWhisperContext: typeof import('@whisper-cpp-node/core')['createWhisperContext'];
   transcribeAsync: typeof import('@whisper-cpp-node/core')['transcribeAsync'];
-};
+}
+
+let whisperBinding: WhisperBinding | null | undefined;
+
+/** 探测并缓存 Whisper 原生绑定；平台无绑定（如 Linux）返回 null。 */
+function loadWhisperBinding(): WhisperBinding | null {
+  if (whisperBinding !== undefined) return whisperBinding;
+  try {
+    whisperBinding = require('@whisper-cpp-node/core') as WhisperBinding;
+  } catch {
+    whisperBinding = null;
+  }
+  return whisperBinding;
+}
+
+/** 语音识别是否在当前平台可用。 */
+export function isWhisperAvailable(): boolean {
+  return loadWhisperBinding() !== null && existsSync(WHISPER_MODEL_PATH);
+}
 
 const YT_DLP_BIN = '/opt/homebrew/bin/yt-dlp';
 const YT_DLP_BIN_FALLBACK = 'yt-dlp';
@@ -221,22 +242,26 @@ export async function transcribeLocalVideo(filePath: string): Promise<Transcript
   }
 }
 
-/** 检查 Whisper 模型并把 WAV 交给 Whisper 识别 */
+/** 检查 Whisper 绑定与模型，把 WAV 交给 Whisper 识别 */
 async function runWhisper(wavPath: string): Promise<TranscriptResult> {
+  const binding = loadWhisperBinding();
+  if (!binding) {
+    throw new Error('当前平台无语音识别绑定（whisper-cpp 原生包未发布 Linux 版），仅支持字幕提取');
+  }
   // 检查模型是否存在
   if (!existsSync(WHISPER_MODEL_PATH)) {
     throw new Error('Whisper 模型未安装，请先下载模型到 models/whisper/ggml-large-v3-turbo-q5_0.bin');
   }
 
   // 使用 whisper.cpp 语音识别
-  const ctx = createWhisperContext({
+  const ctx = binding.createWhisperContext({
     model: WHISPER_MODEL_PATH,
     use_gpu: true,
     no_prints: true,
   });
 
   try {
-    const result = await transcribeAsync(ctx, {
+    const result = await binding.transcribeAsync(ctx, {
       fname_inp: wavPath,
       language: 'zh',
       // 使用 beam search 而非贪心解码，中文输出才能保留标点
