@@ -135,6 +135,25 @@ export function createApiHandler(deps: RoutesDeps) {
         return json(res, 200, { ok: true, username: session.username ?? session.userId, token })
       }
 
+      // 本地无感身份（桌面单机产品形态）：固定本机账号，存在即复用，不设口令。
+      // 商业身份走中转站登录/注册（Skoob 模式）；本机身份只管本地数据归属。
+      if (req.method === 'POST' && op === 'auth/guest-session') {
+        if (!deps.db) return json(res, 503, { ok: false, error: { code: 'service_unavailable', message: '数据库未连接' } });
+        const { findUserByUsername } = await import('@/core/auth/usersRepo');
+        let user = await findUserByUsername(deps.db as never, 'dsh-local');
+        if (!user) {
+          await deps.db.query(
+            `insert into users(username, password_hash, role, status) values ('dsh-local', '', 'member', 'active') on conflict do nothing`,
+          );
+          user = await findUserByUsername(deps.db as never, 'dsh-local');
+        }
+        if (!user || user.status !== 'active') return json(res, 500, { ok: false, error: { code: 'internal', message: '本机身份创建失败' } });
+        const session = { userId: user.id, role: user.role, sessionVersion: user.sessionVersion, username: user.username };
+        const token = deps.auth.mintToken(session);
+        deps.auth.issueCookie(res, session);
+        return json(res, 200, { ok: true, data: { username: user.username, token } });
+      }
+
       // 内部端点（独立 worker 进程复用 DSH 模型）：用共享密钥鉴权，不走 session。
       if (req.method === 'POST' && op === 'internal/llm-complete') {
         const token = String(req.headers['x-superman-internal-token'] ?? '')

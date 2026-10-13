@@ -1,6 +1,6 @@
 'use client';
 
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { apiFetch, fetchSession, signInWithHost, type H5Session } from './lib/auth';
 import { HOST } from './lib/host';
@@ -129,10 +129,10 @@ function App() {
       navigateTo('/reader');
       return <ViewLoading />;
     }
-    // DSH 宿主：口令登录页之上提供「用 DeepSeek 账号进入」一键通道
-    // （覆盖宿主稍后才登录 DeepSeek、或宿主会话被作废后重进的情况）。
+    // 桌面插件形态：无登录页——本机身份无感自动创建（宿主身份优先，游客兜底），
+    // 中转站登录在进入后的「我的页」完成（Skoob 模式：注册在中转站侧，插件只登录+存令牌）。
     if (HOST === 'dsh') {
-      return <DshLoginFallback onSignedIn={setSession} />;
+      return <DshAutoEntry onSignedIn={setSession} />;
     }
     return <H5LoginPage />;
   }
@@ -225,57 +225,52 @@ function App() {
 }
 
 /**
- * DSH 宿主的登录兜底页：口令登录页之上悬浮「用 DeepSeek 账号进入」一键通道。
- * 覆盖宿主稍后才登录 DeepSeek、或宿主会话被作废后重进的情况；通道失败时
- * 底下的口令登录表单仍然可用（原 LoginPage 行为不变）。
+ * DSH 桌面端无感进入：宿主身份（DeepSeek 账号）优先，失败回退本机游客身份——
+ * 本地身份只管本地数据归属；创作/素材能力由中转站登录解锁（我的页完成）。
  */
-function DshLoginFallback({ onSignedIn }: { onSignedIn: (session: H5Session) => void }) {
-  const [busy, setBusy] = useState(false);
+function DshAutoEntry({ onSignedIn }: { onSignedIn: (session: H5Session) => void }) {
   const [error, setError] = useState<string | null>(null);
+  const attemptedRef = useRef(false);
 
-  const tryHost = useCallback(async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      if (await signInWithHost()) {
+  useEffect(() => {
+    if (attemptedRef.current) return;
+    attemptedRef.current = true;
+    void (async () => {
+      try {
+        if (await signInWithHost()) {
+          onSignedIn(await fetchSession());
+          navigateTo('/reader');
+          return;
+        }
+      } catch {
+        // 宿主身份不可用 → 走游客兜底
+      }
+      try {
+        const res = await apiFetch('/s/api/auth/guest-session', { method: 'POST' });
+        if (!res.ok) throw new Error('guest session failed');
         onSignedIn(await fetchSession());
         navigateTo('/reader');
-        return;
+      } catch {
+        setError('本机身份初始化失败，请重试');
       }
-      setError('未获取到 DeepSeek 登录身份：请先在 DeepSeek 客户端登录，或使用下方账号密码。');
-    } finally {
-      setBusy(false);
-    }
+    })();
   }, [onSignedIn]);
 
-  return (
-    <div className="relative">
-      <div
-        className="fixed inset-x-0 top-0 z-50 flex flex-col items-center gap-2 px-4"
-        style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}
-      >
-        <div className="flex flex-col items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => void tryHost()}
-            disabled={busy}
-            className="rounded-full bg-primary px-5 py-2.5 text-xs font-medium text-primary-foreground shadow-lg backdrop-blur-md transition-all hover:brightness-110 disabled:opacity-50"
-          >
-            {busy ? '正在获取宿主身份…' : '🔑 使用 DeepSeek 账号进入'}
-          </button>
-          <p className="text-[10.5px] leading-relaxed text-muted-foreground/80 backdrop-blur-sm">
-            进入后自动创建本机身份，并可一键开通中转站会员
-          </p>
-        </div>
-        {error ? (
-          <p role="alert" className="max-w-md rounded-xl border border-error/30 bg-error/10 px-3 py-2 text-center text-xs text-error backdrop-blur-md">
-            {error}
-          </p>
-        ) : null}
+  if (error) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-background px-6 text-center">
+        <p role="alert" className="text-sm text-error">{error}</p>
+        <button
+          type="button"
+          onClick={() => { attemptedRef.current = false; setError(null); }}
+          className="rounded-full border border-border px-5 py-2 text-xs text-muted-foreground hover:text-foreground"
+        >
+          重试
+        </button>
       </div>
-      <H5LoginPage />
-    </div>
-  );
+    );
+  }
+  return <ViewLoading />;
 }
 
 export default App;
