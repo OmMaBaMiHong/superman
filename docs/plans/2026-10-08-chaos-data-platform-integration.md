@@ -67,3 +67,18 @@ Superman 是消费方+来源归因，不是独占方。迁移判据——**多�
 - 不复制采集器、不加产品专属采集端点；缺字段登记公共缺口；
 - 用户交互（点赞/评论）不接受产品 Key 身份（文档 §3 明确）；
 - 中台 `existing-facts` 通用映射未启用前，不宣称任意字段映射完成。
+
+## 四、Superman 产品接入策略（2026-10-08 已写，待中台环境执行）
+
+脚本：`hotspot-tracking-system/.runtime/consumer-superman-config.mts`（对标 consumer-openskoob-config.mts，按实际 API 契约校正过：scope 字段=dataScopes；频道绑定不带 overrides）。
+
+内容：
+- scope（dataScopes）：channels / feed / rankings / materials / sources:read / sources:write（显式列出，不全量放行）
+- 域名：DSH 宿主 19387 + 网页端 3000
+- 频道：绑定共享热榜 `/`（未订阅用户推荐列表，共享策略不动）+ `/ai`；新建专属频道
+  `/c/superman-materials`（Superman 创作素材：keywords AI/大模型/DeepSeek/创作、materialTags
+  热榜/AI/科技/创作素材、hotMode=keywords、autoRegisterSources=true——P2 订阅源上平台后自动采集）
+- 逻辑分层：未登录/未订阅 → 中台推荐 feed；订阅（Superman 自有注册/宿主授权登录）→ 数据进
+  本地 PGlite；chaos OAuth 用户授权属 P3（两端现均未验，oauthClientId 留空）
+- 验证：channels/feed/materials 真实读 + 无 Key 401 + ingest 422 + 延迟采样 →
+  `.runtime/consumer-superman-verification.json`
