@@ -44,6 +44,7 @@ for (const [from, to] of [
   ['src/plugin/client', 'dist/plugin/client'],
   ['src/plugin/public', 'dist/plugin/public'],
   ['src/plugin/host/migrations', 'dist/plugin/host/migrations'],
+  ['src/server/infra/db/migrations', 'dist/plugin/host/migrations-core'],
 ]) {
   cpSync(join(root, from), join(root, to), { recursive: true })
 }

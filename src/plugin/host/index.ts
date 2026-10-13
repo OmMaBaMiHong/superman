@@ -87,6 +87,9 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
   // 静态产物与迁移目录：编译后位于 dist/plugin/host，资源在 dist/plugin 下。
   const staticRoot = join(HERE, '..', 'public', 'app')
   const migrationsDir = join(HERE, 'migrations')
+  // 核心建表迁移（71 个，含 users/articles 等基础表）：必须先于插件附加迁移执行。
+  // 开源/PGlite 形态从空库起步全靠它；旧 PG 库里这些早已应用，水位表幂等跳过。
+  const coreMigrationsDir = join(HERE, 'migrations-core')
 
   // 鉴权：db 就绪前为 dev 兜底模式；就绪后切换到 users 表 + 共享签名密钥。
   let auth: Auth = createAuth({ db: null, secret: '' })
@@ -113,8 +116,10 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
         setQueueDriver(createLocalQueueDriver(pool))
       }
       log(`存储: ${mode}（${detail}）`)
+      const coreApplied = await runMigrations(pool, loadMigrations(coreMigrationsDir))
+      if (coreApplied.length > 0) log(`核心迁移已应用: ${coreApplied.length} 个`)
       const applied = await runMigrations(pool, loadMigrations(migrationsDir))
-      if (applied.length > 0) log(`迁移已应用: ${applied.join(', ')}`)
+      if (applied.length > 0) log(`插件迁移已应用: ${applied.join(', ')}`)
 
       const { authSessionSecret } = await getAuthSettings(pool as never)
       if (!authSessionSecret.trim()) {
