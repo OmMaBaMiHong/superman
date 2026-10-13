@@ -68,6 +68,7 @@ import { ENTITLEMENTS, requireEntitled, type Entitlement } from '@/core/relay/en
 import { listRelayModels } from '@/core/relay/client'
 import { relayBridgeApi } from './relayHostBridge.js'
 import { readChaosChannels, readChaosMaterials, readChaosRankings, readPlatformConfig, platform } from '@/server/integrations/chaos/client'
+import { startChaosAuthorization, exchangeChaosHandoff, linkedChaosUser, readChaosMe, unlinkChaosUser } from '@/server/integrations/chaos/account'
 import { readBoardSlices, writeBoardSlices, boardCacheInfo } from './boardCache.js'
 import { buildStudioBoardSlices, pickBoardSlices, unwrapBoardSlices } from './studioBoard.js'
 import {
@@ -562,6 +563,39 @@ const ROUTES: RouteDef[] = [
     } catch (error) {
       json(res, 200, { ok: true, data: { configured: true, ready: false, latencyMs: Date.now() - started, error: error instanceof Error ? error.message : 'unavailable' } })
     }
+  }),
+  // Chaos 用户绑定（双身份：产品 Key + Chaos User ID）——订阅等用户行为的规范身份链
+  route('GET', '/chaos/auth/start', async ({ req, res, query, session, db }) => {
+    // 回调地址按请求的 origin 拼（H5 在 /s/app 下，知道自己 origin）
+    const host = String(req.headers.host ?? '127.0.0.1:19387')
+    const proto = String(req.headers['x-forwarded-proto'] ?? 'http').split(',')[0].trim()
+    const returnTo = query.get('returnTo')?.trim() || `${proto}://${host}/s/api/chaos/auth/callback`
+    const authorizationUrl = await startChaosAuthorization(db as never, returnTo)
+    json(res, 200, { ok: true, data: { authorizationUrl } })
+  }),
+  route('GET', '/chaos/auth/callback', async ({ req, res, query, session, db }) => {
+    const code = query.get('code')?.trim() || ''
+    const host = String(req.headers.host ?? '127.0.0.1:19387')
+    const proto = String(req.headers['x-forwarded-proto'] ?? 'http').split(',')[0].trim()
+    if (!code) {
+      res.writeHead(302, { location: `${proto}://${host}/s/app/#/profile?chaos=failed` })
+      res.end()
+      return
+    }
+    const linked = await exchangeChaosHandoff(db as never, session.userId, code)
+    // H5 是 hash 路由：落回我的页并带结果标记
+    res.writeHead(302, { location: `${proto}://${host}/s/app/#/profile?chaos=linked&chaosUserId=${encodeURIComponent(linked.chaosUserId)}` })
+    res.end()
+  }),
+  route('GET', '/chaos/auth/me', async ({ res, session, db }) => {
+    const linked = await linkedChaosUser(db as never, session.userId)
+    if (!linked) return json(res, 200, { ok: true, data: { linked: false } })
+    const me = await readChaosMe(db as never, session.userId)
+    json(res, 200, { ok: true, data: { linked: true, chaosUserId: linked.chaosUserId, linkedAt: linked.linkedAt, profile: me } })
+  }),
+  route('POST', '/chaos/auth/disconnect', async ({ res, session, db }) => {
+    await unlinkChaosUser(db as never, session.userId)
+    json(res, 200, { ok: true, data: { linked: false } })
   }),
   route('GET', '/chaos/materials', async ({ res, query, db }) => {
     const limit = parsePositiveInt(query.get('limit')) ?? 20
