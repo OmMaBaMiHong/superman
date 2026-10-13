@@ -8,10 +8,13 @@ import { buildDouyinCookieArgs, isDouyinUrl } from './douyinCookies';
 
 const execFileAsync = promisify(execFile);
 
-const YT_DLP_BIN = '/opt/homebrew/bin/yt-dlp';
-const YT_DLP_BIN_FALLBACK = 'yt-dlp';
+// 二进制解析统一走 bins.ts（env → 包自带 → ~/.dsh/bin 自举 → PATH）；
+// yt-dlp 缺失时由调用点 await ensureYtDlp() 首用自举（国内镜像优先）。
+const { resolveYtDlp, ensureYtDlp, resolveFfmpeg } = await import('./bins.js').then(m => ({ resolveYtDlp: m.resolveYtDlp, ensureYtDlp: m.ensureYtDlp, resolveFfmpeg: m.resolveFfmpeg }));
+const YT_DLP_BIN = resolveYtDlp();
+const YT_DLP_BIN_FALLBACK = YT_DLP_BIN;
 
-const FFMPEG_BIN = existsSync('/opt/homebrew/bin/ffmpeg') ? '/opt/homebrew/bin/ffmpeg' : 'ffmpeg';
+const FFMPEG_BIN = resolveFfmpeg();
 const FFPROBE_BIN = existsSync('/opt/homebrew/bin/ffprobe') ? '/opt/homebrew/bin/ffprobe' : 'ffprobe';
 
 const DOWNLOADS_DIR = path.join(process.cwd(), 'downloads', 'video');

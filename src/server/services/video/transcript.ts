@@ -38,8 +38,9 @@ export function isWhisperAvailable(): boolean {
   return loadWhisperBinding() !== null && existsSync(WHISPER_MODEL_PATH);
 }
 
-const YT_DLP_BIN = '/opt/homebrew/bin/yt-dlp';
-const YT_DLP_BIN_FALLBACK = 'yt-dlp';
+import { ensureYtDlp, resolveFfmpeg } from './bins.js';
+
+const FFMPEG_BIN = resolveFfmpeg();
 /** whisper.cpp GGML 模型文件路径（large-v3-turbo 量化版，中文识别与标点更佳） */
 const WHISPER_MODEL_PATH = path.join(process.cwd(), 'models', 'whisper', 'ggml-large-v3-turbo-q5_0.bin');
 
@@ -106,7 +107,7 @@ export async function extractTranscript(url: string, articleId?: number, userId?
  * 尝试通过 yt-dlp 获取已有字幕
  */
 async function tryGetSubtitles(url: string, userId?: number): Promise<TranscriptResult | null> {
-  const bin = existsSync(YT_DLP_BIN) ? YT_DLP_BIN : YT_DLP_BIN_FALLBACK;
+  const bin = await ensureYtDlp();
   const { args: cookieArgs, cleanup: cookieCleanup } = await buildDouyinCookieArgs(url, userId);
 
   try {
@@ -173,7 +174,7 @@ async function tryGetSubtitles(url: string, userId?: number): Promise<Transcript
  * 回退方案：下载音频 → Whisper 语音识别
  */
 async function transcribeWithWhisper(url: string, userId?: number): Promise<TranscriptResult> {
-  const bin = existsSync(YT_DLP_BIN) ? YT_DLP_BIN : YT_DLP_BIN_FALLBACK;
+  const bin = await ensureYtDlp();
   const { args: cookieArgs, cleanup: cookieCleanup } = await buildDouyinCookieArgs(url, userId);
 
   await fs.mkdir(TRANSCRIPT_DIR, { recursive: true });
@@ -193,7 +194,7 @@ async function transcribeWithWhisper(url: string, userId?: number): Promise<Tran
     ]);
 
     // 2. 用 ffmpeg 转成 whisper 需要的 16kHz 单声道 WAV
-    await execFileAsync('ffmpeg', [
+    await execFileAsync(FFMPEG_BIN, [
       '-y',
       '-i', audioPath,
       '-ar', '16000',
