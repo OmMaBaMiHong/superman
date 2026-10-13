@@ -24,7 +24,7 @@ OpenSkoob 的消费模式（`apps/web/src/lib/chaos.ts`）四条铁律，Superma
 |---|---|---|
 | ① Key 与权限 | Chaos 后台 → C端产品矩阵 → superman：确认 scope 含 `materials/channels/feed/rankings`，生成/轮换 API Key | 文档 §3 产品注册链路 |
 | ② 频道绑定 | 给 superman 绑定频道 + 已发布 revision（首批建议：热榜 `/`、AI `/ai`） | `PUT /api/v1/admin/consumer-apps/:id/channel-policies` |
-| ③ 灌配置 | Superman 设置页（service_config）填 `chaos_api_url`(http://127.0.0.1:4010) + Key；或写 `~/.dsh/.env` 的 `SUPERMAN_CHAOS_API_URL/API_KEY` | 本文档 §一.3 |
+| ③ 灌配置 | Superman 设置页（service_config）填 `platform_api_url`(http://127.0.0.1:4010) + `consumer_api_key`；或写 `~/.dsh/.env` 的 `PLATFORM_API_URL/CONSUMER_API_KEY`（榜天下同名规范） | 本文档 §一.3 |
 
 验收（照 OpenSkoob §0.7 口径）：`/s/api/chaos/status` 返回 `ready:true` 且延迟记录；
 `/chaos/materials` 返回真实素材；中台杀掉后 Superman 面板显示降级态但其余功能正常。
@@ -82,3 +82,20 @@ Superman 是消费方+来源归因，不是独占方。迁移判据——**多�
   本地 PGlite；chaos OAuth 用户授权属 P3（两端现均未验，oauthClientId 留空）
 - 验证：channels/feed/materials 真实读 + 无 Key 401 + ingest 422 + 延迟采样 →
   `.runtime/consumer-superman-verification.json`
+
+## 五、对齐榜天下规范（2026-10-08 第二轮）
+
+用户要求按规范接（榜天下是第一个 C 端产品，OpenSkoob 是下游小说产品）。差异与修正：
+
+- **客户端重写为榜天下 platform() 网关同构**：单一网关三身份轴（open=产品 Key 读 /open/v1；
+  token=Chaos 用户会话走 /api/v1 用户交互；consumer=产品 Key+用户 token 并用深读）、
+  401 用户 GET 降匿名重放、12s 超时、PlatformError 中文可读异常——原先 2.5s OpenSkoob 式
+  客户端废弃。
+- env 命名对齐榜天下 `.env.example`：`PLATFORM_API_URL` / `CONSUMER_API_KEY`
+  （service_config 同名小写键回退）。
+- OpenSkoob 评价：它的 lib/chaos.ts 在其自身范围（materials/rankings 只读，无用户交互）
+  是正确的，但**不是完整规范**——用户会话轴、/api/v1 深读、401 降匿名这些都是榜天下
+  才有的。Superman 采纳榜天下全量形状（用户轴先留参数位，P3 接线）。
+- `.runtime` 说明：是中台仓的 gitignored 运行时暂存目录（一次性配置/联调脚本 + Key
+  文件 0600），不是产品接入物——真正的接入=中台 DB 的 ConsumerApp 行 + 消费方自己的
+  .env + 服务端客户端代码。榜天下没有 .runtime 脚本，它的 Key 直接在自己的 .env。
