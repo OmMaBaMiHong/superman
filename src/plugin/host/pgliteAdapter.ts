@@ -32,6 +32,12 @@ interface PgliteDb {
   close(): Promise<void>
 }
 
+/** 迁移 SQL 预处理：pgcrypto 行中和（0001 仅历史遗留声明，schema 未用其函数；
+ *  gen_random_uuid 为 PG13+ 内置）。避免个别运行时扩展注册差异导致全量迁移断链。 */
+function preprocessMigrationSql(sql: string): string {
+  return sql.replace(/create\s+extension\s+if\s+not\s+exists\s+pgcrypto\s*;?/gi, '-- pgcrypto: not required (gen_random_uuid is built-in since PG13)');
+}
+
 export class PglitePool implements PgPoolLike {
   private readonly db: PgliteDb
   /** 互斥门：connect() 会话期间普通 query 在此排队（末位追加等待前驱完成）。 */
@@ -114,7 +120,7 @@ export class PglitePool implements PgPoolLike {
 
   private async raw(text: string, params?: readonly unknown[]): Promise<QueryResult> {
     if (params === undefined || params === null || params.length === 0) {
-      const results = await this.db.exec(text)
+      const results = await this.db.exec(preprocessMigrationSql(text))
       if (results.length === 1) return { rows: results[0]?.rows ?? [] }
       // 多语句（DDL/迁移）：无行集语义
       return { rows: [] }

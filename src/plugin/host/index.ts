@@ -56,6 +56,9 @@ interface PluginContext {
 }
 
 const HERE = dirname(fileURLToPath(import.meta.url))
+// 写在 import 区之后也无妨，但保持依赖声明在顶部
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 /** 项目根（dist/plugin/host 上跳三级）：keeper 拉起 SAU 启动脚本用。 */
 const PROJECT_ROOT = join(HERE, '..', '..', '..')
 
@@ -157,7 +160,13 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
       })()
     })
     .catch((error: unknown) => {
-      warn(`[superman] 存储 ${storageMode} 初始化失败：${error instanceof Error ? error.message : String(error)}；路由与工具继续可用（dev 鉴权），心跳/调度关闭`)
+      db = null // 迁移失败不给路由暴露未初始化的裸库（否则后续全是 relation 不存在类报错）
+      const message = error instanceof Error ? error.message : String(error)
+      try {
+        mkdirSync(join(homedir(), '.dsh', 'superman'), { recursive: true })
+        writeFileSync(join(homedir(), '.dsh', 'superman', 'init-error.log'), `${new Date().toISOString()} ${storageMode}: ${message}\n`, { flag: 'a' })
+      } catch { /* 日志落盘失败不影响主流程 */ }
+      warn(`[superman] 存储 ${storageMode} 初始化失败：${message}；路由与工具继续可用（dev 鉴权），心跳/调度关闭`)
     })
 
   // TrendRadar 每日定时任务：独立于全局调度器开关（schedulerEnabled 只管采集/同步等
