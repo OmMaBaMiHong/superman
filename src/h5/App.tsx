@@ -1,7 +1,8 @@
 'use client';
 
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
-import { fetchSession, signInWithHost, type H5Session } from './lib/auth';
+import { X } from 'lucide-react';
+import { apiFetch, fetchSession, signInWithHost, type H5Session } from './lib/auth';
 import { HOST } from './lib/host';
 import { navigateTo, useHashPath } from './lib/router';
 import { ToastHost } from '@/features/toast/components/ToastHost';
@@ -44,6 +45,48 @@ function App() {
   const route = path.split('?')[0] || '/reader';
   const [session, setSession] = useState<H5Session | null>(null);
   const [pasteOpen, setPasteOpen] = useState(false);
+  // Chaos 数据中台授权提示（DSH 宿主）：未绑定则每次冷进入提示一次，可跳过（本会话不再打扰）
+  const [chaosPrompt, setChaosPrompt] = useState(false);
+  const dismissChaosPrompt = useCallback(() => {
+    try {
+      sessionStorage.setItem('superman.chaosPrompt', 'skip');
+    } catch {
+      // 忽略
+    }
+    setChaosPrompt(false);
+  }, []);
+  const connectChaos = useCallback(() => {
+    void (async () => {
+      try {
+        const res = await apiFetch('/s/api/chaos/auth/start');
+        const json = (await res.json()) as { ok?: boolean; data?: { authorizationUrl?: string } };
+        if (json.ok && json.data?.authorizationUrl) {
+          window.location.href = json.data.authorizationUrl;
+          return;
+        }
+      } catch {
+        // 中台未配置或不可用：不再提示
+      }
+      dismissChaosPrompt();
+    })();
+  }, [dismissChaosPrompt]);
+  useEffect(() => {
+    if (HOST !== 'dsh' || !session?.authenticated) return undefined;
+    if (sessionStorage.getItem('superman.chaosPrompt') === 'skip') return undefined;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await apiFetch('/s/api/chaos/auth/me');
+        const json = (await res.json()) as { ok?: boolean; data?: { linked?: boolean } };
+        if (!cancelled && json.ok && !json.data?.linked) setChaosPrompt(true);
+      } catch {
+        // 探测失败不提示
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.authenticated]);
 
   useEffect(() => {
     let cancelled = false;
@@ -147,6 +190,34 @@ function App() {
         </>
       )}
       <Suspense fallback={<ViewLoading />}>{view}</Suspense>
+      {chaosPrompt ? (
+        <div
+          role="status"
+          className="fixed inset-x-3 bottom-4 z-40 flex items-center gap-2 rounded-2xl border border-primary/30 bg-card/95 px-4 py-3 shadow-lg backdrop-blur-md md:inset-x-auto md:right-6 md:w-[26rem]"
+        >
+          <div className="min-w-0 flex-1">
+            <p className="text-[12.5px] font-medium text-foreground">绑定数据中台账号</p>
+            <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+              绑定后推荐与素材行为带你的中台身份；跳过也不影响本地使用。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={connectChaos}
+            className="inline-flex h-8 shrink-0 items-center rounded-full border border-primary/40 bg-primary/10 px-3 text-[11px] font-medium text-primary transition-all duration-150 hover:bg-primary/20"
+          >
+            去授权
+          </button>
+          <button
+            type="button"
+            aria-label="跳过"
+            onClick={dismissChaosPrompt}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors duration-150 hover:text-foreground"
+          >
+            <X aria-hidden="true" className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ) : null}
       <AddSheet open={pasteOpen} onClose={() => setPasteOpen(false)} />
       <ToastHost />
     </>
