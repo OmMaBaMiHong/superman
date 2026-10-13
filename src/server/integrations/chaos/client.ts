@@ -218,7 +218,7 @@ function toRankingEntry(value: unknown): ChaosRankingEntry | null {
   return { rank: Number.isFinite(rank) ? rank : 0, entityId: r.entityId, name: r.name }
 }
 
-/** 产品已授权频道（菜单来自中台授权，过滤静态与个人频道——榜天下 channels() 同款）。 */
+/** 产品已授权频道（菜单来自中台授权，过滤静态与个人频道——榜天下 channels() 同款）。路径均带 /open/v1 全前缀（网关不做拼接，榜天下同款）。 */
 export async function readChaosChannels(db: Queryable | null): Promise<ChaosResult<ChaosChannel[]>> {
   return degrade(db, '/open/v1/channels', (payload) =>
     asArray(asRecord(payload).items)
@@ -235,7 +235,7 @@ export async function readChaosMaterials(
   const query = new URLSearchParams({ limit: String(options.limit ?? 20), junk: 'false' })
   if (options.before) query.set('before', options.before)
   if (options.tag) query.set('tag', options.tag)
-  return degrade(db, `/materials?${query}`, (payload) =>
+  return degrade(db, `/open/v1/materials?${query}`, (payload) =>
     asArray(asRecord(payload).items)
       .map(toMaterial)
       .filter((m): m is ChaosMaterial => m !== null))
@@ -248,7 +248,7 @@ export async function readChaosRankings(
 ): Promise<ChaosResult<Array<Record<string, unknown>>>> {
   const query = new URLSearchParams({ limit: String(options.limit ?? 50) })
   if (options.entityType) query.set('entityType', options.entityType)
-  return degrade(db, `/rankings?${query}`, (payload) => asArray(asRecord(payload).items).map(asRecord))
+  return degrade(db, `/open/v1/rankings?${query}`, (payload) => asArray(asRecord(payload).items).map(asRecord))
 }
 
 /** 榜单条目（按 slug；slug 白名单前置校验）。 */
@@ -258,7 +258,7 @@ export async function readChaosRankingEntries(
   options: { limit?: number } = {},
 ): Promise<ChaosResult<ChaosRankingEntry[]>> {
   if (!/^[A-Za-z0-9_-]+$/.test(slug)) return { data: null, status: 'missing' }
-  return degrade(db, `/rankings/${encodeURIComponent(slug)}?limit=${options.limit ?? 20}`, (payload) =>
+  return degrade(db, `/open/v1/rankings/${encodeURIComponent(slug)}?limit=${options.limit ?? 20}`, (payload) =>
     asArray(asRecord(payload).items)
       .map(toRankingEntry)
       .filter((e): e is ChaosRankingEntry => e !== null))
