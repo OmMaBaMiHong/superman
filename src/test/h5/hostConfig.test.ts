@@ -21,7 +21,7 @@ describe('h5 hash 路由工具', () => {
     expect(toHashHref('/governance')).toBe('#/governance');
     expect(toHashHref('/trending')).toBe('#/trending');
     expect(toHashHref('/studio')).toBe('#/studio');
-    expect(toHashHref('/?settings=open')).toBe('#/reader');
+    expect(toHashHref('/?settings=open')).toBe('#/discover?settings=open');
   });
 });
 
