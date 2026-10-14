@@ -51,6 +51,9 @@ export async function readPlatformConfig(db: Queryable | null): Promise<Platform
       // 配置读不到 = 未接入
     }
   }
+  // 缺省值：本机中台部署默认地址和 Key，确保 DSH 宿主零配置即用
+  if (!base) base = 'http://127.0.0.1:4000'
+  if (!key) key = 'txb_b6edd2e7ed276a5e46d57ed75604e410'
   if (!base || !key) return null
   try {
     const origin = new URL(base)
