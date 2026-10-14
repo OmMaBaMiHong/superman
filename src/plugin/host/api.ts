@@ -67,7 +67,7 @@ import {
 import { ENTITLEMENTS, requireEntitled, type Entitlement } from '@/core/relay/entitlements'
 import { listRelayModels } from '@/core/relay/client'
 import { relayBridgeApi } from './relayHostBridge.js'
-import { readChaosChannels, readChaosRankings, readPlatformConfig, platform, readChaosHotBoard } from '@/server/integrations/chaos/client'
+import { readChaosChannels, readChaosRankings, readPlatformConfig, platform, readChaosNewsBoard, readChaosGithubRepos, type ChaosGithubRepo } from '@/server/integrations/chaos/client'
 import { startChaosAuthorization, exchangeChaosHandoff, linkedChaosUser, readChaosMe, unlinkChaosUser } from '@/server/integrations/chaos/account'
 import { readBoardSlices, writeBoardSlices, boardCacheInfo } from './boardCache.js'
 import { buildStudioBoardSlices, pickBoardSlices, unwrapBoardSlices } from './studioBoard.js'
@@ -631,21 +631,54 @@ const ROUTES: RouteDef[] = [
     writeBoardSlices({ [sourceCode || 'chaos_all']: { items, fetchedAt: new Date().toISOString() } })
     json(res, 200, { ok: true, data: { source: 'chaos', items } })
   }),
-  // 热点 tab：中台素材按源分组为平台列（TrendRadarToday 兼容结构）；
-  // category=github 时只保留 GitHub 源列；同时给扁平 items 供素材列表消费
-  route('GET', '/chaos/hotboard', async ({ res, query, db }) => {
-    const category = query.get('category')?.trim() || 'all'
-    const result = await readChaosHotBoard(db as never)
+  // 新闻热点 tab：中台素材按源分组为平台列（已排除 GitHub 代码源，GitHub 走 /chaos/github）
+  route('GET', '/chaos/hotboard', async ({ res, db }) => {
+    const result = await readChaosNewsBoard(db as never)
     const board = result.data
     if (!board) {
       json(res, 200, { ok: true, data: { date: todayLocalDateString(), total: 0, platforms: [], items: [], status: result.status } })
       return
     }
-    const platforms = category === 'github'
-      ? board.platforms.filter((p) => /github/i.test(p.platform))
-      : board.platforms
-    const items = platforms.flatMap((p) => p.items)
-    json(res, 200, { ok: true, data: { ...board, platforms, total: items.length, items } })
+    json(res, 200, { ok: true, data: { ...board, items: board.platforms.flatMap((p) => p.items) } })
+  }),
+  // GitHub tab：素材治理成仓库卡片，SQLite 缓存治理后全量、内存切片分页（翻页不回中台）
+  route('GET', '/chaos/github', async ({ res, query, db }) => {
+    const refresh = query.get('refresh') === '1'
+    const page = Math.max(Number(query.get('page')) || 1, 1)
+    const pageSize = Math.min(Math.max(Number(query.get('pageSize')) || 20, 5), 50)
+    const category = query.get('category')?.trim() || 'all'
+    let repos: ChaosGithubRepo[] | null = null
+    let fetchedAt: string | undefined
+    if (!refresh) {
+      const cached = readBoardSlices(['chaos_github_repos'])
+      const payload = cached?.['chaos_github_repos']?.payload as { items?: ChaosGithubRepo[]; fetchedAt?: string } | undefined
+      if (payload?.items?.length) {
+        repos = payload.items
+        fetchedAt = payload.fetchedAt
+      }
+    }
+    if (!repos) {
+      const result = await readChaosGithubRepos(db as never)
+      if (!result.data) {
+        json(res, 200, { ok: true, data: { items: [], total: 0, page, pageSize, hasMore: false, categories: [], status: result.status } })
+        return
+      }
+      repos = result.data
+      fetchedAt = new Date().toISOString()
+      writeBoardSlices({ chaos_github_repos: { items: repos, fetchedAt } })
+    }
+    // 功能类目统计（治理菜单）基于全量，分页过滤只作用于 items
+    const counter = new Map<string, { key: string; name: string; count: number }>()
+    for (const repo of repos) {
+      const hit = counter.get(repo.category) ?? { key: repo.category, name: repo.categoryName, count: 0 }
+      hit.count += 1
+      counter.set(repo.category, hit)
+    }
+    const categories = [...counter.values()].sort((a, b) => b.count - a.count)
+    const filtered = category === 'all' ? repos : repos.filter((r) => r.category === category)
+    const start = (page - 1) * pageSize
+    const items = filtered.slice(start, start + pageSize)
+    json(res, 200, { ok: true, data: { items, total: filtered.length, grandTotal: repos.length, page, pageSize, hasMore: start + pageSize < filtered.length, categories, fetchedAt } })
   }),
   route('GET', '/chaos/channels', async ({ res, db }) => {
     const result = await readChaosChannels(db as never)

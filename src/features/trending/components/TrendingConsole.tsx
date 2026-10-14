@@ -8,6 +8,7 @@ import {
   ExternalLink,
   Flame,
   RefreshCw,
+  Star,
   TrendingDown,
   TrendingUp,
   Loader2,
@@ -22,7 +23,12 @@ import {
   type TrendRadarToday,
   extractTrendRadarOriginal,
 } from '@/lib/api/apiClient';
-import { fetchChaosHotBoard } from '@/lib/api/chaosHotboard';
+import {
+  fetchChaosHotBoard,
+  fetchChaosGithubRepos,
+  type ChaosGithubPage,
+  type ChaosGithubRepo,
+} from '@/lib/api/chaosHotboard';
 import { toast } from '@/features/toast/toast';
 import ContentTypeBadge from '@/components/ui/content-type-badge';
 import DirectionBadge from '@/components/ui/direction-badge';
@@ -31,6 +37,61 @@ import MobileTabBar from '@/features/mobile/components/MobileTabBar';
 import { cn } from '@/lib/utils';
 
 const POLL_MS = 60_000;
+
+/** 数据通道子 tab：三条通道各自独立数据源，互不混装。 */
+const HOT_TABS: Array<{ key: 'news' | 'github' | 'dsh'; label: string }> = [
+  { key: 'news', label: '新闻热点' },
+  { key: 'github', label: 'GitHub' },
+  { key: 'dsh', label: 'DSH' },
+];
+
+/** GitHub 仓库卡片：owner/repo + 描述 + topics 标签 + 功能类目 + 质量分 + 更新时间（对齐 GitHub 搜索结果视图）。 */
+function GithubRepoCard({ item }: { item: ChaosGithubRepo }) {
+  const updated = item.updatedAt ? item.updatedAt.slice(0, 10) : null;
+  return (
+    <li className="border-b border-border/60 px-3.5 py-3 last:border-b-0">
+      <div className="flex items-start justify-between gap-3">
+        <a
+          href={item.url ?? '#'}
+          target="_blank"
+          rel="noreferrer"
+          className="min-w-0 truncate text-sm font-semibold text-primary hover:underline"
+        >
+          {item.repo}
+        </a>
+        <span className="shrink-0 rounded-full border border-border px-2 py-0.5 text-[10px] text-muted-foreground">
+          {item.categoryName}
+        </span>
+      </div>
+      {item.description ? (
+        <p className="mt-1 line-clamp-2 text-[13px] leading-snug text-muted-foreground">
+          {item.description}
+        </p>
+      ) : null}
+      {item.topics.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {item.topics.map((topic) => (
+            <span
+              key={topic}
+              className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary"
+            >
+              {topic}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <div className="mt-2 flex items-center gap-3 font-mono text-[10px] tabular-nums text-muted-foreground/70">
+        {item.qualityScore !== null ? (
+          <span className="inline-flex items-center gap-1">
+            <Star aria-hidden="true" className="h-3 w-3" />
+            {item.qualityScore}/5
+          </span>
+        ) : null}
+        {updated ? <span>更新于 {updated}</span> : null}
+      </div>
+    </li>
+  );
+}
 
 /** 排名变化徽章：升红降绿（热榜语境排名变小=上升；深色终端风禁用蓝色），无历史不显示。 */
 function RankDelta({ item }: { item: TrendRadarItem }) {
@@ -257,15 +318,13 @@ export default function TrendingConsole() {
   /** 拖动/程序平滑滚动期间屏蔽 scroll 事件回写，避免 pill 高亮抖动。 */
   const suppressScrollSyncRef = useRef(false);
 
-  // 三 tab：新闻热点 / GitHub / DSH
+  // 三 tab：新闻热点 / GitHub / DSH（数据通道分离，各自独立加载）
   const [hotTab, setHotTab] = useState<'news' | 'github' | 'dsh'>('news');
-  const [chaosItems, setChaosItems] = useState<Array<Record<string, unknown>>>([]);
-  const [usingChaos, setUsingChaos] = useState(false);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      // 中台 hotboard 优先（Chaos 数据源）；不可用/未配置降级本地 TrendRadar
+      // 新闻热榜走中台（已排除 GitHub 代码源）；不可用/未配置降级本地 TrendRadar
       const hotboard = await fetchChaosHotBoard();
       if (hotboard && hotboard.platforms.length > 0) {
         setData(hotboard as never);
@@ -281,19 +340,63 @@ export default function TrendingConsole() {
     }
   }, []);
 
-  // Chaos 素材按 tab 分类加载（GitHub / 新闻热点 / DSH）
-  const loadChaosMaterials = useCallback(async (tab: HotTab) => {
+  // GitHub 仓库（治理后卡片，服务端分页，滚动追加）
+  const [repoState, setRepoState] = useState<ChaosGithubPage | null>(null);
+  const [repos, setRepos] = useState<ChaosGithubRepo[]>([]);
+  const [repoCat, setRepoCat] = useState('all');
+  const [repoLoading, setRepoLoading] = useState(false);
+  const [repoError, setRepoError] = useState<string | null>(null);
+  const reposLoadedRef = useRef(false);
+
+  const loadRepos = useCallback(async (category: string, page = 1) => {
+    setRepoLoading(true);
+    setRepoError(null);
     try {
-      const cat = tab === 'github' ? 'github' : 'all';
-      const res = await apiFetch(`/s/api/chaos/hotboard?category=${cat}&limit=50`);
-      if (!res.ok) return;
-      const json = await res.json() as { ok?: boolean; data?: { items?: Array<Record<string, unknown>> } };
-      if (json?.ok && Array.isArray(json.data?.items)) {
-        setChaosItems(json.data.items);
-        setUsingChaos(true);
+      const result = await fetchChaosGithubRepos(page, category);
+      if (!result) {
+        setRepoError('GitHub 数据加载失败，请稍后重试。');
+        return;
       }
-    } catch { /* 降级本地 */ }
+      setRepoState(result);
+      setRepos((current) => (page > 1 ? [...current, ...result.items] : result.items));
+    } finally {
+      setRepoLoading(false);
+    }
   }, []);
+
+  // 切到 GitHub tab 按需首载（一次），之后翻页/切类目由交互触发
+  useEffect(() => {
+    if (hotTab === 'github' && !reposLoadedRef.current) {
+      reposLoadedRef.current = true;
+      void loadRepos('all', 1);
+    }
+  }, [hotTab, loadRepos]);
+
+  const switchRepoCat = useCallback(
+    (key: string) => {
+      setRepoCat(key);
+      void loadRepos(key, 1);
+    },
+    [loadRepos],
+  );
+
+  // 列表底部 sentinel：滚进视口自动追加下一页
+  const repoSentinelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (hotTab !== 'github') return;
+    const node = repoSentinelRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && repoState?.hasMore && !repoLoading) {
+          void loadRepos(repoCat, repoState.page + 1);
+        }
+      },
+      { rootMargin: '400px' },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hotTab, repoState, repoLoading, repoCat, loadRepos]);
 
   // 立即同步：不等调度器周期，直接读 TrendRadar 当日 SQLite upsert 进库
   const [syncing, setSyncing] = useState(false);
@@ -310,11 +413,13 @@ export default function TrendingConsole() {
       .finally(() => setSyncing(false));
   }, [load]);
 
+  // 分钟级轮询只服务新闻热点 tab；GitHub/DSH 按需加载不轮询
   useEffect(() => {
+    if (hotTab !== 'news') return;
     void load();
     const timer = window.setInterval(() => void load(true), POLL_MS);
     return () => window.clearInterval(timer);
-  }, [load]);
+  }, [load, hotTab]);
 
   const handlePromote = useCallback((item: TrendRadarItem) => {
     setPromoting((current) => ({ ...current, [item.id]: true }));
@@ -476,25 +581,27 @@ export default function TrendingConsole() {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-3">
-            {data ? (
+            {hotTab === 'news' && data ? (
               <span className="hidden font-mono text-[11px] tabular-nums text-muted-foreground sm:inline">
                 {data.date} · {data.platforms.length} 平台 · {data.total} 条
               </span>
             ) : null}
+            {hotTab === 'news' ? (
+              <button
+                type="button"
+                onClick={handleSyncNow}
+                disabled={syncing}
+                aria-label="立即同步热榜"
+                title="立即读取 TrendRadar 当日数据入仓"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-primary/40 bg-primary/10 text-primary transition-colors duration-150 hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50 sm:h-9 sm:w-9"
+              >
+                <RefreshCw aria-hidden="true" className={cn('h-4 w-4', syncing && 'animate-spin')} />
+              </button>
+            ) : null}
             <button
               type="button"
-              onClick={handleSyncNow}
-              disabled={syncing}
-              aria-label="立即同步热榜"
-              title="立即读取 TrendRadar 当日数据入仓"
-              className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-primary/40 bg-primary/10 text-primary transition-colors duration-150 hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50 sm:h-9 sm:w-9"
-            >
-              <RefreshCw aria-hidden="true" className={cn('h-4 w-4', syncing && 'animate-spin')} />
-            </button>
-            <button
-              type="button"
-              onClick={() => void load()}
-              aria-label="刷新热榜"
+              onClick={() => (hotTab === 'github' ? switchRepoCat(repoCat) : void load())}
+              aria-label="刷新"
               className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:h-9 sm:w-9"
             >
               <RefreshCw aria-hidden="true" className="h-4 w-4" />
@@ -502,8 +609,34 @@ export default function TrendingConsole() {
           </div>
         </div>
 
-        {/* 平台 pill 栏（与轨道双向联动） */}
-        {platforms.length > 0 ? (
+        {/* 数据通道子 tab：新闻热点 / GitHub / DSH */}
+        <div
+          role="tablist"
+          aria-label="热点数据源"
+          className="flex items-center gap-1.5 px-4 pb-2 sm:px-6"
+        >
+          {HOT_TABS.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={hotTab === tab.key}
+              onClick={() => setHotTab(tab.key)}
+              className={cn(
+                'flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-xs font-medium transition-colors duration-150',
+                'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                hotTab === tab.key
+                  ? 'border-primary/40 bg-primary/10 text-primary'
+                  : 'border-border text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* 平台 pill 栏（与轨道双向联动，仅新闻热点 tab） */}
+        {hotTab === 'news' && platforms.length > 0 ? (
           <div
             ref={pillBarRef}
             role="tablist"
@@ -537,65 +670,142 @@ export default function TrendingConsole() {
       </header>
 
       <main className="mx-auto w-full max-w-6xl flex-1 px-0 pb-28 pt-4 md:pb-8">
-        {loading ? (
-          <div className="flex gap-4 px-4 sm:px-6">
-            {Array.from({ length: 3 }, (_, index) => (
-              <div
-                key={index}
-                className="gov-card h-[60vh] w-[88vw] shrink-0 animate-pulse md:w-[380px]"
-                aria-hidden="true"
-              />
-            ))}
-          </div>
-        ) : error ? (
-          <div className="mx-4 rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center sm:mx-6">
-            <p className="text-sm font-medium text-foreground">{error}</p>
-          </div>
-        ) : platforms.length === 0 ? (
-          <div className="mx-4 rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center sm:mx-6">
-            <p className="text-sm font-medium text-foreground">今天还没有热榜数据</p>
-            <p className="mt-2 text-xs text-muted-foreground">
-              等 TrendRadar 跑完一轮，sync job 会把当天热榜同步进来。
-            </p>
+        {hotTab === 'news' ? (
+          loading ? (
+            <div className="flex gap-4 px-4 sm:px-6">
+              {Array.from({ length: 3 }, (_, index) => (
+                <div
+                  key={index}
+                  className="gov-card h-[60vh] w-[88vw] shrink-0 animate-pulse md:w-[380px]"
+                  aria-hidden="true"
+                />
+              ))}
+            </div>
+          ) : error ? (
+            <div className="mx-4 rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center sm:mx-6">
+              <p className="text-sm font-medium text-foreground">{error}</p>
+            </div>
+          ) : platforms.length === 0 ? (
+            <div className="mx-4 rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center sm:mx-6">
+              <p className="text-sm font-medium text-foreground">新闻热榜数据接入中</p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                中台资讯源就位后自动展示；GitHub 仓库在「GitHub」tab 查看。
+              </p>
+            </div>
+          ) : (
+            /* 横向 snap 轨道：每平台一列，列内纵向滚动 */
+            <div
+              ref={railRef}
+              data-testid="trend-platform-rail"
+              onScroll={onRailScroll}
+              onPointerDown={onRailPointerDown}
+              onPointerMove={onRailPointerMove}
+              onPointerUp={onRailPointerUp}
+              onPointerCancel={onRailPointerUp}
+              onPointerLeave={onRailPointerUp}
+              className={cn(
+                'relative flex gap-4 overflow-x-auto px-4 sm:px-6',
+                draggingRail ? 'cursor-grabbing select-none' : 'cursor-grab snap-x snap-mandatory',
+                '[scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+              )}
+            >
+              {platforms.map((group) => (
+                <section
+                  key={group.platform}
+                  data-platform-column={group.platform}
+                  className="gov-card flex h-[calc(100vh-15rem)] max-h-[42rem] w-[88vw] shrink-0 snap-start flex-col overflow-hidden [--gov-accent:var(--glass-border)] md:w-[380px]"
+                >
+                  <header className="flex shrink-0 items-center justify-between border-b border-border px-3.5 py-2.5">
+                    <h2 className="truncate text-[13px] font-semibold text-foreground">
+                      {group.platformName}
+                    </h2>
+                    <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
+                      {group.items.length} 条
+                    </span>
+                  </header>
+                  <ul className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+                    {group.items.map((item) => (
+                      <TrendRadarRow key={item.id} item={item} onOpenDetail={openDetail} />
+                    ))}
+                  </ul>
+                </section>
+              ))}
+            </div>
+          )
+        ) : hotTab === 'github' ? (
+          /* GitHub 仓库：功能类目 chips + 仓库卡片列表 + 滚动分页 */
+          <div className="mx-4 sm:mx-6">
+            {repoState && repoState.categories.length > 0 ? (
+              <div className="mb-3 flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => switchRepoCat('all')}
+                  className={cn(
+                    'flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors duration-150',
+                    repoCat === 'all'
+                      ? 'border-primary/40 bg-primary/10 text-primary'
+                      : 'border-border text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  全部
+                  <span className="font-mono text-[10px] tabular-nums opacity-60">{repoState.grandTotal}</span>
+                </button>
+                {repoState.categories.map((cat) => (
+                  <button
+                    key={cat.key}
+                    type="button"
+                    onClick={() => switchRepoCat(cat.key)}
+                    className={cn(
+                      'flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors duration-150',
+                      repoCat === cat.key
+                        ? 'border-primary/40 bg-primary/10 text-primary'
+                        : 'border-border text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    {cat.name}
+                    <span className="font-mono text-[10px] tabular-nums opacity-60">{cat.count}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {repoError ? (
+              <div className="rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center">
+                <p className="text-sm font-medium text-foreground">{repoError}</p>
+              </div>
+            ) : repos.length === 0 && repoLoading ? (
+              <div className="flex justify-center py-16" aria-busy="true">
+                <Loader2 aria-hidden="true" className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : repos.length === 0 ? (
+              <div className="rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center">
+                <p className="text-sm font-medium text-foreground">暂无 GitHub 仓库数据</p>
+                <p className="mt-2 text-xs text-muted-foreground">中台采集器就绪后自动展示。</p>
+              </div>
+            ) : (
+              <>
+                <div className="gov-card overflow-hidden">
+                  <ul>
+                    {repos.map((item) => (
+                      <GithubRepoCard key={item.id} item={item} />
+                    ))}
+                  </ul>
+                </div>
+                <div ref={repoSentinelRef} className="flex justify-center py-6 text-xs text-muted-foreground">
+                  {repoLoading ? (
+                    <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+                  ) : repoState?.hasMore ? (
+                    <span>上滑加载更多</span>
+                  ) : (
+                    <span>已全部加载 · {repos.length} 个仓库</span>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         ) : (
-          /* 横向 snap 轨道：每平台一列，列内纵向滚动 */
-          <div
-            ref={railRef}
-            data-testid="trend-platform-rail"
-            onScroll={onRailScroll}
-            onPointerDown={onRailPointerDown}
-            onPointerMove={onRailPointerMove}
-            onPointerUp={onRailPointerUp}
-            onPointerCancel={onRailPointerUp}
-            onPointerLeave={onRailPointerUp}
-            className={cn(
-              'relative flex gap-4 overflow-x-auto px-4 sm:px-6',
-              draggingRail ? 'cursor-grabbing select-none' : 'cursor-grab snap-x snap-mandatory',
-              '[scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
-            )}
-          >
-            {platforms.map((group) => (
-              <section
-                key={group.platform}
-                data-platform-column={group.platform}
-                className="gov-card flex h-[calc(100vh-15rem)] max-h-[42rem] w-[88vw] shrink-0 snap-start flex-col overflow-hidden [--gov-accent:var(--glass-border)] md:w-[380px]"
-              >
-                <header className="flex shrink-0 items-center justify-between border-b border-border px-3.5 py-2.5">
-                  <h2 className="truncate text-[13px] font-semibold text-foreground">
-                    {group.platformName}
-                  </h2>
-                  <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
-                    {group.items.length} 条
-                  </span>
-                </header>
-                <ul className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-                  {group.items.map((item) => (
-                    <TrendRadarRow key={item.id} item={item} onOpenDetail={openDetail} />
-                  ))}
-                </ul>
-              </section>
-            ))}
+          <div className="mx-4 rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center sm:mx-6">
+            <p className="text-sm font-medium text-foreground">DSH 生态动态</p>
+            <p className="mt-2 text-xs text-muted-foreground">数据通道筹备中，敬请期待。</p>
           </div>
         )}
       </main>

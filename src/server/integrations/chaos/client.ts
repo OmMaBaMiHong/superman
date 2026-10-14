@@ -297,8 +297,8 @@ export interface ChaosHotBoard {
   }>;
 }
 
-/** 热榜聚合：读 materials，按 sourceName 分组为平台列（与 TrendRadar 页面结构对齐）。 */
-export async function readChaosHotBoard(db: Queryable | null): Promise<ChaosResult<ChaosHotBoard>> {
+/** 新闻热榜：读 materials 并排除代码仓库类源（GitHub 走 /chaos/github 治理通道），按源分组为平台列。 */
+export async function readChaosNewsBoard(db: Queryable | null): Promise<ChaosResult<ChaosHotBoard>> {
   const result = await degrade(db, '/open/v1/materials?limit=200&junk=false', (payload) => {
     const items = asArray(asRecord(payload).items);
     const groups = new Map<string, ChaosHotBoard['platforms'][number]>();
@@ -306,6 +306,7 @@ export async function readChaosHotBoard(db: Queryable | null): Promise<ChaosResu
     for (const raw of items) {
       const r = asRecord(raw);
       const sourceCode = typeof r.sourceCode === 'string' ? r.sourceCode : 'unknown';
+      if (/github/i.test(sourceCode)) continue;
       const sourceName = typeof r.sourceName === 'string' ? r.sourceName : sourceCode;
       if (!groups.has(sourceCode)) {
         groups.set(sourceCode, { platform: sourceCode, platformName: sourceName, items: [] });
@@ -331,4 +332,61 @@ export async function readChaosHotBoard(db: Queryable | null): Promise<ChaosResu
     };
   });
   return result;
+}
+
+/** GitHub 仓库卡片（治理后结构）：repo 名 / 描述 / topics / 功能类目 / 质量分 / 更新时间。 */
+export interface ChaosGithubRepo {
+  id: string;
+  repo: string;
+  description: string | null;
+  topics: string[];
+  category: string;
+  categoryName: string;
+  url: string | null;
+  qualityScore: number | null;
+  updatedAt: string | null;
+}
+
+/** 功能类目治理：把采集侧散 topics 归并成少量功能菜单（按序命中第一条）。 */
+const GITHUB_CATEGORY_RULES: Array<{ key: string; name: string; match: (tag: string) => boolean }> = [
+  { key: 'ai', name: 'AI', match: (t) => /(^|-)(ai|ai-assistant|generative-ai|gemini-api|google-gemini|llm|gpt)(-|$)/.test(t) },
+  { key: 'apple', name: '苹果生态', match: (t) => /(^|-)(apple|ios|ipados|macos|watchos|shortcuts|siri-shortcuts)(-|$)/.test(t) },
+  { key: 'automation', name: '自动化', match: (t) => /(^|-)(automation|workflow|gh-automation|api-integration)(-|$)/.test(t) },
+  { key: 'productivity', name: '效率', match: (t) => /(^|-)(productivity)(-|$)/.test(t) },
+];
+
+function classifyGithubRepo(tags: string[]): { category: string; categoryName: string } {
+  for (const rule of GITHUB_CATEGORY_RULES) {
+    if (tags.some(rule.match)) return { category: rule.key, categoryName: rule.name };
+  }
+  return { category: 'misc', categoryName: '其他' };
+}
+
+/** 拉取 GitHub 素材并治理成仓库卡片全量（分页切片由路由层在缓存上做，避免翻页回源）。 */
+export async function readChaosGithubRepos(db: Queryable | null): Promise<ChaosResult<ChaosGithubRepo[]>> {
+  return degrade(db, '/open/v1/materials?limit=200&junk=false', (payload) => {
+    const items = asArray(asRecord(payload).items);
+    const repos: ChaosGithubRepo[] = [];
+    for (const raw of items) {
+      const r = asRecord(raw);
+      const sourceCode = typeof r.sourceCode === 'string' ? r.sourceCode : '';
+      if (!/github/i.test(sourceCode)) continue;
+      const title = typeof r.title === 'string' ? r.title.trim() : '';
+      if (!title) continue;
+      const topics = asArray(r.categoriesJson).filter((t): t is string => typeof t === 'string');
+      const { category, categoryName } = classifyGithubRepo(topics);
+      repos.push({
+        id: typeof r.id === 'string' ? r.id : title,
+        repo: title,
+        description: typeof r.summary === 'string' && r.summary.trim() ? r.summary.trim() : null,
+        topics: topics.slice(0, 4),
+        category,
+        categoryName,
+        url: typeof r.url === 'string' ? r.url : null,
+        qualityScore: typeof r.qualityScore === 'number' ? r.qualityScore : null,
+        updatedAt: typeof r.updatedAt === 'string' ? r.updatedAt : null,
+      });
+    }
+    return repos;
+  });
 }
