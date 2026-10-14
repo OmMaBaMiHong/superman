@@ -597,9 +597,39 @@ const ROUTES: RouteDef[] = [
     await unlinkChaosUser(db as never, session.userId)
     json(res, 200, { ok: true, data: { linked: false } })
   }),
-  route('GET', '/chaos/hotboard', async ({ res, db }) => {
-    const result = await readChaosHotBoard(db as never)
-    json(res, 200, { ok: true, data: result.data ?? { date: new Date().toISOString().slice(0, 10), total: 0, platforms: [] } })
+  // 按需查：每个 tab 独立端点，各自从中台拉自己的数据，查完缓存在本地 PGlite
+  route('GET', '/chaos/materials', async ({ res, query, db }) => {
+    const refresh = query.get('refresh') === '1'
+    const sourceCode = query.get('sourceCode')?.trim() || undefined
+    const limit = Math.min(Math.max(Number(query.get('limit')) || 50, 1), 200)
+    // 先读本地缓存（SQLite board_slice），除非显式刷新
+    if (!refresh) {
+      const cached = readBoardSlices([sourceCode || 'chaos_all'])
+      const hit = cached?.[sourceCode || 'chaos_all']
+      if (hit) {
+        json(res, 200, { ok: true, data: { source: 'cache', items: (hit.payload as { items?: unknown[] })?.items ?? [] } })
+        return
+      }
+    }
+    // 中台拉取
+    const config = await readPlatformConfig(db as never)
+    if (!config) return json(res, 200, { ok: true, data: { source: 'none', items: [] } })
+    const url = `${config.apiUrl}/open/v1/materials?limit=${limit}&junk=false${sourceCode ? `&sourceCode=${encodeURIComponent(sourceCode)}` : ''}`
+    const apiRes = await fetch(url, { headers: { authorization: `Bearer ${config.consumerKey}` }, signal: AbortSignal.timeout(15_000) })
+    if (!apiRes.ok) return json(res, 200, { ok: true, data: { source: 'error', items: [] } })
+    const payload = await apiRes.json() as { items?: Array<Record<string, unknown>> }
+    const items = (payload.items ?? []).map((r) => ({
+      id: String(r.id ?? ''),
+      title: String(r.title ?? ''),
+      summary: typeof r.summary === 'string' ? r.summary : null,
+      url: typeof r.url === 'string' ? r.url : null,
+      publishedAt: typeof r.publishedAt === 'string' ? r.publishedAt : null,
+      sourceCode: String(r.sourceCode ?? ''),
+      sourceName: String(r.sourceName ?? ''),
+    }))
+    // 缓存到本地
+    writeBoardSlices({ [sourceCode || 'chaos_all']: { items, fetchedAt: new Date().toISOString() } })
+    json(res, 200, { ok: true, data: { source: 'chaos', items } })
   }),
   route('GET', '/chaos/materials', async ({ res, query, db }) => {
     const limit = parsePositiveInt(query.get('limit')) ?? 20
