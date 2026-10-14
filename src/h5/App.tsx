@@ -111,6 +111,14 @@ function App() {
     }
   }, [session, route]);
 
+  // DSH 宿主：首次进入面板总是落「订阅」（/discover），即使用户上次停在其他 tab
+  useEffect(() => {
+    if (HOST !== 'dsh' || !session?.authenticated) return;
+    if (sessionStorage.getItem('superman.discoverLanded')) return;
+    sessionStorage.setItem('superman.discoverLanded', '1');
+    if (route !== '/discover') navigateTo('/discover');
+  }, [session?.authenticated]);
+
   const openPaste = useCallback(() => {
     setPasteOpen(true);
   }, []);
