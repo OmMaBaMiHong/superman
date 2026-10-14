@@ -257,6 +257,11 @@ export default function TrendingConsole() {
   /** 拖动/程序平滑滚动期间屏蔽 scroll 事件回写，避免 pill 高亮抖动。 */
   const suppressScrollSyncRef = useRef(false);
 
+  // 三 tab：新闻热点 / GitHub / DSH
+  const [hotTab, setHotTab] = useState<'news' | 'github' | 'dsh'>('news');
+  const [chaosItems, setChaosItems] = useState<Array<Record<string, unknown>>>([]);
+  const [usingChaos, setUsingChaos] = useState(false);
+
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
@@ -274,6 +279,20 @@ export default function TrendingConsole() {
     } finally {
       if (!silent) setLoading(false);
     }
+  }, []);
+
+  // Chaos 素材按 tab 分类加载（GitHub / 新闻热点 / DSH）
+  const loadChaosMaterials = useCallback(async (tab: HotTab) => {
+    try {
+      const cat = tab === 'github' ? 'github' : 'all';
+      const res = await apiFetch(`/s/api/chaos/hotboard?category=${cat}&limit=50`);
+      if (!res.ok) return;
+      const json = await res.json() as { ok?: boolean; data?: { items?: Array<Record<string, unknown>> } };
+      if (json?.ok && Array.isArray(json.data?.items)) {
+        setChaosItems(json.data.items);
+        setUsingChaos(true);
+      }
+    } catch { /* 降级本地 */ }
   }, []);
 
   // 立即同步：不等调度器周期，直接读 TrendRadar 当日 SQLite upsert 进库
