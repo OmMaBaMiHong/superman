@@ -597,9 +597,12 @@ const ROUTES: RouteDef[] = [
     await unlinkChaosUser(db as never, session.userId)
     json(res, 200, { ok: true, data: { linked: false } })
   }),
-  route('GET', '/chaos/hotboard', async ({ res, db }) => {
-    const result = await readChaosHotBoard(db as never)
-    json(res, 200, { ok: true, data: result.data })
+  route('GET', '/chaos/hotboard', async ({ res, query, db }) => {
+    const category = query.get('category')?.trim() || 'all'
+    const limit = Math.min(Math.max(Number(query.get('limit')) || 30, 1), 200)
+    const sourceCode = category === 'github' ? 'github-api' : undefined
+    const result = await readChaosMaterials(db as never, { limit, sourceCode })
+    json(res, 200, { ok: true, data: result })
   }),
   route('GET', '/chaos/materials', async ({ res, query, db }) => {
     const limit = parsePositiveInt(query.get('limit')) ?? 20
