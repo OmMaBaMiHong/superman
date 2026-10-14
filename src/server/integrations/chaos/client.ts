@@ -183,7 +183,12 @@ export interface ChaosMaterial {
   summary: string | null
   url: string | null
   publishedAt: string | null
+  updatedAt: string | null
   tags: string[]
+  categories: string[]
+  qualityScore: number | null
+  sourceCode: string
+  sourceName: string
 }
 
 export interface ChaosRankingEntry {
@@ -208,6 +213,11 @@ function toMaterial(value: unknown): ChaosMaterial | null {
     url: typeof r.url === 'string' ? r.url : null,
     publishedAt: typeof r.publishedAt === 'string' ? r.publishedAt : null,
     tags: asArray(r.tags).filter((t): t is string => typeof t === 'string'),
+    categories: asArray(r.categories).filter((c): c is string => typeof c === 'string'),
+    qualityScore: typeof r.qualityScore === 'number' ? r.qualityScore : null,
+    sourceCode: typeof r.sourceCode === 'string' ? r.sourceCode : '',
+    sourceName: typeof r.sourceName === 'string' ? r.sourceName : '',
+    updatedAt: typeof r.updatedAt === 'string' ? r.updatedAt : null,
   }
 }
 
