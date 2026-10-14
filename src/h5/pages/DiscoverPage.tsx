@@ -15,7 +15,7 @@ type Category = '全部' | 'AI' | '科技' | '开源' | '新闻热点' | '独立
 const CATEGORY_ORDER: Category[] = ['全部', 'AI', '科技', '开源', '新闻热点', '独立开发'];
 
 /** 根据推荐源的 platform 和标题推断细分类。 */
-function inferCategory(item: RecommendedFeedEntry): Category {
+function inferCategory(item: RecommendedFeedEntry): Exclude<Category, '全部'> {
   if (item.platform === 'ai') return 'AI';
   if (item.platform === 'tech') return '科技';
   if (item.url.includes('github.com') || item.title.toLowerCase().includes('trending')) return '开源';
