@@ -26,6 +26,6 @@ export function navigateTo(path: string): void {
 export function toHashHref(href: string): string {
   const [path, query] = href.split('?');
   if ((path === '' || path === '/') && new URLSearchParams(query).get('settings') === 'open') return '#/settings';
-  if (path === '' || path === '/') return '#/reader';
+  if (path === '' || path === '/') return '#/discover';
   return `#${path}`;
 }

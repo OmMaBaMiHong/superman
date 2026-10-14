@@ -17,7 +17,7 @@ describe('h5 hash 路由工具', () => {
   });
 
   it('Next 路径 → hash href（/ 映射到阅读器，query 丢弃）', () => {
-    expect(toHashHref('/')).toBe('#/reader');
+    expect(toHashHref('/')).toBe('#/discover');
     expect(toHashHref('/governance')).toBe('#/governance');
     expect(toHashHref('/trending')).toBe('#/trending');
     expect(toHashHref('/studio')).toBe('#/studio');
