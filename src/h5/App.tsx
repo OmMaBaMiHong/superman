@@ -127,7 +127,7 @@ function App() {
     // （DSH 桌面端内嵌在 dsh-app:// 里时踩过：session 已经 authenticated，页面却卡在登录页）。
     // 已经登录就别再要口令，直接把路由推回应用内，自愈。
     if (session?.authenticated === true) {
-      navigateTo('/reader');
+      navigateTo('/discover');
       return <ViewLoading />;
     }
     // 桌面插件形态：无登录页——本机身份无感自动创建（宿主身份优先，游客兜底），
@@ -242,7 +242,7 @@ function DshAutoEntry({ onSignedIn }: { onSignedIn: (session: H5Session) => void
       try {
         if (await signInWithHost()) {
           onSignedIn(await fetchSession());
-          navigateTo('/reader');
+          navigateTo('/discover');
           return;
         }
       } catch {
@@ -256,7 +256,7 @@ function DshAutoEntry({ onSignedIn }: { onSignedIn: (session: H5Session) => void
         if (!json?.ok || !json.data?.token) throw new Error('guest session missing token');
         writeSessionToken(json.data.token);
         onSignedIn({ authenticated: true, username: json.data.username ?? 'dsh-local' });
-        navigateTo('/reader');
+        navigateTo('/discover');
       } catch {
         setError('本机身份初始化失败，请重试');
       }
