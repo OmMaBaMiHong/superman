@@ -67,7 +67,7 @@ import {
 import { ENTITLEMENTS, requireEntitled, type Entitlement } from '@/core/relay/entitlements'
 import { listRelayModels } from '@/core/relay/client'
 import { relayBridgeApi } from './relayHostBridge.js'
-import { readChaosChannels, readChaosMaterials, readChaosRankings, readPlatformConfig, platform, readChaosHotBoard } from '@/server/integrations/chaos/client'
+import { readChaosChannels, readChaosRankings, readPlatformConfig, platform, readChaosHotBoard } from '@/server/integrations/chaos/client'
 import { startChaosAuthorization, exchangeChaosHandoff, linkedChaosUser, readChaosMe, unlinkChaosUser } from '@/server/integrations/chaos/account'
 import { readBoardSlices, writeBoardSlices, boardCacheInfo } from './boardCache.js'
 import { buildStudioBoardSlices, pickBoardSlices, unwrapBoardSlices } from './studioBoard.js'
@@ -631,12 +631,21 @@ const ROUTES: RouteDef[] = [
     writeBoardSlices({ [sourceCode || 'chaos_all']: { items, fetchedAt: new Date().toISOString() } })
     json(res, 200, { ok: true, data: { source: 'chaos', items } })
   }),
-  route('GET', '/chaos/materials', async ({ res, query, db }) => {
-    const limit = parsePositiveInt(query.get('limit')) ?? 20
-    const before = query.get('before')?.trim() || undefined
-    const tag = query.get('tag')?.trim() || undefined
-    const result = await readChaosMaterials(db as never, { limit, before, tag })
-    json(res, 200, { ok: true, data: result })
+  // 热点 tab：中台素材按源分组为平台列（TrendRadarToday 兼容结构）；
+  // category=github 时只保留 GitHub 源列；同时给扁平 items 供素材列表消费
+  route('GET', '/chaos/hotboard', async ({ res, query, db }) => {
+    const category = query.get('category')?.trim() || 'all'
+    const result = await readChaosHotBoard(db as never)
+    const board = result.data
+    if (!board) {
+      json(res, 200, { ok: true, data: { date: todayLocalDateString(), total: 0, platforms: [], items: [], status: result.status } })
+      return
+    }
+    const platforms = category === 'github'
+      ? board.platforms.filter((p) => /github/i.test(p.platform))
+      : board.platforms
+    const items = platforms.flatMap((p) => p.items)
+    json(res, 200, { ok: true, data: { ...board, platforms, total: items.length, items } })
   }),
   route('GET', '/chaos/channels', async ({ res, db }) => {
     const result = await readChaosChannels(db as never)
