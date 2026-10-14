@@ -22,6 +22,7 @@ import {
   type TrendRadarToday,
   extractTrendRadarOriginal,
 } from '@/lib/api/apiClient';
+import { fetchChaosHotBoard } from '@/lib/api/chaosHotboard';
 import { toast } from '@/features/toast/toast';
 import ContentTypeBadge from '@/components/ui/content-type-badge';
 import DirectionBadge from '@/components/ui/direction-badge';
@@ -259,8 +260,15 @@ export default function TrendingConsole() {
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      setData(await getTrendRadarToday(undefined, { notifyOnError: false }));
-      setError(null);
+      // 中台 hotboard 优先（Chaos 数据源）；不可用/未配置降级本地 TrendRadar
+      const hotboard = await fetchChaosHotBoard();
+      if (hotboard && hotboard.platforms.length > 0) {
+        setData(hotboard as never);
+        setError(null);
+      } else {
+        setData(await getTrendRadarToday(undefined, { notifyOnError: false }));
+        setError(null);
+      }
     } catch {
       if (!silent) setError('热点数据加载失败，请稍后重试。');
     } finally {

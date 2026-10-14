@@ -67,7 +67,7 @@ import {
 import { ENTITLEMENTS, requireEntitled, type Entitlement } from '@/core/relay/entitlements'
 import { listRelayModels } from '@/core/relay/client'
 import { relayBridgeApi } from './relayHostBridge.js'
-import { readChaosChannels, readChaosMaterials, readChaosRankings, readPlatformConfig, platform } from '@/server/integrations/chaos/client'
+import { readChaosChannels, readChaosMaterials, readChaosRankings, readPlatformConfig, platform, readChaosHotBoard } from '@/server/integrations/chaos/client'
 import { startChaosAuthorization, exchangeChaosHandoff, linkedChaosUser, readChaosMe, unlinkChaosUser } from '@/server/integrations/chaos/account'
 import { readBoardSlices, writeBoardSlices, boardCacheInfo } from './boardCache.js'
 import { buildStudioBoardSlices, pickBoardSlices, unwrapBoardSlices } from './studioBoard.js'
@@ -596,6 +596,10 @@ const ROUTES: RouteDef[] = [
   route('POST', '/chaos/auth/disconnect', async ({ res, session, db }) => {
     await unlinkChaosUser(db as never, session.userId)
     json(res, 200, { ok: true, data: { linked: false } })
+  }),
+  route('GET', '/chaos/hotboard', async ({ res, db }) => {
+    const result = await readChaosHotBoard(db as never)
+    json(res, 200, { ok: true, data: result.data })
   }),
   route('GET', '/chaos/materials', async ({ res, query, db }) => {
     const limit = parsePositiveInt(query.get('limit')) ?? 20

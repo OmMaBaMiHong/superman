@@ -263,3 +263,59 @@ export async function readChaosRankingEntries(
       .map(toRankingEntry)
       .filter((e): e is ChaosRankingEntry => e !== null))
 }
+
+export interface ChaosHotBoard {
+  date: string;
+  total: number;
+  platforms: Array<{
+    platform: string;
+    platformName: string;
+    items: Array<{
+      id: string;
+      title: string;
+      url: string | null;
+      rank: number | null;
+      hotValue: string;
+      sourceDate: string;
+      contentType: string;
+      platform: string;
+      platformName: string;
+    }>;
+  }>;
+}
+
+/** 热榜聚合：读 materials，按 sourceName 分组为平台列（与 TrendRadar 页面结构对齐）。 */
+export async function readChaosHotBoard(db: Queryable | null): Promise<ChaosResult<ChaosHotBoard>> {
+  const result = await degrade(db, '/open/v1/materials?limit=200&junk=false', (payload) => {
+    const items = asArray(asRecord(payload).items);
+    const groups = new Map<string, ChaosHotBoard['platforms'][number]>();
+    let rank = 0;
+    for (const raw of items) {
+      const r = asRecord(raw);
+      const sourceCode = typeof r.sourceCode === 'string' ? r.sourceCode : 'unknown';
+      const sourceName = typeof r.sourceName === 'string' ? r.sourceName : sourceCode;
+      if (!groups.has(sourceCode)) {
+        groups.set(sourceCode, { platform: sourceCode, platformName: sourceName, items: [] });
+      }
+      const group = groups.get(sourceCode)!;
+      rank += 1;
+      group.items.push({
+        id: typeof r.id === 'string' ? r.id : String(rank),
+        title: typeof r.title === 'string' ? r.title : '',
+        url: typeof r.url === 'string' ? r.url : null,
+        rank: group.items.length + 1,
+        hotValue: '',
+        sourceDate: typeof r.publishedAt === 'string' ? r.publishedAt.slice(0, 10) : new Date().toISOString().slice(0, 10),
+        contentType: 'article',
+        platform: sourceCode,
+        platformName: sourceName,
+      });
+    }
+    return {
+      date: new Date().toISOString().slice(0, 10),
+      total: rank,
+      platforms: [...groups.values()],
+    };
+  });
+  return result;
+}
