@@ -43,7 +43,7 @@ function ViewLoading() {
 
 function App() {
   const path = useHashPath();
-  const route = path.split('?')[0] || '/reader';
+  const route = path.split('?')[0] || '/discover';
   const [session, setSession] = useState<H5Session | null>(null);
   const [pasteOpen, setPasteOpen] = useState(false);
   // Chaos 数据中台授权提示（DSH 宿主）：未绑定则每次冷进入提示一次，可跳过（本会话不再打扰）
@@ -173,9 +173,10 @@ function App() {
     view = <H5NotificationsPage />;
   } else if (route === '/profile') {
     view = <H5ProfilePage username={session.username} />;
-  } else {
-    // 首页默认 = 发现（推荐博主 + 热点入口）；阅读流收进「我的订阅」二级
+  } else if (route === '/discover') {
     view = <H5DiscoverPage />;
+  } else {
+    view = <H5ReaderPage />;
   }
 
   return (
