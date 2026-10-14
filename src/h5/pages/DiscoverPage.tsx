@@ -10,9 +10,20 @@ import {
 } from '@/lib/api/apiClient';
 import { cn } from '@/lib/utils';
 
-type Category = '全部' | 'AI' | '科技' | 'B站' | '通用';
+type Category = '全部' | 'AI' | '科技' | '开源' | '新闻热点' | '独立开发';
 
-const CATEGORY_ORDER: Category[] = ['全部', 'AI', '科技', 'B站', '通用'];
+const CATEGORY_ORDER: Category[] = ['全部', 'AI', '科技', '开源', '新闻热点', '独立开发'];
+
+/** 根据推荐源的 platform 和标题推断细分类。 */
+function inferCategory(item: RecommendedFeedEntry): Category {
+  if (item.platform === 'ai') return 'AI';
+  if (item.platform === 'tech') return '科技';
+  if (item.url.includes('github.com') || item.title.toLowerCase().includes('trending')) return '开源';
+  if (/36氪|热榜|新闻|日报|晚报/.test(item.title)) return '新闻热点';
+  if (/独立|变现|ezindie/.test(item.title)) return '独立开发';
+  if (item.platform === 'bilibili') return '科技';
+  return '独立开发';
+}
 
 const PLATFORM_BADGE: Record<string, { label: string; className: string }> = {
   ai: { label: 'AI', className: 'border-purple-400/40 bg-purple-400/10 text-purple-500 dark:text-purple-300' },
@@ -23,10 +34,7 @@ const PLATFORM_BADGE: Record<string, { label: string; className: string }> = {
 };
 
 function categoryOf(item: RecommendedFeedEntry): Exclude<Category, '全部'> {
-  if (item.platform === 'ai') return 'AI';
-  if (item.platform === 'bilibili') return 'B站';
-  if (item.platform === 'tech') return '科技';
-  return '通用';
+  return inferCategory(item);
 }
 
 export default function DiscoverPage() {
