@@ -2,7 +2,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
-import { apiFetch, fetchSession, signInWithHost, type H5Session } from './lib/auth';
+import { apiFetch, fetchSession, signInWithHost, writeSessionToken, type H5Session } from './lib/auth';
 import { HOST } from './lib/host';
 import { navigateTo, useHashPath } from './lib/router';
 import { ToastHost } from '@/features/toast/components/ToastHost';
@@ -15,6 +15,7 @@ import H5LoginPage from './pages/LoginPage';
 const TrendingConsole = lazy(() => import('@/features/trending/components/TrendingConsole'));
 const StudioConsole = lazy(() => import('@/features/studio/components/StudioConsole'));
 const H5ReaderPage = lazy(() => import('./pages/ReaderPage'));
+const H5DiscoverPage = lazy(() => import('./pages/DiscoverPage'));
 const H5NotificationsPage = lazy(() => import('./pages/NotificationsPage'));
 const H5ProfilePage = lazy(() => import('./pages/ProfilePage'));
 const H5RemakePage = lazy(() => import('./pages/RemakePage'));
@@ -173,7 +174,8 @@ function App() {
   } else if (route === '/profile') {
     view = <H5ProfilePage username={session.username} />;
   } else {
-    view = <H5ReaderPage />;
+    // 首页默认 = 发现（推荐博主 + 热点入口）；阅读流收进「我的订阅」二级
+    view = <H5DiscoverPage />;
   }
 
   return (
@@ -248,7 +250,11 @@ function DshAutoEntry({ onSignedIn }: { onSignedIn: (session: H5Session) => void
       try {
         const res = await apiFetch('/s/api/auth/guest-session', { method: 'POST' });
         if (!res.ok) throw new Error('guest session failed');
-        onSignedIn(await fetchSession());
+        const json = (await res.json()) as { ok?: boolean; data?: { token?: string; username?: string } };
+        // DSH 壳里 cookie 进不来：游客令牌必须显式写入本地存储（与登录同款）
+        if (!json?.ok || !json.data?.token) throw new Error('guest session missing token');
+        writeSessionToken(json.data.token);
+        onSignedIn({ authenticated: true, username: json.data.username ?? 'dsh-local' });
         navigateTo('/reader');
       } catch {
         setError('本机身份初始化失败，请重试');
