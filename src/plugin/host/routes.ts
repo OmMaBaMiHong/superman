@@ -148,7 +148,7 @@ export function createApiHandler(deps: RoutesDeps) {
           user = await findUserByUsername(deps.db as never, 'dsh-local');
         }
         if (!user || user.status !== 'active') return json(res, 500, { ok: false, error: { code: 'internal', message: '本机身份创建失败' } });
-        const session = { userId: user.id, role: user.role, sessionVersion: user.sessionVersion, username: user.username };
+        const session = { userId: String(user.id), role: user.role, sessionVersion: user.sessionVersion, username: user.username };
         const token = deps.auth.mintToken(session);
         deps.auth.issueCookie(res, session);
         return json(res, 200, { ok: true, data: { username: user.username, token } });

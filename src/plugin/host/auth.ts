@@ -135,7 +135,7 @@ export function createAuth(options: AuthOptions): Auth {
         passwordHash: hashPassword(password),
       })
     }
-    return { userId: user.id, role: user.role, sessionVersion: user.sessionVersion, username: user.username }
+    return { userId: String(user.id), role: user.role, sessionVersion: user.sessionVersion, username: user.username }
   }
 
   function loginDevFallback(username: string, password: string): Session | null {
@@ -163,7 +163,7 @@ export function createAuth(options: AuthOptions): Auth {
       ) {
         return null
       }
-      return { userId: user.id, role: user.role, sessionVersion: user.sessionVersion, username: user.username }
+      return { userId: String(user.id), role: user.role, sessionVersion: user.sessionVersion, username: user.username }
     }
 
     return devSessions.get(token) ?? null
@@ -185,7 +185,7 @@ export function createAuth(options: AuthOptions): Auth {
         displayName: identity.displayName,
       })
       if (!user || user.status !== 'active') return null
-      return { userId: user.id, role: user.role, sessionVersion: user.sessionVersion, username: user.username }
+      return { userId: String(user.id), role: user.role, sessionVersion: user.sessionVersion, username: user.username }
     },
     async authenticate(req) {
       const token = readRequestToken(req)
