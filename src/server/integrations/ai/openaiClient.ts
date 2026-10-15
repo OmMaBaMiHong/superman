@@ -103,6 +103,16 @@ interface DshChatPayload {
  * DSH 宿主模型 shim：OpenAI 形状的 `chat.completions.create`，内部走 `ctx.llm.stream`。
  * 因此所有既有 AI 调用点（治理拟折 / 产品计划 / 洗稿 / 摘要）零改动即可用上 DSH 模型。
  */
+
+/** 系统日志尽力而为写：插件宿主进程没有 DATABASE_URL（存储走 PGlite），getPool() 会同步抛——不能让日志副作用带崩模型调用。 */
+async function writeDshSystemLog(entry: Parameters<typeof writeSystemLog>[1]): Promise<void> {
+  try {
+    await writeSystemLog(getPool(), entry)
+  } catch {
+    // 日志失败不影响模型调用本身
+  }
+}
+
 async function createDshLlmCompletion(payload: unknown): Promise<unknown> {
   const input = (payload ?? {}) as DshChatPayload;
   const messages = Array.isArray(input.messages) ? input.messages : [];
@@ -130,23 +140,23 @@ async function createDshLlmCompletion(payload: unknown): Promise<unknown> {
       maxTokens: typeof input.max_tokens === 'number' ? input.max_tokens : (typeof input.maxTokens === 'number' ? input.maxTokens : 4096),
       reasoningEffort: 'off',
     });
-    await writeSystemLog(getPool(), {
+    await writeDshSystemLog({
       level: 'info',
       category: 'external_api',
       source: 'dsh-llm',
       message: 'DSH 模型调用 completed',
       context: { model: input.model ?? null, durationMs: Date.now() - startedAt, via: 'ctx.llm' },
-    }).catch(() => {});
+    });
     return { choices: [{ message: { role: 'assistant', content: text }, finish_reason: 'stop' }] };
   } catch (err) {
-    await writeSystemLog(getPool(), {
+    await writeDshSystemLog({
       level: 'error',
       category: 'external_api',
       source: 'dsh-llm',
       message: 'DSH 模型调用 failed',
       details: stringifyExternalError(err),
       context: { model: input.model ?? null, durationMs: Date.now() - startedAt, via: 'ctx.llm' },
-    }).catch(() => {});
+    });
     throw err instanceof Error ? err : new Error(String(err));
   }
 }

@@ -42,10 +42,16 @@ export interface ChaosGithubRepo {
   id: string;
   repo: string;
   description: string | null;
+  /** 中文描述（LLM 异步回填；null 时前端回退英文原文） */
+  descriptionZh: string | null;
   topics: string[];
   category: string;
   categoryName: string;
   url: string | null;
+  stars: number | null;
+  forks: number | null;
+  language: string | null;
+  ownerAvatarUrl: string | null;
   qualityScore: number | null;
   updatedAt: string | null;
 }
@@ -66,6 +72,8 @@ export interface ChaosGithubPage {
   hasMore: boolean;
   categories: ChaosGithubCategory[];
   fetchedAt?: string;
+  /** 本轮响应后服务端受理的待翻译条数；>0 时前端单次延时补拉一次（非轮询） */
+  translating?: number;
 }
 
 /** GitHub 仓库分页：category=all 走治理全量，翻页由服务端切片。 */

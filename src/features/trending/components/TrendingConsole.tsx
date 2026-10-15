@@ -63,7 +63,7 @@ function DshPluginCard({ item, rank }: { item: ChaosDshPlugin; rank: number }) {
             {item.name}
           </a>
           {item.description ? (
-            <p className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-muted-foreground/85">
+            <p className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-muted-foreground">
               {item.description}
             </p>
           ) : null}
@@ -87,7 +87,7 @@ function DshPluginCard({ item, rank }: { item: ChaosDshPlugin; rank: number }) {
           ) : null}
         </div>
         <span
-          className="inline-flex shrink-0 items-center gap-0.5 pt-0.5 font-mono text-[10px] tabular-nums text-amber-300/90"
+          className="inline-flex shrink-0 items-center gap-0.5 pt-0.5 font-mono text-[10px] tabular-nums font-medium text-amber-600 dark:text-amber-400"
           title={`${item.stars} stars`}
         >
           <Star aria-hidden="true" className="h-3 w-3" />
@@ -98,19 +98,25 @@ function DshPluginCard({ item, rank }: { item: ChaosDshPlugin; rank: number }) {
   );
 }
 
-/** GitHub 仓库卡片：首字母方块 + owner/repo 分层名 + 描述 + topics/类目标签行 + 质量分指标。 */
+/** 星数格式化：1234 → 1.2k（与 GitHub 惯例一致）。 */
+function formatStars(stars: number): string {
+  return stars >= 1000 ? `${(stars / 1000).toFixed(1)}k` : String(stars);
+}
+
+/** GitHub 仓库卡片：首字母方块 + owner/repo 分层名 + 中文描述(回退原文) + topics/类目标签行 + 星数/语言指标。 */
 function GithubRepoCard({ item }: { item: ChaosGithubRepo }) {
   const slash = item.repo.indexOf('/');
   const owner = slash > 0 ? item.repo.slice(0, slash) : '';
   const name = slash > 0 ? item.repo.slice(slash + 1) : item.repo;
   const initial = (name || owner || '?').charAt(0).toUpperCase();
   const updated = item.updatedAt ? item.updatedAt.slice(0, 10) : null;
+  const description = item.descriptionZh?.trim() || item.description;
   return (
     <li className="border-b border-border/60 px-3.5 py-3 last:border-b-0">
       <div className="flex items-start gap-2.5">
         <span
           aria-hidden="true"
-          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-border/70 bg-muted/40 font-mono text-[13px] font-bold text-primary/90"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-border/70 bg-muted/40 font-mono text-[13px] font-bold text-primary"
         >
           {initial}
         </span>
@@ -125,37 +131,45 @@ function GithubRepoCard({ item }: { item: ChaosGithubRepo }) {
             {owner ? <span className="text-muted-foreground">{owner}/</span> : null}
             <span className="font-semibold text-foreground">{name}</span>
           </a>
-          {item.description ? (
-            <p className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-muted-foreground/85">
-              {item.description}
+          {description ? (
+            <p
+              className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-muted-foreground"
+              title={item.descriptionZh ? item.description ?? '' : undefined}
+            >
+              {description}
             </p>
           ) : null}
           <div className="mt-1.5 flex flex-wrap items-center gap-1">
-            <span className="rounded border border-border/70 px-1.5 py-px text-[10px] text-muted-foreground">
+            <span className="rounded border border-border bg-muted px-1.5 py-px text-[10px] font-medium text-foreground/80">
               {item.categoryName}
             </span>
             {item.topics.slice(0, 3).map((topic) => (
               <span
                 key={topic}
-                className="max-w-[10rem] truncate rounded-full bg-primary/10 px-1.5 py-px text-[10px] font-medium text-primary/90"
+                className="max-w-[10rem] truncate rounded-full bg-primary/10 px-1.5 py-px text-[10px] font-medium text-primary"
               >
                 {topic}
               </span>
             ))}
           </div>
         </div>
-        {item.qualityScore !== null ? (
-          <span
-            className="inline-flex shrink-0 items-center gap-0.5 pt-0.5 font-mono text-[10px] tabular-nums text-amber-300/90"
-            title="中台质量分"
-          >
-            <Star aria-hidden="true" className="h-3 w-3" />
-            {item.qualityScore}/5
-          </span>
-        ) : null}
+        <div className="flex shrink-0 flex-col items-end gap-0.5 pt-0.5">
+          {item.stars !== null ? (
+            <span
+              className="inline-flex items-center gap-0.5 font-mono text-[11px] tabular-nums font-medium text-amber-600 dark:text-amber-400"
+              title={`${item.stars} stars`}
+            >
+              <Star aria-hidden="true" className="h-3 w-3" />
+              {formatStars(item.stars)}
+            </span>
+          ) : null}
+          {item.language ? (
+            <span className="font-mono text-[10px] text-muted-foreground">{item.language}</span>
+          ) : null}
+        </div>
       </div>
       {updated ? (
-        <p className="mt-1 pl-[42px] font-mono text-[10px] tabular-nums text-muted-foreground/50">
+        <p className="mt-1 pl-[42px] font-mono text-[10px] tabular-nums text-muted-foreground/80">
           更新于 {updated}
         </p>
       ) : null}
@@ -165,24 +179,24 @@ function GithubRepoCard({ item }: { item: ChaosGithubRepo }) {
 
 /** 排名变化徽章已从行内撤下（中台流数据无历史排名，NaN 误显）；详情 payload 里可看全量字段。 */
 
-/** 排名徽章：前三名金银铜奖牌感，其余素色序号（对齐榜天下 atlas 榜单行语义）。 */
+/** 排名徽章：前三名金银铜奖牌感，其余素色序号（对齐榜天下 atlas 榜单行语义）；明暗双主题可读。 */
 function RankBadge({ rank }: { rank: number | null }) {
   if (rank === null) {
     return <span className="w-6 shrink-0" aria-hidden="true">—</span>;
   }
   const medal =
     rank === 1
-      ? 'border-amber-400/40 bg-amber-400/15 text-amber-300'
+      ? 'border-amber-500/50 bg-amber-100 text-amber-700 dark:border-amber-400/40 dark:bg-amber-400/15 dark:text-amber-300'
       : rank === 2
-        ? 'border-slate-300/40 bg-slate-300/10 text-slate-200'
+        ? 'border-zinc-400/50 bg-zinc-200 text-zinc-700 dark:border-slate-300/40 dark:bg-slate-300/10 dark:text-slate-200'
         : rank === 3
-          ? 'border-orange-600/40 bg-orange-600/15 text-orange-300'
+          ? 'border-orange-500/50 bg-orange-100 text-orange-700 dark:border-orange-600/40 dark:bg-orange-600/15 dark:text-orange-300'
           : null;
   return (
     <span
       className={cn(
         'grid h-6 w-6 shrink-0 place-items-center rounded-md border font-mono text-[11px] tabular-nums',
-        medal ?? 'border-transparent font-medium text-muted-foreground/60',
+        medal ?? 'border-transparent font-medium text-muted-foreground',
       )}
     >
       {rank}
@@ -214,7 +228,7 @@ function TrendRadarRow({
             {item.title}
           </span>
           {item.summary ? (
-            <span className="mt-0.5 line-clamp-1 text-[11px] leading-snug text-muted-foreground/80">
+            <span className="mt-0.5 line-clamp-1 text-[11px] leading-snug text-muted-foreground">
               {item.summary}
             </span>
           ) : null}
@@ -430,6 +444,32 @@ export default function TrendingConsole() {
       setRepoLoading(false);
     }
   }, []);
+
+  // 中文描述异步回填：服务端受理翻译后，延时【单次】补拉替换列表（有受理闸门与次数上限，不是轮询）
+  const ghRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ghRefetchCountRef = useRef(0);
+  useEffect(() => {
+    if (hotTab !== 'github') return;
+    const accepted = repoState?.translating ?? 0;
+    if (accepted <= 0) {
+      // 无新受理（翻完/冷却/未配模型）→ 计数清零，下一波回填重新获得补拉预算
+      ghRefetchCountRef.current = 0;
+      return;
+    }
+    if (ghRefetchCountRef.current >= 2) return;
+    if (ghRefetchTimerRef.current) clearTimeout(ghRefetchTimerRef.current);
+    ghRefetchCountRef.current += 1;
+    ghRefetchTimerRef.current = setTimeout(() => {
+      ghRefetchTimerRef.current = null;
+      void loadRepos(repoCat, 1);
+    }, 12_000);
+    return () => {
+      if (ghRefetchTimerRef.current) {
+        clearTimeout(ghRefetchTimerRef.current);
+        ghRefetchTimerRef.current = null;
+      }
+    };
+  }, [repoState, hotTab, repoCat, loadRepos]);
 
   // 切到 GitHub tab 按需首载（一次），之后翻页/切类目由交互触发
   useEffect(() => {

@@ -67,7 +67,8 @@ import {
 import { ENTITLEMENTS, requireEntitled, type Entitlement } from '@/core/relay/entitlements'
 import { listRelayModels } from '@/core/relay/client'
 import { relayBridgeApi } from './relayHostBridge.js'
-import { readChaosChannels, readChaosRankings, readPlatformConfig, platform, readChaosNewsBoard, readChaosGithubRepos, readChaosDshMarket, readChaosDshCategories, type ChaosGithubRepo, type ChaosDshPlugin } from '@/server/integrations/chaos/client'
+import { readChaosChannels, readChaosRankings, readPlatformConfig, platform, readChaosNewsBoard, readChaosGithubRepos, readChaosDshMarket, readChaosDshCategories, GITHUB_DEFAULT_MIN_STARS, type ChaosGithubRepo, type ChaosDshPlugin } from '@/server/integrations/chaos/client'
+import { applyZhDescriptions, scheduleGhTranslation } from '@/server/integrations/chaos/githubTranslate'
 import { startChaosAuthorization, exchangeChaosHandoff, linkedChaosUser, readChaosMe, unlinkChaosUser } from '@/server/integrations/chaos/account'
 import { readBoardSlices, writeBoardSlices, boardCacheInfo } from './boardCache.js'
 import { buildStudioBoardSlices, pickBoardSlices, unwrapBoardSlices } from './studioBoard.js'
@@ -680,31 +681,39 @@ const ROUTES: RouteDef[] = [
     const result = await readChaosDshCategories(db as never)
     json(res, 200, { ok: true, data: result.data ?? [] })
   }),
-  // GitHub tab：素材治理成仓库卡片，SQLite 缓存治理后全量、内存切片分页（翻页不回中台）
-  route('GET', '/chaos/github', async ({ res, query, db }) => {
+  // GitHub tab：素材治理成仓库卡片，SQLite 缓存治理后全量、内存切片分页（翻页不回中台）。
+  // 千星门槛（minStars 可手动指定，0=不设门槛）；中文描述由 LLM 响应后异步回填，接口永不等翻译。
+  route('GET', '/chaos/github', async ({ res, query, db, session }) => {
     const refresh = query.get('refresh') === '1'
     const page = Math.max(Number(query.get('page')) || 1, 1)
     const pageSize = Math.min(Math.max(Number(query.get('pageSize')) || 20, 5), 50)
     const category = query.get('category')?.trim() || 'all'
+    // 注意 Number(null)=0 陷阱：参数缺席时必须落回默认千星门槛，0 仅在显式传 minStars=0 时生效
+    const minStarsRaw = query.get('minStars')?.trim() ?? ''
+    const minStarsParsed = minStarsRaw === '' ? Number.NaN : Number(minStarsRaw)
+    const minStars = Number.isFinite(minStarsParsed) && minStarsParsed >= 0 ? Math.floor(minStarsParsed) : GITHUB_DEFAULT_MIN_STARS
+    const cacheKey = `chaos_github_repos:${minStars}`
+    const TTL_MS = 10 * 60_000
     let repos: ChaosGithubRepo[] | null = null
     let fetchedAt: string | undefined
     if (!refresh) {
-      const cached = readBoardSlices(['chaos_github_repos'])
-      const payload = cached?.['chaos_github_repos']?.payload as { items?: ChaosGithubRepo[]; fetchedAt?: string } | undefined
-      if (payload?.items?.length) {
+      const cached = readBoardSlices([cacheKey])
+      const payload = cached?.[cacheKey]?.payload as { items?: ChaosGithubRepo[]; fetchedAt?: string } | undefined
+      const age = payload?.fetchedAt ? Date.now() - new Date(payload.fetchedAt).getTime() : Number.POSITIVE_INFINITY
+      if (payload?.items?.length && age < TTL_MS) {
         repos = payload.items
         fetchedAt = payload.fetchedAt
       }
     }
     if (!repos) {
-      const result = await readChaosGithubRepos(db as never)
+      const result = await readChaosGithubRepos(db as never, { minStars })
       if (!result.data) {
         json(res, 200, { ok: true, data: { items: [], total: 0, page, pageSize, hasMore: false, categories: [], status: result.status } })
         return
       }
       repos = result.data
       fetchedAt = new Date().toISOString()
-      writeBoardSlices({ chaos_github_repos: { items: repos, fetchedAt } })
+      writeBoardSlices({ [cacheKey]: { items: repos, fetchedAt } })
     }
     // 功能类目统计（治理菜单）基于全量，分页过滤只作用于 items
     const counter = new Map<string, { key: string; name: string; count: number }>()
@@ -716,8 +725,11 @@ const ROUTES: RouteDef[] = [
     const categories = [...counter.values()].sort((a, b) => b.count - a.count)
     const filtered = category === 'all' ? repos : repos.filter((r) => r.category === category)
     const start = (page - 1) * pageSize
-    const items = filtered.slice(start, start + pageSize)
-    json(res, 200, { ok: true, data: { items, total: filtered.length, grandTotal: repos.length, page, pageSize, hasMore: start + pageSize < filtered.length, categories, fetchedAt } })
+    const paged = filtered.slice(start, start + pageSize)
+    // 中文描述：缓存命中直接贴；缺失的响应后异步回填（本轮受理数随响应告知，前端单次补拉一次）
+    const { items, pending } = applyZhDescriptions(paged)
+    const translating = scheduleGhTranslation(db, session?.userId, pending)
+    json(res, 200, { ok: true, data: { items, total: filtered.length, grandTotal: repos.length, page, pageSize, hasMore: start + pageSize < filtered.length, categories, fetchedAt, translating } })
   }),
   route('GET', '/chaos/channels', async ({ res, db }) => {
     const result = await readChaosChannels(db as never)

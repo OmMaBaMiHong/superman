@@ -460,65 +460,137 @@ export async function readChaosDshCategories(db: Queryable | null): Promise<Chao
   )
 }
 
-/** GitHub 仓库卡片（治理后结构）：repo 名 / 描述 / topics / 功能类目 / 质量分 / 更新时间。 */
+/** GitHub 仓库卡片（治理后结构）：repo 名 / 描述 / topics / 功能类目 / 星数 / 更新时间。 */
 export interface ChaosGithubRepo {
   id: string;
   repo: string;
   description: string | null;
+  /** 中文描述（LLM 异步回填，未就绪为 null，前端回退英文原文） */
+  descriptionZh: string | null;
   topics: string[];
   category: string;
   categoryName: string;
   url: string | null;
+  stars: number | null;
+  forks: number | null;
+  language: string | null;
+  ownerAvatarUrl: string | null;
   qualityScore: number | null;
   updatedAt: string | null;
 }
 
-/** 功能类目治理：把采集侧散 topics 归并成少量功能菜单（按序命中第一条）。 */
-const GITHUB_CATEGORY_RULES: Array<{ key: string; name: string; match: (tag: string) => boolean }> = [
-  { key: 'ai', name: 'AI', match: (t) => /(^|-)(ai|ai-assistant|generative-ai|gemini-api|google-gemini|llm|gpt)(-|$)/.test(t) },
-  { key: 'apple', name: '苹果生态', match: (t) => /(^|-)(apple|ios|ipados|macos|watchos|shortcuts|siri-shortcuts)(-|$)/.test(t) },
-  { key: 'automation', name: '自动化', match: (t) => /(^|-)(automation|workflow|gh-automation|api-integration)(-|$)/.test(t) },
-  { key: 'productivity', name: '效率', match: (t) => /(^|-)(productivity)(-|$)/.test(t) },
-];
+/**
+ * 功能类目菜单：镜像中台 gh-projects 标签库二级分类（market-taxonomy.ts）。
+ * 中台扩分类时同步补这张表；未登记的治理 slug 落「其他」。
+ */
+const GITHUB_CATEGORY_NAMES: Record<string, string> = {
+  'gh-ai': 'AI 与智能体',
+  'gh-mcp': 'MCP 生态',
+  'gh-devtools': '开发工具',
+  'gh-web': 'Web 与前端',
+  'gh-data': '数据与数据库',
+  'gh-ml': '机器学习',
+  'gh-security': '安全',
+  'gh-automation': '自动化与运维',
+  'gh-apple': '苹果生态',
+  'gh-productivity': '效率与笔记',
+  'gh-content': '内容创作与自媒体',
+  'gh-crawler': '爬虫与数据采集',
+  'gh-site': '建站与自助搭建',
+  'gh-browser': '浏览器插件',
+  'gh-design': '设计与素材',
+  'gh-finance': '金融与量化',
+  'gh-learn': '学习与资源',
+  'gh-ecommerce': '电商与跨境',
+};
 
-function classifyGithubRepo(tags: string[]): { category: string; categoryName: string } {
-  for (const rule of GITHUB_CATEGORY_RULES) {
-    if (tags.some(rule.match)) return { category: rule.key, categoryName: rule.name };
+/** 千星门槛（老板 2026-10-15：Stars 超过一切；用户手动指定时路由层传 minStars 覆盖，0=不设门槛）。 */
+export const GITHUB_DEFAULT_MIN_STARS = 1_000;
+
+function classifyGithubRepo(tags: string[], governedCategory?: string | null): { category: string; categoryName: string } {
+  // 采集时挂的治理分类优先（中台标签库是唯一分类事实源）
+  if (governedCategory && GITHUB_CATEGORY_NAMES[governedCategory]) {
+    return { category: governedCategory, categoryName: GITHUB_CATEGORY_NAMES[governedCategory] };
+  }
+  // 历史素材兜底：标签里自带的治理 slug
+  const slug = tags.find((t) => GITHUB_CATEGORY_NAMES[t]);
+  if (slug) return { category: slug, categoryName: GITHUB_CATEGORY_NAMES[slug] };
+  // 更早的历史行：按 topics 粗归入治理类目（不再另立菜单）
+  const legacy: Array<{ key: string; match: (tag: string) => boolean }> = [
+    { key: 'gh-ai', match: (t) => /(^|-)(ai|ai-assistant|generative-ai|gemini-api|google-gemini|llm|gpt|agentic-ai)(-|$)/.test(t) },
+    { key: 'gh-apple', match: (t) => /(^|-)(apple|ios|ipados|macos|watchos|shortcuts|siri-shortcuts)(-|$)/.test(t) },
+    { key: 'gh-automation', match: (t) => /(^|-)(automation|workflow|devops)(-|$)/.test(t) },
+    { key: 'gh-productivity', match: (t) => /(^|-)(productivity)(-|$)/.test(t) },
+  ];
+  for (const rule of legacy) {
+    if (tags.some(rule.match)) return { category: rule.key, categoryName: GITHUB_CATEGORY_NAMES[rule.key] };
   }
   return { category: 'misc', categoryName: '其他' };
 }
 
-/** 拉取 GitHub 素材并治理成仓库卡片全量（分页切片由路由层在缓存上做，避免翻页回源）。 */
-export async function readChaosGithubRepos(db: Queryable | null): Promise<ChaosResult<ChaosGithubRepo[]>> {
-  return degrade(db, '/open/v1/materials?limit=200&junk=false', (payload) => {
-    const items = asArray(asRecord(payload).items);
-    const repos: ChaosGithubRepo[] = [];
-    for (const raw of items) {
-      const r = asRecord(raw);
-      const sourceCode = typeof r.sourceCode === 'string' ? r.sourceCode : '';
-      if (!/github/i.test(sourceCode)) continue;
-      const title = typeof r.title === 'string' ? r.title.trim() : '';
-      if (!title) continue;
-      const topics = asArray(r.categoriesJson).filter((t): t is string => typeof t === 'string');
-      const { category, categoryName } = classifyGithubRepo(topics);
-      repos.push({
-        id: typeof r.id === 'string' ? r.id : title,
-        repo: title,
-        description: typeof r.summary === 'string' && r.summary.trim() ? r.summary.trim() : null,
-        topics: topics.slice(0, 4),
-        category,
-        categoryName,
-        url: typeof r.url === 'string' ? r.url : null,
-        qualityScore: typeof r.qualityScore === 'number' ? r.qualityScore : null,
-        updatedAt: typeof r.updatedAt === 'string' ? r.updatedAt : null,
-      });
+/** 展示 topics：剥掉治理命名（gh-*、-- 三级词、subject:*），只留仓库原始 topic。 */
+function displayTopics(tags: string[]): string[] {
+  return tags.filter((t) => !t.startsWith('gh-') && !t.includes('--') && !t.startsWith('subject:'));
+}
+
+/**
+ * 素材 → 仓库卡片治理变换（纯函数）：
+ * 千星门槛过滤（无星数事实的历史行按不达标处理）→ 按 repo 去重 → stars 降序。
+ */
+export function governGithubMaterials(payload: unknown, minStars: number): ChaosGithubRepo[] {
+  const items = asArray(asRecord(payload).items);
+  const byRepo = new Map<string, ChaosGithubRepo>();
+  for (const raw of items) {
+    const r = asRecord(raw);
+    const sourceCode = typeof r.sourceCode === 'string' ? r.sourceCode : '';
+    if (!/github/i.test(sourceCode)) continue;
+    const title = typeof r.title === 'string' ? r.title.trim() : '';
+    if (!title) continue;
+    const tags = asArray(r.categoriesJson).filter((t): t is string => typeof t === 'string');
+    const gh = asRecord(r.gh);
+    const num = (v: unknown): number | null => (typeof v === 'number' && Number.isSafeInteger(v) ? v : null);
+    // 千星门槛：无星数事实的历史行按不达标处理（星数超过一切）；minStars=0 是手动关闭门槛，全部放行
+    const stars = num(gh.stars);
+    if (stars === null ? minStars > 0 : stars < minStars) continue;
+    const { category, categoryName } = classifyGithubRepo(tags, typeof gh.categorySlug === 'string' ? gh.categorySlug : null);
+    const repo: ChaosGithubRepo = {
+      id: typeof r.id === 'string' ? r.id : title,
+      repo: title,
+      description: typeof r.summary === 'string' && r.summary.trim() ? r.summary.trim() : null,
+      descriptionZh: null,
+      topics: displayTopics(tags).slice(0, 4),
+      category,
+      categoryName,
+      url: typeof r.url === 'string' ? r.url : null,
+      stars,
+      forks: num(gh.forks),
+      language: typeof gh.language === 'string' && gh.language ? gh.language : null,
+      ownerAvatarUrl: typeof gh.ownerAvatarUrl === 'string' && gh.ownerAvatarUrl ? gh.ownerAvatarUrl : null,
+      qualityScore: typeof r.qualityScore === 'number' ? r.qualityScore : null,
+      updatedAt: typeof r.updatedAt === 'string' ? r.updatedAt : null,
+    };
+    // 同一仓库会以多个 topic 身份入库：按 repo 去重，保留分类更明确/更新更近的一条
+    const existing = byRepo.get(title);
+    if (!existing || (existing.category === 'misc' && category !== 'misc') ||
+      ((existing.category !== 'misc') === (category !== 'misc') && (repo.updatedAt ?? '') > (existing.updatedAt ?? ''))) {
+      byRepo.set(title, repo);
     }
-    // 治理排序：质量分高的仓库排前，同分看更新时间
-    repos.sort((a, b) => {
-      const scoreDiff = (b.qualityScore ?? 0) - (a.qualityScore ?? 0);
-      if (scoreDiff !== 0) return scoreDiff;
-      return (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '');
-    });
-    return repos;
+  }
+  const repos = [...byRepo.values()];
+  // 治理排序：星数超过一切——stars 降序，同星看更新时间
+  repos.sort((a, b) => {
+    const starDiff = (b.stars ?? 0) - (a.stars ?? 0);
+    if (starDiff !== 0) return starDiff;
+    return (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '');
   });
+  return repos;
+}
+
+/** 拉取 GitHub 素材并治理成仓库卡片全量（分页切片由路由层在缓存上做，避免翻页回源）。 */
+export async function readChaosGithubRepos(
+  db: Queryable | null,
+  options: { minStars?: number } = {},
+): Promise<ChaosResult<ChaosGithubRepo[]>> {
+  const minStars = Math.max(0, Math.floor(options.minStars ?? GITHUB_DEFAULT_MIN_STARS));
+  return degrade(db, '/open/v1/materials?limit=200&junk=false', (payload) => governGithubMaterials(payload, minStars));
 }
