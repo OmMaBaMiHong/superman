@@ -138,6 +138,31 @@ function GithubRepoCard({ item }: { item: ChaosGithubRepo }) {
 
 /** 排名变化徽章已从行内撤下（中台流数据无历史排名，NaN 误显）；详情 payload 里可看全量字段。 */
 
+/** 排名徽章：前三名金银铜奖牌感，其余素色序号（对齐榜天下 atlas 榜单行语义）。 */
+function RankBadge({ rank }: { rank: number | null }) {
+  if (rank === null) {
+    return <span className="w-6 shrink-0" aria-hidden="true">—</span>;
+  }
+  const medal =
+    rank === 1
+      ? 'border-amber-400/40 bg-amber-400/15 text-amber-300'
+      : rank === 2
+        ? 'border-slate-300/40 bg-slate-300/10 text-slate-200'
+        : rank === 3
+          ? 'border-orange-600/40 bg-orange-600/15 text-orange-300'
+          : null;
+  return (
+    <span
+      className={cn(
+        'grid h-6 w-6 shrink-0 place-items-center rounded-md border font-mono text-[11px] tabular-nums',
+        medal ?? 'border-transparent font-medium text-muted-foreground/60',
+      )}
+    >
+      {rank}
+    </span>
+  );
+}
+
 function TrendRadarRow({
   item,
   onOpenDetail,
@@ -152,18 +177,24 @@ function TrendRadarRow({
         data-testid="trend-radar-item"
         onClick={() => onOpenDetail(item)}
         className={cn(
-          'flex min-h-[44px] w-full items-start gap-2.5 border-b border-border/60 px-3 py-3 text-left last:border-b-0',
+          'flex w-full items-start gap-2.5 border-b border-border/60 px-3 py-2.5 text-left last:border-b-0',
           'transition-colors duration-150 hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset',
         )}
       >
-        <span className="w-5 shrink-0 pt-0.5 text-right font-mono text-[11px] tabular-nums text-muted-foreground sm:w-6">
-          {item.rank ?? '—'}
-        </span>
-        <span className="line-clamp-2 min-w-0 flex-1 text-[14px] leading-snug text-foreground">
-          {item.title}
+        <RankBadge rank={item.rank} />
+        <span className="min-w-0 flex-1">
+          <span className="line-clamp-2 block text-[13.5px] font-medium leading-snug text-foreground">
+            {item.title}
+          </span>
+          {item.summary ? (
+            <span className="mt-0.5 line-clamp-1 text-[11px] leading-snug text-muted-foreground/80">
+              {item.summary}
+            </span>
+          ) : null}
         </span>
         {item.hotValue ? (
-          <span className="shrink-0 pt-0.5 font-mono text-[10px] tabular-nums text-muted-foreground/70">
+          <span className="inline-flex shrink-0 items-center gap-0.5 pt-0.5 font-mono text-[10px] tabular-nums text-orange-400/90">
+            <Flame aria-hidden="true" className="h-3 w-3" />
             {item.hotValue}
           </span>
         ) : null}

@@ -299,98 +299,83 @@ export interface ChaosHotBoard {
       directionKey: string | null;
       platform: string;
       platformName: string;
+      summary: string | null;
     }>;
   }>;
 }
 
-/** 新闻热榜 external 源白名单（热榜语义明确的信息源）；rss 源按名称语义收。 */
-const NEWS_EXTERNAL_SOURCE_CODES = new Set([
-  'hacker-news-top', 'google-news-top-cn', 'google-news-tech-us',
-  'wikipedia-top-views-zh', 'wikipedia-top-views-en', 'arxiv-latest-ai',
-  'stackexchange-hot', 'gdelt-global-topics',
-]);
-
-/** external 源显示名治理（中台 name 有重复，如两个 Google News）。 */
-const NEWS_SOURCE_DISPLAY: Record<string, string> = {
-  'google-news-tech-us': 'Google News 科技',
-  'google-news-top-cn': 'Google News 中文',
-  'wikipedia-top-views-zh': '维基热读·中文',
-  'wikipedia-top-views-en': '维基热读·英文',
-  'hacker-news-top': 'Hacker News',
-  'arxiv-latest-ai': 'arXiv AI 论文',
-  'stackexchange-hot': 'Stack Exchange 热问',
-  'gdelt-global-topics': 'GDELT 全球话题',
-};
-
-function isNewsSource(s: { code: string; name: string; status: string; sourceKind: string }): boolean {
-  if (s.status !== 'on') return false;
-  if (NEWS_EXTERNAL_SOURCE_CODES.has(s.code)) return true;
-  return s.sourceKind === 'rss' && /热榜|新闻|News|资讯/i.test(s.name);
+/** 热度值格式化：7904452 → 790.4万。 */
+function formatHeat(n: number): string {
+  if (n >= 100_000_000) return `${(n / 100_000_000).toFixed(1)}亿`
+  if (n >= 10_000) return `${(n / 10_000).toFixed(1)}万`
+  return String(n)
 }
 
 /**
- * 新闻热榜：源发现（/sources 白名单）→ 每源并发拉素材（/materials?sourceCode=）→ 按源分组为平台列。
- * 不走全量 /materials——GitHub 等高频采集源会把 id desc 窗口占满，新闻源挤不进前 200。
+ * 新闻热榜：中台治理榜单（/open/v1/source-boards?domain=news，条目自带 rank/heat 热度指数/摘要）。
+ * 榜单按条目量取前 12 榜 × 每榜 15 条 ≤180 条（分页纪律）；GitHub Trending 榜不进新闻（走 /chaos/github）。
  */
 export async function readChaosNewsBoard(db: Queryable | null): Promise<ChaosResult<ChaosHotBoard>> {
   try {
-    const sourcesPayload = await platform<{ items?: unknown[] }>('/open/v1/sources?limit=50', { open: true }, db)
-    const newsSources = asArray(asRecord(sourcesPayload).items)
+    const boardsPayload = await platform<{ items?: unknown[] }>('/open/v1/source-boards?domain=news', { open: true }, db)
+    const boards = asArray(asRecord(boardsPayload).items)
       .map(asRecord)
-      .map((s) => ({
-        code: typeof s.code === 'string' ? s.code : '',
-        name: typeof s.name === 'string' ? s.name : '',
-        status: typeof s.status === 'string' ? s.status : '',
-        sourceKind: typeof s.sourceKind === 'string' ? s.sourceKind : '',
+      .map((b) => ({
+        id: typeof b.id === 'string' ? b.id : '',
+        name: typeof b.name === 'string' ? b.name : '',
+        sourceKey: typeof b.sourceKey === 'string' ? b.sourceKey : '',
+        itemCount: typeof b.itemCount === 'number' ? b.itemCount : 0,
       }))
-      .filter(isNewsSource)
-      .slice(0, 8)
-    const results = await Promise.all(newsSources.map(async (source) => {
+      .filter((b) => b.id !== '' && b.name !== '' && b.itemCount > 0 && !/github/i.test(`${b.sourceKey} ${b.name}`))
+      .sort((a, b) => b.itemCount - a.itemCount)
+      .slice(0, 12)
+    const results = await Promise.all(boards.map(async (board) => {
       try {
-        // 单源 25 条 × 最多 8 源 = 单次 ≤200 条（用户纪律：分页、别一口气拉全量）
         const payload = await platform<{ items?: unknown[] }>(
-          `/open/v1/materials?sourceCode=${encodeURIComponent(source.code)}&limit=25&junk=false`,
+          `/open/v1/source-boards/${encodeURIComponent(board.id)}/items?limit=15`,
           { open: true }, db,
         )
-        return { source, items: asArray(asRecord(payload).items) }
+        return { board, items: asArray(asRecord(payload).items) }
       } catch {
-        return { source, items: [] as unknown[] }
+        return { board, items: [] as unknown[] }
       }
     }))
     const platforms: ChaosHotBoard['platforms'] = []
     let total = 0
-    for (const { source, items } of results) {
+    const now = new Date().toISOString()
+    for (const { board, items } of results) {
       if (items.length === 0) continue
-      const displayName = NEWS_SOURCE_DISPLAY[source.code] ?? source.name
       const group: ChaosHotBoard['platforms'][number] = {
-        platform: source.code, platformName: displayName, items: [],
+        platform: board.id, platformName: board.name, items: [],
       }
       for (const raw of items) {
         const r = asRecord(raw)
         total += 1
-        const seenAt = typeof r.publishedAt === 'string' ? r.publishedAt : new Date().toISOString()
+        const heat = typeof r.heat === 'number' ? r.heat : null
+        const payload = asRecord(r.payload)
         group.items.push({
           id: typeof r.id === 'string' ? r.id : String(total),
           title: typeof r.title === 'string' ? r.title : '',
           url: typeof r.url === 'string' ? r.url : null,
-          rank: group.items.length + 1,
+          rank: typeof r.rank === 'number' ? r.rank : group.items.length + 1,
           previousRank: null,
-          hotValue: '',
-          firstSeenAt: seenAt,
-          lastSeenAt: seenAt,
-          sourceDate: seenAt.slice(0, 10),
+          hotValue: heat !== null ? formatHeat(heat) : '',
+          firstSeenAt: now,
+          lastSeenAt: now,
+          sourceDate: now.slice(0, 10),
           promotedAt: null,
           promotedArticleId: null,
           contentType: 'article',
           directionKey: null,
-          platform: source.code,
-          platformName: displayName,
+          platform: board.id,
+          platformName: board.name,
+          summary: typeof payload.desc === 'string' && payload.desc.trim() ? payload.desc.trim() : null,
         })
       }
       platforms.push(group)
     }
     return {
-      data: { date: new Date().toISOString().slice(0, 10), total, platforms },
+      data: { date: now.slice(0, 10), total, platforms },
       status: platforms.length > 0 ? 'ready' : 'missing',
     }
   } catch (error) {

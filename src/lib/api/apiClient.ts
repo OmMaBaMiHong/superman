@@ -2410,6 +2410,8 @@ export interface TrendRadarItem {
   contentType: ContentType;
   /** 已转选题条目的治理方向（未转为 null，P2b）。 */
   directionKey: string | null;
+  /** 榜单条目摘要（中台 source-boards 带 desc；本地 TrendRadar 无则缺省）。 */
+  summary?: string | null;
 }
 
 /** 热榜详情：行字段 + payload_json 全量（有啥返回啥）。 */

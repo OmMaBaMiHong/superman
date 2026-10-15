@@ -20,6 +20,7 @@ export interface ChaosHotBoard {
       contentType: string;
       platform: string;
       platformName: string;
+      summary?: string | null;
     }>;
   }>;
 }
