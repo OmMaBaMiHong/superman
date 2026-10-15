@@ -26,8 +26,11 @@ import {
 import {
   fetchChaosHotBoard,
   fetchChaosGithubRepos,
+  fetchChaosDshMarket,
+  fetchChaosDshCategories,
   type ChaosGithubPage,
   type ChaosGithubRepo,
+  type ChaosDshPlugin,
 } from '@/lib/api/chaosHotboard';
 import { toast } from '@/features/toast/toast';
 import ContentTypeBadge from '@/components/ui/content-type-badge';
@@ -44,6 +47,49 @@ const HOT_TABS: Array<{ key: 'news' | 'github' | 'dsh'; label: string }> = [
   { key: 'github', label: 'GitHub' },
   { key: 'dsh', label: 'DSH' },
 ];
+
+/** DSH 插件市场卡片：名称 + 描述 + tags + stars + 安装命令。 */
+function DshPluginCard({ item }: { item: ChaosDshPlugin }) {
+  return (
+    <li className="border-b border-border/60 px-3.5 py-3 last:border-b-0">
+      <div className="flex items-start justify-between gap-3">
+        <a
+          href={item.sourceUrl ?? '#'}
+          target="_blank"
+          rel="noreferrer"
+          className="min-w-0 truncate text-sm font-semibold text-primary hover:underline"
+        >
+          {item.name}
+        </a>
+        <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/70">
+          ★ {item.stars >= 1000 ? `${(item.stars / 1000).toFixed(1)}k` : item.stars}
+        </span>
+      </div>
+      {item.description ? (
+        <p className="mt-1 line-clamp-2 text-[13px] leading-snug text-muted-foreground">
+          {item.description}
+        </p>
+      ) : null}
+      {item.tags.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {item.tags.slice(0, 4).map((tag) => (
+            <span
+              key={tag}
+              className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {item.installCommand ? (
+        <code className="mt-2 block truncate rounded-md bg-muted/60 px-2 py-1 font-mono text-[10px] text-muted-foreground">
+          {item.installCommand}
+        </code>
+      ) : null}
+    </li>
+  );
+}
 
 /** GitHub 仓库卡片：owner/repo + 描述 + topics 标签 + 功能类目 + 质量分 + 更新时间（对齐 GitHub 搜索结果视图）。 */
 function GithubRepoCard({ item }: { item: ChaosGithubRepo }) {
@@ -397,6 +443,68 @@ export default function TrendingConsole() {
     observer.observe(node);
     return () => observer.disconnect();
   }, [hotTab, repoState, repoLoading, repoCat, loadRepos]);
+
+  // DSH 插件市场（中台货架，服务端分页，按需首载）
+  const [dshPlugins, setDshPlugins] = useState<ChaosDshPlugin[]>([]);
+  const [dshTotal, setDshTotal] = useState(0);
+  const [dshCats, setDshCats] = useState<Array<{ slug: string; name: string; pluginCount: number }>>([]);
+  const [dshCat, setDshCat] = useState('all');
+  const [dshPage, setDshPage] = useState(1);
+  const [dshHasMore, setDshHasMore] = useState(false);
+  const [dshLoading, setDshLoading] = useState(false);
+  const [dshError, setDshError] = useState<string | null>(null);
+  const dshLoadedRef = useRef(false);
+
+  const loadDsh = useCallback(async (category: string, page: number) => {
+    setDshLoading(true);
+    setDshError(null);
+    try {
+      const result = await fetchChaosDshMarket(page, category);
+      if (!result) {
+        setDshError('DSH 市场数据加载失败，请稍后重试。');
+        return;
+      }
+      setDshTotal(result.total);
+      setDshPage(result.page);
+      setDshHasMore(result.page * result.pageSize < result.total);
+      setDshPlugins((current) => (page > 1 ? [...current, ...result.items] : result.items));
+    } finally {
+      setDshLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (hotTab === 'dsh' && !dshLoadedRef.current) {
+      dshLoadedRef.current = true;
+      void fetchChaosDshCategories().then(setDshCats);
+      void loadDsh('all', 1);
+    }
+  }, [hotTab, loadDsh]);
+
+  const switchDshCat = useCallback(
+    (slug: string) => {
+      setDshCat(slug);
+      void loadDsh(slug, 1);
+    },
+    [loadDsh],
+  );
+
+  const dshSentinelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (hotTab !== 'dsh') return;
+    const node = dshSentinelRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && dshHasMore && !dshLoading) {
+          void loadDsh(dshCat, dshPage + 1);
+        }
+      },
+      { rootMargin: '400px' },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hotTab, dshHasMore, dshLoading, dshCat, dshPage, loadDsh]);
 
   // 立即同步：不等调度器周期，直接读 TrendRadar 当日 SQLite upsert 进库
   const [syncing, setSyncing] = useState(false);
@@ -803,9 +911,74 @@ export default function TrendingConsole() {
             )}
           </div>
         ) : (
-          <div className="mx-4 rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center sm:mx-6">
-            <p className="text-sm font-medium text-foreground">DSH 生态动态</p>
-            <p className="mt-2 text-xs text-muted-foreground">数据通道筹备中，敬请期待。</p>
+          /* DSH 插件市场：分类 chips + 插件卡片 + 滚动分页 */
+          <div className="mx-4 sm:mx-6">
+            {dshCats.length > 0 ? (
+              <div className="mb-3 flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => switchDshCat('all')}
+                  className={cn(
+                    'flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors duration-150',
+                    dshCat === 'all'
+                      ? 'border-primary/40 bg-primary/10 text-primary'
+                      : 'border-border text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  全部
+                  <span className="font-mono text-[10px] tabular-nums opacity-60">{dshCats.reduce((sum, c) => sum + c.pluginCount, 0)}</span>
+                </button>
+                {dshCats.map((cat) => (
+                  <button
+                    key={cat.slug}
+                    type="button"
+                    onClick={() => switchDshCat(cat.slug)}
+                    className={cn(
+                      'flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors duration-150',
+                      dshCat === cat.slug
+                        ? 'border-primary/40 bg-primary/10 text-primary'
+                        : 'border-border text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    {cat.name}
+                    <span className="font-mono text-[10px] tabular-nums opacity-60">{cat.pluginCount}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {dshError ? (
+              <div className="rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center">
+                <p className="text-sm font-medium text-foreground">{dshError}</p>
+              </div>
+            ) : dshPlugins.length === 0 && dshLoading ? (
+              <div className="flex justify-center py-16" aria-busy="true">
+                <Loader2 aria-hidden="true" className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : dshPlugins.length === 0 ? (
+              <div className="rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center">
+                <p className="text-sm font-medium text-foreground">暂无 DSH 插件数据</p>
+                <p className="mt-2 text-xs text-muted-foreground">中台市场目录就绪后自动展示。</p>
+              </div>
+            ) : (
+              <>
+                <div className="gov-card overflow-hidden">
+                  <ul>
+                    {dshPlugins.map((item) => (
+                      <DshPluginCard key={item.id} item={item} />
+                    ))}
+                  </ul>
+                </div>
+                <div ref={dshSentinelRef} className="flex justify-center py-6 text-xs text-muted-foreground">
+                  {dshLoading ? (
+                    <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+                  ) : dshHasMore ? (
+                    <span>上滑加载更多</span>
+                  ) : (
+                    <span>已全部加载 · {dshPlugins.length} / {dshTotal} 个插件</span>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
       </main>

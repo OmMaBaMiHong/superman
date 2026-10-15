@@ -297,41 +297,156 @@ export interface ChaosHotBoard {
   }>;
 }
 
-/** 新闻热榜：读 materials 并排除代码仓库类源（GitHub 走 /chaos/github 治理通道），按源分组为平台列。 */
+/** 新闻热榜 external 源白名单（热榜语义明确的信息源）；rss 源按名称语义收。 */
+const NEWS_EXTERNAL_SOURCE_CODES = new Set([
+  'hacker-news-top', 'google-news-top-cn', 'google-news-tech-us',
+  'wikipedia-top-views-zh', 'wikipedia-top-views-en', 'arxiv-latest-ai',
+  'stackexchange-hot', 'gdelt-global-topics',
+]);
+
+function isNewsSource(s: { code: string; name: string; status: string; sourceKind: string }): boolean {
+  if (s.status !== 'on') return false;
+  if (NEWS_EXTERNAL_SOURCE_CODES.has(s.code)) return true;
+  return s.sourceKind === 'rss' && /热榜|新闻|News|资讯/i.test(s.name);
+}
+
+/**
+ * 新闻热榜：源发现（/sources 白名单）→ 每源并发拉素材（/materials?sourceCode=）→ 按源分组为平台列。
+ * 不走全量 /materials——GitHub 等高频采集源会把 id desc 窗口占满，新闻源挤不进前 200。
+ */
 export async function readChaosNewsBoard(db: Queryable | null): Promise<ChaosResult<ChaosHotBoard>> {
-  const result = await degrade(db, '/open/v1/materials?limit=200&junk=false', (payload) => {
-    const items = asArray(asRecord(payload).items);
-    const groups = new Map<string, ChaosHotBoard['platforms'][number]>();
-    let rank = 0;
-    for (const raw of items) {
-      const r = asRecord(raw);
-      const sourceCode = typeof r.sourceCode === 'string' ? r.sourceCode : 'unknown';
-      if (/github/i.test(sourceCode)) continue;
-      const sourceName = typeof r.sourceName === 'string' ? r.sourceName : sourceCode;
-      if (!groups.has(sourceCode)) {
-        groups.set(sourceCode, { platform: sourceCode, platformName: sourceName, items: [] });
+  try {
+    const sourcesPayload = await platform<{ items?: unknown[] }>('/open/v1/sources?limit=50', { open: true }, db)
+    const newsSources = asArray(asRecord(sourcesPayload).items)
+      .map(asRecord)
+      .map((s) => ({
+        code: typeof s.code === 'string' ? s.code : '',
+        name: typeof s.name === 'string' ? s.name : '',
+        status: typeof s.status === 'string' ? s.status : '',
+        sourceKind: typeof s.sourceKind === 'string' ? s.sourceKind : '',
+      }))
+      .filter(isNewsSource)
+      .slice(0, 8)
+    const results = await Promise.all(newsSources.map(async (source) => {
+      try {
+        // 单源 25 条 × 最多 8 源 = 单次 ≤200 条（用户纪律：分页、别一口气拉全量）
+        const payload = await platform<{ items?: unknown[] }>(
+          `/open/v1/materials?sourceCode=${encodeURIComponent(source.code)}&limit=25&junk=false`,
+          { open: true }, db,
+        )
+        return { source, items: asArray(asRecord(payload).items) }
+      } catch {
+        return { source, items: [] as unknown[] }
       }
-      const group = groups.get(sourceCode)!;
-      rank += 1;
-      group.items.push({
-        id: typeof r.id === 'string' ? r.id : String(rank),
-        title: typeof r.title === 'string' ? r.title : '',
-        url: typeof r.url === 'string' ? r.url : null,
-        rank: group.items.length + 1,
-        hotValue: '',
-        sourceDate: typeof r.publishedAt === 'string' ? r.publishedAt.slice(0, 10) : new Date().toISOString().slice(0, 10),
-        contentType: 'article',
-        platform: sourceCode,
-        platformName: sourceName,
-      });
+    }))
+    const platforms: ChaosHotBoard['platforms'] = []
+    let total = 0
+    for (const { source, items } of results) {
+      if (items.length === 0) continue
+      const group: ChaosHotBoard['platforms'][number] = {
+        platform: source.code, platformName: source.name, items: [],
+      }
+      for (const raw of items) {
+        const r = asRecord(raw)
+        total += 1
+        group.items.push({
+          id: typeof r.id === 'string' ? r.id : String(total),
+          title: typeof r.title === 'string' ? r.title : '',
+          url: typeof r.url === 'string' ? r.url : null,
+          rank: group.items.length + 1,
+          hotValue: '',
+          sourceDate: typeof r.publishedAt === 'string' ? r.publishedAt.slice(0, 10) : new Date().toISOString().slice(0, 10),
+          contentType: 'article',
+          platform: source.code,
+          platformName: source.name,
+        })
+      }
+      platforms.push(group)
     }
     return {
-      date: new Date().toISOString().slice(0, 10),
-      total: rank,
-      platforms: [...groups.values()],
-    };
-  });
-  return result;
+      data: { date: new Date().toISOString().slice(0, 10), total, platforms },
+      status: platforms.length > 0 ? 'ready' : 'missing',
+    }
+  } catch (error) {
+    if (error instanceof PlatformError) {
+      if (error.status === 404) return { data: null, status: 'missing' }
+      if (error.status === 401 || error.status === 403) return { data: null, status: 'forbidden', error: error.message }
+      return { data: null, status: 'unavailable', error: error.message }
+    }
+    return { data: null, status: 'unavailable', error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/** DSH 插件市场卡片（中台 market/listings 治理结构）。 */
+export interface ChaosDshPlugin {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string;
+  tags: string[];
+  stars: number;
+  riskScore: number | null;
+  installCommand: string | null;
+  sourceUrl: string | null;
+}
+
+export interface ChaosDshPage {
+  items: ChaosDshPlugin[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/** DSH 插件市场列表：中台服务端分页（sort=popular/default/security/newest）。 */
+export async function readChaosDshMarket(
+  db: Queryable | null,
+  options: { page?: number; pageSize?: number; category?: string; sort?: string } = {},
+): Promise<ChaosResult<ChaosDshPage>> {
+  const page = Math.max(options.page ?? 1, 1)
+  const pageSize = Math.min(Math.max(options.pageSize ?? 20, 1), 50)
+  const params = new URLSearchParams({
+    assetType: 'dsh_plugin',
+    sort: options.sort ?? 'popular',
+    page: String(page),
+    pageSize: String(pageSize),
+  })
+  if (options.category && options.category !== 'all') params.set('category', options.category)
+  return degrade(db, `/open/v1/market/listings?${params}`, (payload) => {
+    const root = asRecord(payload)
+    return {
+      items: asArray(root.items).map(asRecord).map((r) => ({
+        id: typeof r.listingId === 'string' ? r.listingId : '',
+        name: typeof r.name === 'string' ? r.name : '',
+        description: typeof r.description === 'string' ? r.description : null,
+        category: typeof r.category === 'string' ? r.category : 'plugin',
+        tags: asArray(r.tags).filter((t): t is string => typeof t === 'string'),
+        stars: typeof r.stars === 'number' ? r.stars : 0,
+        riskScore: typeof r.riskScore === 'number' ? r.riskScore : null,
+        installCommand: typeof r.installCommand === 'string' ? r.installCommand : null,
+        sourceUrl: typeof r.sourceUrl === 'string' ? r.sourceUrl : null,
+      })),
+      total: typeof root.total === 'number' ? root.total : 0,
+      page,
+      pageSize,
+    }
+  })
+}
+
+export interface ChaosDshCategory {
+  slug: string;
+  name: string;
+  pluginCount: number;
+}
+
+/** DSH 市场分类货架（功能菜单）。 */
+export async function readChaosDshCategories(db: Queryable | null): Promise<ChaosResult<ChaosDshCategory[]>> {
+  return degrade(db, '/open/v1/market/categories?assetType=dsh_plugin', (payload) =>
+    asArray(asRecord(payload).items).map(asRecord).map((r) => ({
+      slug: typeof r.slug === 'string' ? r.slug : '',
+      name: typeof r.name === 'string' ? r.name : '',
+      pluginCount: typeof r.pluginCount === 'number' ? r.pluginCount : 0,
+    })).filter((c) => c.slug !== ''),
+  )
 }
 
 /** GitHub 仓库卡片（治理后结构）：repo 名 / 描述 / topics / 功能类目 / 质量分 / 更新时间。 */

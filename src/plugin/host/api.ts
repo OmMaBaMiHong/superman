@@ -67,7 +67,7 @@ import {
 import { ENTITLEMENTS, requireEntitled, type Entitlement } from '@/core/relay/entitlements'
 import { listRelayModels } from '@/core/relay/client'
 import { relayBridgeApi } from './relayHostBridge.js'
-import { readChaosChannels, readChaosRankings, readPlatformConfig, platform, readChaosNewsBoard, readChaosGithubRepos, type ChaosGithubRepo } from '@/server/integrations/chaos/client'
+import { readChaosChannels, readChaosRankings, readPlatformConfig, platform, readChaosNewsBoard, readChaosGithubRepos, readChaosDshMarket, readChaosDshCategories, type ChaosGithubRepo, type ChaosDshPlugin } from '@/server/integrations/chaos/client'
 import { startChaosAuthorization, exchangeChaosHandoff, linkedChaosUser, readChaosMe, unlinkChaosUser } from '@/server/integrations/chaos/account'
 import { readBoardSlices, writeBoardSlices, boardCacheInfo } from './boardCache.js'
 import { buildStudioBoardSlices, pickBoardSlices, unwrapBoardSlices } from './studioBoard.js'
@@ -631,15 +631,54 @@ const ROUTES: RouteDef[] = [
     writeBoardSlices({ [sourceCode || 'chaos_all']: { items, fetchedAt: new Date().toISOString() } })
     json(res, 200, { ok: true, data: { source: 'chaos', items } })
   }),
-  // 新闻热点 tab：中台素材按源分组为平台列（已排除 GitHub 代码源，GitHub 走 /chaos/github）
-  route('GET', '/chaos/hotboard', async ({ res, db }) => {
+  // 新闻热点 tab：源发现→按源并发拉素材→平台列（多源请求重，boardCache 缓存 5 分钟，refresh=1 强刷）
+  route('GET', '/chaos/hotboard', async ({ res, query, db }) => {
+    const refresh = query.get('refresh') === '1'
+    const NEWS_TTL_MS = 5 * 60_000
+    if (!refresh) {
+      const cached = readBoardSlices(['chaos_news_board'])
+      const hit = cached?.['chaos_news_board']?.payload as { board?: unknown; fetchedAt?: string } | undefined
+      const age = hit?.fetchedAt ? Date.now() - new Date(hit.fetchedAt).getTime() : Number.POSITIVE_INFINITY
+      if (hit?.board && age < NEWS_TTL_MS) {
+        const board = hit.board as { date: string; total: number; platforms: Array<{ platform: string; platformName: string; items: unknown[] }> }
+        json(res, 200, { ok: true, data: { ...board, items: board.platforms.flatMap((p) => p.items) }, source: 'cache' })
+        return
+      }
+    }
     const result = await readChaosNewsBoard(db as never)
     const board = result.data
     if (!board) {
       json(res, 200, { ok: true, data: { date: todayLocalDateString(), total: 0, platforms: [], items: [], status: result.status } })
       return
     }
+    writeBoardSlices({ chaos_news_board: { board, fetchedAt: new Date().toISOString() } })
     json(res, 200, { ok: true, data: { ...board, items: board.platforms.flatMap((p) => p.items) } })
+  }),
+  // DSH tab：中台插件市场（服务端分页 + 分类货架，60s 缓存）
+  route('GET', '/chaos/dsh/market', async ({ res, query, db }) => {
+    const page = Math.max(Number(query.get('page')) || 1, 1)
+    const pageSize = Math.min(Math.max(Number(query.get('pageSize')) || 20, 1), 50)
+    const category = query.get('category')?.trim() || 'all'
+    const cacheKey = `chaos_dsh_market:${category}:${page}`
+    const TTL_MS = 60_000
+    const cached = readBoardSlices([cacheKey])
+    const hit = cached?.[cacheKey]?.payload as { data?: unknown; fetchedAt?: string } | undefined
+    const age = hit?.fetchedAt ? Date.now() - new Date(hit.fetchedAt).getTime() : Number.POSITIVE_INFINITY
+    if (hit?.data && age < TTL_MS) {
+      json(res, 200, { ok: true, data: hit.data, source: 'cache' })
+      return
+    }
+    const result = await readChaosDshMarket(db as never, { page, pageSize, category })
+    if (!result.data) {
+      json(res, 200, { ok: true, data: { items: [], total: 0, page, pageSize }, status: result.status })
+      return
+    }
+    writeBoardSlices({ [cacheKey]: { data: result.data, fetchedAt: new Date().toISOString() } })
+    json(res, 200, { ok: true, data: result.data })
+  }),
+  route('GET', '/chaos/dsh/categories', async ({ res, db }) => {
+    const result = await readChaosDshCategories(db as never)
+    json(res, 200, { ok: true, data: result.data ?? [] })
   }),
   // GitHub tab：素材治理成仓库卡片，SQLite 缓存治理后全量、内存切片分页（翻页不回中台）
   route('GET', '/chaos/github', async ({ res, query, db }) => {

@@ -84,3 +84,57 @@ export async function fetchChaosGithubRepos(
     return null;
   }
 }
+
+/** DSH 插件市场卡片 */
+export interface ChaosDshPlugin {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string;
+  tags: string[];
+  stars: number;
+  riskScore: number | null;
+  installCommand: string | null;
+  sourceUrl: string | null;
+}
+
+export interface ChaosDshCategory {
+  slug: string;
+  name: string;
+  pluginCount: number;
+}
+
+export interface ChaosDshPage {
+  items: ChaosDshPlugin[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export async function fetchChaosDshMarket(
+  page = 1,
+  category = 'all',
+): Promise<ChaosDshPage | null> {
+  try {
+    const res = await apiFetch(
+      `/s/api/chaos/dsh/market?page=${page}&pageSize=20&category=${encodeURIComponent(category)}`,
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as { ok?: boolean; data?: ChaosDshPage | null };
+    if (!json?.ok || !json.data) return null;
+    return json.data;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchChaosDshCategories(): Promise<ChaosDshCategory[]> {
+  try {
+    const res = await apiFetch('/s/api/chaos/dsh/categories');
+    if (!res.ok) return [];
+    const json = (await res.json()) as { ok?: boolean; data?: ChaosDshCategory[] | null };
+    return json?.ok ? (json.data ?? []) : [];
+  } catch {
+    return [];
+  }
+}
