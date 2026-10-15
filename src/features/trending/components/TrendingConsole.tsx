@@ -9,8 +9,6 @@ import {
   Flame,
   RefreshCw,
   Star,
-  TrendingDown,
-  TrendingUp,
   Loader2,
 } from 'lucide-react';
 import {
@@ -34,7 +32,6 @@ import {
 } from '@/lib/api/chaosHotboard';
 import { toast } from '@/features/toast/toast';
 import ContentTypeBadge from '@/components/ui/content-type-badge';
-import DirectionBadge from '@/components/ui/direction-badge';
 import GlassDetailSheet from '@/components/ui/glass-detail-sheet';
 import MobileTabBar from '@/features/mobile/components/MobileTabBar';
 import { cn } from '@/lib/utils';
@@ -139,30 +136,7 @@ function GithubRepoCard({ item }: { item: ChaosGithubRepo }) {
   );
 }
 
-/** 排名变化徽章：升红降绿（热榜语境排名变小=上升；深色终端风禁用蓝色），无历史不显示。 */
-function RankDelta({ item }: { item: TrendRadarItem }) {
-  if (item.previousRank === null || item.rank === null || item.previousRank === item.rank) {
-    return null;
-  }
-  const rising = item.rank < item.previousRank;
-  const delta = Math.abs(item.previousRank - item.rank);
-  return (
-    <span
-      className={cn(
-        'inline-flex shrink-0 items-center gap-0.5 font-mono text-[10px] tabular-nums',
-        rising ? 'text-red-500' : 'text-primary',
-      )}
-      title={`上次第 ${item.previousRank} 名`}
-    >
-      {rising ? (
-        <TrendingUp aria-hidden="true" className="h-3 w-3" />
-      ) : (
-        <TrendingDown aria-hidden="true" className="h-3 w-3" />
-      )}
-      {delta}
-    </span>
-  );
-}
+/** 排名变化徽章已从行内撤下（中台流数据无历史排名，NaN 误显）；详情 payload 里可看全量字段。 */
 
 function TrendRadarRow({
   item,
@@ -171,8 +145,6 @@ function TrendRadarRow({
   item: TrendRadarItem;
   onOpenDetail: (item: TrendRadarItem) => void;
 }) {
-  const promoted = item.promotedAt !== null;
-
   return (
     <li>
       <button
@@ -180,28 +152,19 @@ function TrendRadarRow({
         data-testid="trend-radar-item"
         onClick={() => onOpenDetail(item)}
         className={cn(
-          'flex min-h-[44px] w-full items-center gap-2.5 border-b border-border/60 px-3 py-2.5 text-left last:border-b-0',
+          'flex min-h-[44px] w-full items-start gap-2.5 border-b border-border/60 px-3 py-3 text-left last:border-b-0',
           'transition-colors duration-150 hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset',
         )}
       >
-        <span className="w-5 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground sm:w-6">
+        <span className="w-5 shrink-0 pt-0.5 text-right font-mono text-[11px] tabular-nums text-muted-foreground sm:w-6">
           {item.rank ?? '—'}
         </span>
-        <RankDelta item={item} />
-        <span className="line-clamp-2 min-w-0 flex-1 text-[13px] leading-snug text-foreground">
+        <span className="line-clamp-2 min-w-0 flex-1 text-[14px] leading-snug text-foreground">
           {item.title}
         </span>
-        <ContentTypeBadge type={item.contentType} />
-        {promoted ? <DirectionBadge directionKey={item.directionKey} /> : null}
         {item.hotValue ? (
-          <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/70">
+          <span className="shrink-0 pt-0.5 font-mono text-[10px] tabular-nums text-muted-foreground/70">
             {item.hotValue}
-          </span>
-        ) : null}
-        {promoted ? (
-          <span className="inline-flex shrink-0 items-center gap-0.5 text-[10px] font-medium text-success">
-            <Check aria-hidden="true" className="h-3 w-3" />
-            已转
           </span>
         ) : null}
       </button>

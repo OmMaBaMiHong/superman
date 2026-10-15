@@ -288,9 +288,15 @@ export interface ChaosHotBoard {
       title: string;
       url: string | null;
       rank: number | null;
+      previousRank: number | null;
       hotValue: string;
+      firstSeenAt: string;
+      lastSeenAt: string;
       sourceDate: string;
+      promotedAt: string | null;
+      promotedArticleId: string | null;
       contentType: string;
+      directionKey: string | null;
       platform: string;
       platformName: string;
     }>;
@@ -303,6 +309,18 @@ const NEWS_EXTERNAL_SOURCE_CODES = new Set([
   'wikipedia-top-views-zh', 'wikipedia-top-views-en', 'arxiv-latest-ai',
   'stackexchange-hot', 'gdelt-global-topics',
 ]);
+
+/** external 源显示名治理（中台 name 有重复，如两个 Google News）。 */
+const NEWS_SOURCE_DISPLAY: Record<string, string> = {
+  'google-news-tech-us': 'Google News 科技',
+  'google-news-top-cn': 'Google News 中文',
+  'wikipedia-top-views-zh': '维基热读·中文',
+  'wikipedia-top-views-en': '维基热读·英文',
+  'hacker-news-top': 'Hacker News',
+  'arxiv-latest-ai': 'arXiv AI 论文',
+  'stackexchange-hot': 'Stack Exchange 热问',
+  'gdelt-global-topics': 'GDELT 全球话题',
+};
 
 function isNewsSource(s: { code: string; name: string; status: string; sourceKind: string }): boolean {
   if (s.status !== 'on') return false;
@@ -343,22 +361,30 @@ export async function readChaosNewsBoard(db: Queryable | null): Promise<ChaosRes
     let total = 0
     for (const { source, items } of results) {
       if (items.length === 0) continue
+      const displayName = NEWS_SOURCE_DISPLAY[source.code] ?? source.name
       const group: ChaosHotBoard['platforms'][number] = {
-        platform: source.code, platformName: source.name, items: [],
+        platform: source.code, platformName: displayName, items: [],
       }
       for (const raw of items) {
         const r = asRecord(raw)
         total += 1
+        const seenAt = typeof r.publishedAt === 'string' ? r.publishedAt : new Date().toISOString()
         group.items.push({
           id: typeof r.id === 'string' ? r.id : String(total),
           title: typeof r.title === 'string' ? r.title : '',
           url: typeof r.url === 'string' ? r.url : null,
           rank: group.items.length + 1,
+          previousRank: null,
           hotValue: '',
-          sourceDate: typeof r.publishedAt === 'string' ? r.publishedAt.slice(0, 10) : new Date().toISOString().slice(0, 10),
+          firstSeenAt: seenAt,
+          lastSeenAt: seenAt,
+          sourceDate: seenAt.slice(0, 10),
+          promotedAt: null,
+          promotedArticleId: null,
           contentType: 'article',
+          directionKey: null,
           platform: source.code,
-          platformName: source.name,
+          platformName: displayName,
         })
       }
       platforms.push(group)
