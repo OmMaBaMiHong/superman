@@ -513,6 +513,12 @@ export async function readChaosGithubRepos(db: Queryable | null): Promise<ChaosR
         updatedAt: typeof r.updatedAt === 'string' ? r.updatedAt : null,
       });
     }
+    // 治理排序：质量分高的仓库排前，同分看更新时间
+    repos.sort((a, b) => {
+      const scoreDiff = (b.qualityScore ?? 0) - (a.qualityScore ?? 0);
+      if (scoreDiff !== 0) return scoreDiff;
+      return (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '');
+    });
     return repos;
   });
 }

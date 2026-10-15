@@ -45,93 +45,120 @@ const HOT_TABS: Array<{ key: 'news' | 'github' | 'dsh'; label: string }> = [
   { key: 'dsh', label: 'DSH' },
 ];
 
-/** DSH 插件市场卡片：名称 + 描述 + tags + stars + 安装命令。 */
-function DshPluginCard({ item }: { item: ChaosDshPlugin }) {
+/** DSH 插件市场卡片：popular 排名徽章（前三奖牌）+ 名称/描述分层 + stars 指标 + tags + 安装命令。 */
+function DshPluginCard({ item, rank }: { item: ChaosDshPlugin; rank: number }) {
+  const stars = item.stars >= 1000 ? `${(item.stars / 1000).toFixed(1)}k` : String(item.stars);
   return (
     <li className="border-b border-border/60 px-3.5 py-3 last:border-b-0">
-      <div className="flex items-start justify-between gap-3">
-        <a
-          href={item.sourceUrl ?? '#'}
-          target="_blank"
-          rel="noreferrer"
-          className="min-w-0 truncate text-sm font-semibold text-primary hover:underline"
+      <div className="flex items-start gap-2.5">
+        <RankBadge rank={rank} />
+        <div className="min-w-0 flex-1">
+          <a
+            href={item.sourceUrl ?? '#'}
+            target="_blank"
+            rel="noreferrer"
+            className="block truncate text-[13.5px] font-semibold leading-snug text-foreground hover:underline"
+            title={item.name}
+          >
+            {item.name}
+          </a>
+          {item.description ? (
+            <p className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-muted-foreground/85">
+              {item.description}
+            </p>
+          ) : null}
+          {item.tags.length > 0 ? (
+            <div className="mt-1.5 flex flex-wrap items-center gap-1">
+              {item.tags.slice(0, 3).map((tag) => (
+                <span
+                  key={tag}
+                  className="max-w-[10rem] truncate rounded-full bg-primary/10 px-1.5 py-px text-[10px] font-medium text-primary/90"
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {item.installCommand ? (
+            <code className="mt-1.5 block truncate rounded-md bg-muted/50 px-2 py-1 font-mono text-[10px] text-muted-foreground/80">
+              <span aria-hidden="true" className="mr-1 text-success">$</span>
+              {item.installCommand}
+            </code>
+          ) : null}
+        </div>
+        <span
+          className="inline-flex shrink-0 items-center gap-0.5 pt-0.5 font-mono text-[10px] tabular-nums text-amber-300/90"
+          title={`${item.stars} stars`}
         >
-          {item.name}
-        </a>
-        <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/70">
-          ★ {item.stars >= 1000 ? `${(item.stars / 1000).toFixed(1)}k` : item.stars}
+          <Star aria-hidden="true" className="h-3 w-3" />
+          {stars}
         </span>
       </div>
-      {item.description ? (
-        <p className="mt-1 line-clamp-2 text-[13px] leading-snug text-muted-foreground">
-          {item.description}
-        </p>
-      ) : null}
-      {item.tags.length > 0 ? (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {item.tags.slice(0, 4).map((tag) => (
-            <span
-              key={tag}
-              className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary"
-            >
-              {tag}
-            </span>
-          ))}
-        </div>
-      ) : null}
-      {item.installCommand ? (
-        <code className="mt-2 block truncate rounded-md bg-muted/60 px-2 py-1 font-mono text-[10px] text-muted-foreground">
-          {item.installCommand}
-        </code>
-      ) : null}
     </li>
   );
 }
 
-/** GitHub 仓库卡片：owner/repo + 描述 + topics 标签 + 功能类目 + 质量分 + 更新时间（对齐 GitHub 搜索结果视图）。 */
+/** GitHub 仓库卡片：首字母方块 + owner/repo 分层名 + 描述 + topics/类目标签行 + 质量分指标。 */
 function GithubRepoCard({ item }: { item: ChaosGithubRepo }) {
+  const slash = item.repo.indexOf('/');
+  const owner = slash > 0 ? item.repo.slice(0, slash) : '';
+  const name = slash > 0 ? item.repo.slice(slash + 1) : item.repo;
+  const initial = (name || owner || '?').charAt(0).toUpperCase();
   const updated = item.updatedAt ? item.updatedAt.slice(0, 10) : null;
   return (
     <li className="border-b border-border/60 px-3.5 py-3 last:border-b-0">
-      <div className="flex items-start justify-between gap-3">
-        <a
-          href={item.url ?? '#'}
-          target="_blank"
-          rel="noreferrer"
-          className="min-w-0 truncate text-sm font-semibold text-primary hover:underline"
+      <div className="flex items-start gap-2.5">
+        <span
+          aria-hidden="true"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-border/70 bg-muted/40 font-mono text-[13px] font-bold text-primary/90"
         >
-          {item.repo}
-        </a>
-        <span className="shrink-0 rounded-full border border-border px-2 py-0.5 text-[10px] text-muted-foreground">
-          {item.categoryName}
+          {initial}
         </span>
-      </div>
-      {item.description ? (
-        <p className="mt-1 line-clamp-2 text-[13px] leading-snug text-muted-foreground">
-          {item.description}
-        </p>
-      ) : null}
-      {item.topics.length > 0 ? (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {item.topics.map((topic) => (
-            <span
-              key={topic}
-              className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary"
-            >
-              {topic}
+        <div className="min-w-0 flex-1">
+          <a
+            href={item.url ?? '#'}
+            target="_blank"
+            rel="noreferrer"
+            className="block truncate text-[13.5px] leading-snug hover:underline"
+            title={item.repo}
+          >
+            {owner ? <span className="text-muted-foreground">{owner}/</span> : null}
+            <span className="font-semibold text-foreground">{name}</span>
+          </a>
+          {item.description ? (
+            <p className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-muted-foreground/85">
+              {item.description}
+            </p>
+          ) : null}
+          <div className="mt-1.5 flex flex-wrap items-center gap-1">
+            <span className="rounded border border-border/70 px-1.5 py-px text-[10px] text-muted-foreground">
+              {item.categoryName}
             </span>
-          ))}
+            {item.topics.slice(0, 3).map((topic) => (
+              <span
+                key={topic}
+                className="max-w-[10rem] truncate rounded-full bg-primary/10 px-1.5 py-px text-[10px] font-medium text-primary/90"
+              >
+                {topic}
+              </span>
+            ))}
+          </div>
         </div>
-      ) : null}
-      <div className="mt-2 flex items-center gap-3 font-mono text-[10px] tabular-nums text-muted-foreground/70">
         {item.qualityScore !== null ? (
-          <span className="inline-flex items-center gap-1">
+          <span
+            className="inline-flex shrink-0 items-center gap-0.5 pt-0.5 font-mono text-[10px] tabular-nums text-amber-300/90"
+            title="中台质量分"
+          >
             <Star aria-hidden="true" className="h-3 w-3" />
             {item.qualityScore}/5
           </span>
         ) : null}
-        {updated ? <span>更新于 {updated}</span> : null}
       </div>
+      {updated ? (
+        <p className="mt-1 pl-[42px] font-mono text-[10px] tabular-nums text-muted-foreground/50">
+          更新于 {updated}
+        </p>
+      ) : null}
     </li>
   );
 }
@@ -907,7 +934,7 @@ export default function TrendingConsole() {
         ) : (
           /* DSH 插件市场：分类 chips + 插件卡片 + 滚动分页 */
           <div className="mx-4 sm:mx-6">
-            {dshCats.length > 0 ? (
+            {dshCats.some((cat) => cat.pluginCount > 0) ? (
               <div className="mb-3 flex flex-wrap gap-1.5">
                 <button
                   type="button"
@@ -922,7 +949,7 @@ export default function TrendingConsole() {
                   全部
                   <span className="font-mono text-[10px] tabular-nums opacity-60">{dshCats.reduce((sum, c) => sum + c.pluginCount, 0)}</span>
                 </button>
-                {dshCats.map((cat) => (
+                {dshCats.filter((cat) => cat.pluginCount > 0).map((cat) => (
                   <button
                     key={cat.slug}
                     type="button"
@@ -957,8 +984,8 @@ export default function TrendingConsole() {
               <>
                 <div className="gov-card overflow-hidden">
                   <ul>
-                    {dshPlugins.map((item) => (
-                      <DshPluginCard key={item.id} item={item} />
+                    {dshPlugins.map((item, index) => (
+                      <DshPluginCard key={item.id} item={item} rank={index + 1} />
                     ))}
                   </ul>
                 </div>
