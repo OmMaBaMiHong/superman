@@ -1,0 +1,17 @@
+# Local application containers reuse the shared database.
+services:
+  web:
+    extends: {file: docker-compose.yml, service: web}
+    depends_on: !reset {}
+    environment:
+      DATABASE_URL: ${CONTAINER_DATABASE_URL:?Set the shared database URL}
+    networks: [shared]
+  worker:
+    extends: {file: docker-compose.yml, service: worker}
+    depends_on: !reset {}
+    environment:
+      DATABASE_URL: ${CONTAINER_DATABASE_URL:?Set the shared database URL}
+    networks: [shared]
+
+networks:
+  shared: {external: true, name: local-infra}
