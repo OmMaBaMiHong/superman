@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { SubscribeNavState } from '@/h5/components/SubscribeTabs';
 import Link from 'next/link';
 import {
   ArrowLeft,
@@ -390,15 +390,10 @@ export interface TrendingConsoleProps {
   /** 用户订阅的 GitHub 分类 key（空/缺省 = 全部）；作用于分类 pills */
   categoryFilter?: string[];
   /**
-   * 嵌入态导航上报：把二级 pills / 统计 / 动作 / 可订阅项交给订阅页统一导航
+   * 嵌入态导航上报：把二级 pills / 统计 / 动作以数据形式交给订阅页统一导航
    * （SubscribeTabs）渲染，本组件自身不再画导航。独立形态不传即用自带页头。
    */
-  onNavUpdate?: (state: {
-    secondary?: ReactNode;
-    stats?: string;
-    actions?: ReactNode;
-    picks?: Array<{ key: string; label: string }>;
-  }) => void;
+  onNavUpdate?: (state: SubscribeNavState) => void;
 }
 
 export default function TrendingConsole({
@@ -794,139 +789,70 @@ export default function TrendingConsole({
     repoState,
   };
 
-  // 嵌入态：二级 pills / 统计 / 动作上报给订阅页统一导航渲染（几何由 SubscribeTabs 统一管）
+  // 嵌入态：把二级筛选 pills / 统计 / 动作以【数据】上报给订阅页统一导航（SubscribeTabs）——
+  // 嵌入态自身不渲染任何导航，所有来源同一组件同一几何。
   useEffect(() => {
     if (!embedded || !onNavUpdate) return;
     const h = navHandlersRef.current;
-    const pill = (
-      active: boolean,
-      onClick: () => void,
-      content: ReactNode,
-    ) => (
-      <button
-        type="button"
-        role="tab"
-        aria-selected={active}
-        onClick={onClick}
-        className={cn(
-          'flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-xs font-medium transition-colors duration-150',
-          active
-            ? 'border-primary/40 bg-primary/10 text-primary'
-            : 'border-border text-muted-foreground hover:text-foreground',
-        )}
-      >
-        {content}
-      </button>
-    );
-
-    let secondary: ReactNode = null;
+    let pills: Array<{ key: string; label: string; count?: number; active?: boolean }> = [];
     let stats: string | undefined = undefined;
+    let canSync = false;
+    let onRefresh: () => void = () => h.load();
     if (hotTab === 'news') {
-      secondary =
-        platforms.length > 0 ? (
-          <>
-            {platforms.map((group, index) =>
-              pill(
-                activePlatform === index,
-                () => h.scrollToPlatform(index),
-                <>
-                  {group.platformName}
-                  <span className="font-mono text-[10px] tabular-nums opacity-60">{group.items.length}</span>
-                </>,
-              ),
-            )}
-          </>
-        ) : null;
+      pills = platforms.map((group, index) => ({
+        key: group.platform,
+        label: group.platformName,
+        count: group.items.length,
+        active: activePlatform === index,
+      }));
       stats = data
         ? `${data.date} · ${platforms.reduce((sum, group) => sum + group.items.length, 0)} 条`
         : undefined;
+      canSync = true;
     } else if (hotTab === 'github' && h.repoState) {
       const cats = h.repoState.categories.filter(
         (cat) => !categoryFilter || categoryFilter.length === 0 || categoryFilter.includes(cat.key),
       );
-      secondary = (
-        <>
-          {pill(h.repoCat === 'all', () => h.switchRepoCat('all'), (
-            <>
-              全部
-              <span className="font-mono text-[10px] tabular-nums opacity-60">{h.repoState.grandTotal}</span>
-            </>
-          ))}
-          {cats.map((cat) =>
-            pill(h.repoCat === cat.key, () => h.switchRepoCat(cat.key), (
-              <>
-                {cat.name}
-                <span className="font-mono text-[10px] tabular-nums opacity-60">{cat.count}</span>
-              </>
-            )),
-          )}
-        </>
-      );
+      pills = [
+        { key: 'all', label: '全部', count: h.repoState.grandTotal, active: h.repoCat === 'all' },
+        ...cats.map((cat) => ({
+          key: cat.key,
+          label: cat.name,
+          count: cat.count,
+          active: h.repoCat === cat.key,
+        })),
+      ];
       stats = `共 ${h.repoState.grandTotal} 个仓库`;
+      onRefresh = () => h.switchRepoCat(h.repoCat);
     } else if (hotTab === 'dsh' && h.dshCats.length > 0) {
       const dshTotal = h.dshCats.reduce((sum, cat) => sum + cat.pluginCount, 0);
-      secondary = (
-        <>
-          {pill(h.dshCat === 'all', () => h.switchDshCat('all'), (
-            <>
-              全部
-              <span className="font-mono text-[10px] tabular-nums opacity-60">{dshTotal}</span>
-            </>
-          ))}
-          {h.dshCats
-            .filter((cat) => cat.pluginCount > 0)
-            .map((cat) =>
-              pill(h.dshCat === cat.slug, () => h.switchDshCat(cat.slug), (
-                <>
-                  {cat.name}
-                  <span className="font-mono text-[10px] tabular-nums opacity-60">{cat.pluginCount}</span>
-                </>
-              )),
-            )}
-        </>
-      );
+      pills = [
+        { key: 'all', label: '全部', count: dshTotal, active: h.dshCat === 'all' },
+        ...h.dshCats
+          .filter((cat) => cat.pluginCount > 0)
+          .map((cat) => ({
+            key: cat.slug,
+            label: cat.name,
+            count: cat.pluginCount,
+            active: h.dshCat === cat.slug,
+          })),
+      ];
       stats = `共 ${dshTotal} 个插件`;
+      onRefresh = () => h.switchDshCat(h.dshCat);
     }
-
     onNavUpdate({
-      picks:
-        hotTab === 'news'
-          ? allPlatforms.map((group) => ({ key: group.platform, label: group.platformName }))
-          : hotTab === 'github' && h.repoState
-            ? h.repoState.categories.map((cat) => ({ key: cat.key, label: cat.name }))
-            : [],
-      secondary,
+      pills,
+      onPill: (key: string) => {
+        if (hotTab === 'news') {
+          const idx = h.platforms.findIndex((group) => group.platform === key);
+          if (idx >= 0) h.scrollToPlatform(idx);
+        } else if (hotTab === 'github') h.switchRepoCat(key);
+        else if (hotTab === 'dsh') h.switchDshCat(key);
+      },
+      onSync: () => h.handleSyncNow(),
       stats,
-      actions: (
-        <>
-          {hotTab === 'news' ? (
-            <button
-              type="button"
-              onClick={h.handleSyncNow}
-              disabled={syncing}
-              aria-label="立即同步热榜"
-              title="立即同步热榜数据入仓"
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-primary/40 bg-primary/10 text-primary transition-colors duration-150 hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
-            >
-              <RefreshCw aria-hidden="true" className={cn('h-4 w-4', syncing && 'animate-spin')} />
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={() =>
-              hotTab === 'github'
-                ? h.switchRepoCat(h.repoCat)
-                : hotTab === 'dsh'
-                  ? h.switchDshCat(h.dshCat)
-                  : void h.load()
-            }
-            aria-label="刷新"
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          >
-            <RefreshCw aria-hidden="true" className="h-4 w-4" />
-          </button>
-        </>
-      ),
+      canSync,
+      onRefresh,
     });
     // 卸载/切走时清空宿主导航的二级行
     return () => onNavUpdate?.({});
