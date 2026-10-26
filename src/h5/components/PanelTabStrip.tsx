@@ -1,6 +1,6 @@
 'use client';
 
-import { Bell, BookOpen, Flame, Compass, PenLine, Plus, User } from 'lucide-react';
+import { Bell, BookOpen, Compass, PenLine, Plus, User } from 'lucide-react';
 import { useGovernanceQueueSize } from '@/features/governance/hooks/useGovernanceQueueSize';
 import { useUnreadNotificationCount } from '@/features/notifications/useUnreadNotificationCount';
 import { cn } from '@/lib/utils';
@@ -28,8 +28,8 @@ export default function PanelTabStrip({ onOpenPaste }: PanelTabStripProps) {
   const isStudio = route === '/studio' || route === '/governance';
 
   const items = [
-    { key: '/discover', label: '订阅', to: '/discover', Icon: Compass, active: route === '/discover' || route === '/', badge: 0 },
-    { key: '/trending', label: '热点', to: '/trending', Icon: Flame, active: route === '/trending', badge: 0 },
+    // 订阅 = 热点新闻 + RSS 博主 + GitHub 的统一入口（热点页已并入订阅页子 tab）
+    { key: '/discover', label: '订阅', to: '/discover', Icon: Compass, active: route === '/discover' || route === '/' || route === '/trending', badge: 0 },
     { key: '/reader', label: '收藏', to: '/reader', Icon: BookOpen, active: route === '/reader', badge: 0 },
     { key: '/studio', label: '创作', to: '/studio', Icon: PenLine, active: isStudio, badge: queueSize },
     { key: '/notifications', label: '消息', to: '/notifications', Icon: Bell, active: route === '/notifications', badge: unreadNotifications },

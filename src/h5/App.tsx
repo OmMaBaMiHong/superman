@@ -12,7 +12,6 @@ import PanelTabStrip from './components/PanelTabStrip';
 import AddSheet from './components/AddSheet';
 import H5LoginPage from './pages/LoginPage';
 
-const TrendingConsole = lazy(() => import('@/features/trending/components/TrendingConsole'));
 const StudioConsole = lazy(() => import('@/features/studio/components/StudioConsole'));
 const H5ReaderPage = lazy(() => import('./pages/ReaderPage'));
 const H5DiscoverPage = lazy(() => import('./pages/DiscoverPage'));
@@ -168,7 +167,9 @@ function App() {
   const tabParam = path.includes('?') ? new URLSearchParams(path.split('?')[1]).get('tab') : null;
 
   if (route === '/trending') {
-    view = <TrendingConsole />;
+    // 热点已并入订阅页（子 tab「热点新闻」）：老路由 302 式收敛，避免外链/收藏失效
+    navigateTo('/discover?tab=hot');
+    return <ViewLoading />;
   } else if (route === '/studio') {
     const studioTab =
       tabParam === 'queue' || tabParam === 'topics' || tabParam === 'jobs' || tabParam === 'drafts' || tabParam === 'plans' || tabParam === 'performance'
@@ -182,7 +183,9 @@ function App() {
   } else if (route === '/profile') {
     view = <H5ProfilePage username={session.username} />;
   } else if (route === '/discover') {
-    view = <H5DiscoverPage />;
+    // 订阅页子 tab：hot=热点新闻 / rss=博主 RSS / github=GitHub（缺省落在 RSS 发现流）
+    const subTab = tabParam === 'hot' || tabParam === 'github' ? tabParam : undefined;
+    view = <H5DiscoverPage initialTab={subTab} />;
   } else {
     view = <H5ReaderPage />;
   }

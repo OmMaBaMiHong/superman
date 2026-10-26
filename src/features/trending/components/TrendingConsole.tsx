@@ -377,8 +377,16 @@ function TrendRadarDetailView({
  * 热点雷达主控台（横向轨道版）：
  * 平台 = 横向 snap 轨道（拖动切平台），顶部 pill 栏双向联动，列内纵向滚动；
  * 条目点开详情 sheet，详情里可「转为选题」。
+ *
+ * embedded：嵌入订阅页子 tab 使用——隐藏自身页头（返回/标题）与内部数据通道
+ * 切换（由父级 tab 控制），保留同步/刷新动作与平台 pill 栏。
  */
-export default function TrendingConsole() {
+export interface TrendingConsoleProps {
+  embedded?: boolean;
+  initialHotTab?: 'news' | 'github' | 'dsh';
+}
+
+export default function TrendingConsole({ embedded = false, initialHotTab }: TrendingConsoleProps = {}) {
   const [data, setData] = useState<TrendRadarToday | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -400,7 +408,7 @@ export default function TrendingConsole() {
   const suppressScrollSyncRef = useRef(false);
 
   // 三 tab：新闻热点 / GitHub / DSH（数据通道分离，各自独立加载）
-  const [hotTab, setHotTab] = useState<'news' | 'github' | 'dsh'>('news');
+  const [hotTab, setHotTab] = useState<'news' | 'github' | 'dsh'>(initialHotTab ?? 'news');
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -729,26 +737,30 @@ export default function TrendingConsole() {
   const platforms = data?.platforms ?? [];
 
   return (
-    <div className="flex min-h-screen flex-col">
-      {/* 顶部指挥条 */}
-      <header className="glass-surface-strong sticky top-0 z-10 rounded-none border-x-0 border-t-0">
+    <div className={embedded ? 'flex flex-col' : 'flex min-h-screen flex-col'}>
+      {/* 顶部指挥条（嵌入态：隐藏返回/标题与内部通道切换，保留动作与平台 pill 栏） */}
+      <header className={cn('glass-surface-strong rounded-none border-x-0 border-t-0', embedded ? '' : 'sticky top-0 z-10')}>
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
-          <div className="flex min-w-0 items-center gap-3">
-            <Link
-              href="/"
-              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:h-9 sm:w-9"
-              aria-label="返回阅读器"
-            >
-              <ArrowLeft aria-hidden="true" className="h-4 w-4" />
-            </Link>
-            <div className="min-w-0">
-              <h1 className="flex items-center gap-1.5 truncate text-sm font-semibold text-foreground">
-                <Flame aria-hidden="true" className="h-4 w-4 text-primary" />
-                热点雷达
-              </h1>
-              <p className="text-[11px] text-muted-foreground">Trend Radar</p>
+          {embedded ? (
+            <div className="min-w-0 flex-1" />
+          ) : (
+            <div className="flex min-w-0 items-center gap-3">
+              <Link
+                href="/"
+                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:h-9 sm:w-9"
+                aria-label="返回阅读器"
+              >
+                <ArrowLeft aria-hidden="true" className="h-4 w-4" />
+              </Link>
+              <div className="min-w-0">
+                <h1 className="flex items-center gap-1.5 truncate text-sm font-semibold text-foreground">
+                  <Flame aria-hidden="true" className="h-4 w-4 text-primary" />
+                  热点雷达
+                </h1>
+                <p className="text-[11px] text-muted-foreground">Trend Radar</p>
+              </div>
             </div>
-          </div>
+          )}
           <div className="flex shrink-0 items-center gap-3">
             {hotTab === 'news' && data ? (
               <span className="hidden font-mono text-[11px] tabular-nums text-muted-foreground sm:inline">
@@ -778,31 +790,33 @@ export default function TrendingConsole() {
           </div>
         </div>
 
-        {/* 数据通道子 tab：新闻热点 / GitHub / DSH */}
-        <div
-          role="tablist"
-          aria-label="热点数据源"
-          className="flex items-center gap-1.5 px-4 pb-2 sm:px-6"
-        >
-          {HOT_TABS.map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              role="tab"
-              aria-selected={hotTab === tab.key}
-              onClick={() => setHotTab(tab.key)}
-              className={cn(
-                'flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-xs font-medium transition-colors duration-150',
-                'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                hotTab === tab.key
-                  ? 'border-primary/40 bg-primary/10 text-primary'
-                  : 'border-border text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        {/* 数据通道子 tab：新闻热点 / GitHub / DSH（嵌入态由父级订阅子 tab 控制，不再重复展示） */}
+        {!embedded && (
+          <div
+            role="tablist"
+            aria-label="热点数据源"
+            className="flex items-center gap-1.5 px-4 pb-2 sm:px-6"
+          >
+            {HOT_TABS.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                role="tab"
+                aria-selected={hotTab === tab.key}
+                onClick={() => setHotTab(tab.key)}
+                className={cn(
+                  'flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-xs font-medium transition-colors duration-150',
+                  'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                  hotTab === tab.key
+                    ? 'border-primary/40 bg-primary/10 text-primary'
+                    : 'border-border text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* 平台 pill 栏（与轨道双向联动，仅新闻热点 tab） */}
         {hotTab === 'news' && platforms.length > 0 ? (
@@ -1082,7 +1096,7 @@ export default function TrendingConsole() {
         ) : null}
       </GlassDetailSheet>
 
-      <MobileTabBar />
+      {embedded ? null : <MobileTabBar />}
     </div>
   );
 }
