@@ -185,7 +185,7 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
 
   // 订阅管理加号：打开当前来源的勾选面板（热点/GitHub 带草稿态，RSS 即时生效）
   const openPicker = useCallback(() => {
-    const prefKey = subTab === 'github' ? 'github' : subTab === 'hot' ? 'hot' : '';
+    const prefKey = subTab === 'github' || subTab === 'dsh' ? subTab : subTab === 'hot' ? 'hot' : '';
     setDraftKeys(prefKey ? prefs[prefKey] ?? [] : []);
     setPickerOpen(true);
   }, [subTab, prefs]);
@@ -302,7 +302,7 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
         initialHotTab={channel}
         // 订阅制：勾了才展示（空数组 = 未勾选任何子类 → 通道显示引导）
         platformFilter={subTab === 'hot' ? prefs.hot ?? [] : undefined}
-        categoryFilter={subTab === 'github' ? prefs.github ?? [] : undefined}
+        categoryFilter={subTab === 'github' || subTab === 'dsh' ? (subTab === 'github' ? prefs.github ?? [] : prefs.dsh ?? []) : undefined}
         onNavUpdate={handleNavUpdate}
       />
     </Suspense>
@@ -465,7 +465,7 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
               >
                 {subTab === 'rss' ? '完成' : '取消'}
               </button>
-              {subTab !== 'rss' && subTab !== 'dsh' ? (
+              {subTab !== 'rss' ? (
                 <button
                   type="button"
                   disabled={savingPrefs}

@@ -814,11 +814,15 @@ export default function TrendingConsole({
         : undefined;
       canSync = true;
     } else if (hotTab === 'github' && h.repoState) {
-      const cats = h.repoState.categories.filter(
-        (cat) => !categoryFilter || categoryFilter.length === 0 || categoryFilter.includes(cat.key),
-      );
+      // 订阅制：勾选了分类 → 二级 pills 收敛到订阅集合（「全部」收起）
+      const cats =
+        categoryFilter === undefined
+          ? h.repoState.categories
+          : h.repoState.categories.filter((cat) => categoryFilter.includes(cat.key));
       pills = [
-        { key: 'all', label: '全部', count: h.repoState.grandTotal, active: h.repoCat === 'all' },
+        ...(categoryFilter === undefined
+          ? [{ key: 'all', label: '全部', count: h.repoState.grandTotal, active: h.repoCat === 'all' }]
+          : []),
         ...cats.map((cat) => ({
           key: cat.key,
           label: cat.name,
@@ -829,17 +833,22 @@ export default function TrendingConsole({
       stats = `共 ${h.repoState.grandTotal} 个仓库`;
       onRefresh = () => h.switchRepoCat(h.repoCat);
     } else if (hotTab === 'dsh' && h.dshCats.length > 0) {
-      const dshTotal = h.dshCats.reduce((sum, cat) => sum + cat.pluginCount, 0);
+      // 订阅制：勾选了插件分类 → 二级 pills 收敛到订阅集合（「全部」收起）
+      const dshCatsVisible =
+        categoryFilter === undefined
+          ? h.dshCats
+          : h.dshCats.filter((cat) => categoryFilter.includes(cat.slug));
+      const dshTotal = dshCatsVisible.reduce((sum, cat) => sum + cat.pluginCount, 0);
       pills = [
-        { key: 'all', label: '全部', count: dshTotal, active: h.dshCat === 'all' },
-        ...h.dshCats
-          .filter((cat) => cat.pluginCount > 0)
-          .map((cat) => ({
-            key: cat.slug,
-            label: cat.name,
-            count: cat.pluginCount,
-            active: h.dshCat === cat.slug,
-          })),
+        ...(categoryFilter === undefined
+          ? [{ key: 'all', label: '全部', count: dshTotal, active: h.dshCat === 'all' }]
+          : []),
+        ...dshCatsVisible.map((cat) => ({
+          key: cat.slug,
+          label: cat.name,
+          count: cat.pluginCount,
+          active: h.dshCat === cat.slug,
+        })),
       ];
       stats = `共 ${dshTotal} 个插件`;
       onRefresh = () => h.switchDshCat(h.dshCat);
@@ -1098,7 +1107,13 @@ export default function TrendingConsole({
                 ))}
             </div>
           ) : null}
-            {repoError ? (
+            {embedded && categoryFilter !== undefined && repoState && !repoState.categories.some((cat) => categoryFilter.includes(cat.key)) ? (
+              /* 订阅制：未勾选任何 GitHub 分类 → 不展示仓库，只出订阅引导 */
+              <div className="rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center">
+                <p className="text-sm font-medium text-foreground">还没有订阅 GitHub 分类</p>
+                <p className="mt-2 text-xs text-muted-foreground">点右上角「+」勾选关注的分类，仓库会出现在这里。</p>
+              </div>
+            ) : repoError ? (
               <div className="rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center">
                 <p className="text-sm font-medium text-foreground">{repoError}</p>
               </div>
@@ -1168,7 +1183,13 @@ export default function TrendingConsole({
                 ))}
               </div>
             )}
-            {dshError ? (
+            {embedded && categoryFilter !== undefined && !dshCats.some((cat) => categoryFilter.includes(cat.slug)) ? (
+              /* 订阅制：未勾选任何插件分类 → 不展示插件，只出订阅引导 */
+              <div className="rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center">
+                <p className="text-sm font-medium text-foreground">还没有订阅插件分类</p>
+                <p className="mt-2 text-xs text-muted-foreground">点右上角「+」勾选关注的分类，插件会出现在这里。</p>
+              </div>
+            ) : dshError ? (
               <div className="rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center">
                 <p className="text-sm font-medium text-foreground">{dshError}</p>
               </div>
