@@ -172,17 +172,9 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
 
   return (
     <div className="min-h-screen bg-background">
-      <main className="mx-auto max-w-5xl px-4 pb-28 pt-6 sm:px-6 md:pb-10">
-        {/* 头部 */}
-        <div className="mb-4">
-          <h1 className="text-xl font-bold">订阅</h1>
-          <p className="mt-1 text-[12px] text-muted-foreground">
-            热点榜单、博主 RSS 与 GitHub 仓库，内容自动进入你的阅读流
-          </p>
-        </div>
-
-        {/* 子 tab：热点新闻 / RSS 订阅 / GitHub */}
-        <div role="tablist" aria-label="订阅分类" className="mb-5 flex items-center gap-1.5">
+      <main className="mx-auto max-w-5xl px-4 pb-28 pt-4 sm:px-6 md:pb-10">
+        {/* 子 tab + 分类（RSS 态）同行紧凑排布 */}
+        <div className="mb-3 flex flex-wrap items-center gap-1.5">
           {SUB_TABS.map(({ key, label, Icon }) => (
             <button
               key={key}
@@ -191,7 +183,7 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
               aria-selected={subTab === key}
               onClick={() => setSubTab(key)}
               className={cn(
-                'flex h-9 items-center gap-1.5 rounded-full border px-4 text-[12.5px] font-medium transition-colors duration-150',
+                'flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors duration-150',
                 'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
                 subTab === key
                   ? 'border-primary/40 bg-primary/10 text-primary'
@@ -202,6 +194,29 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
               {label}
             </button>
           ))}
+          {subTab === 'rss' ? <span aria-hidden="true" className="mx-1 h-4 w-px bg-border" /> : null}
+          {subTab === 'rss'
+            ? CATEGORY_ORDER.map((cat) => {
+                const n = cat === '全部' ? recommended.length : counts.get(cat) ?? 0;
+                if (cat !== '全部' && n === 0) return null;
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setCategory(cat)}
+                    className={cn(
+                      'flex h-8 items-center rounded-full border px-3 text-xs font-medium transition-colors duration-150',
+                      category === cat
+                        ? 'border-primary/40 bg-primary/10 text-primary'
+                        : 'border-border bg-card text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    {cat}
+                    {n > 0 ? <span className="ml-1 opacity-50">{n}</span> : null}
+                  </button>
+                );
+              })
+            : null}
         </div>
 
         {subTab === 'hot' ? (
@@ -227,54 +242,23 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
             }
           >
             <div>
-              <p className="mb-3 text-[12px] text-muted-foreground">GitHub 趋势仓库与开源动态，来自你订阅的仓库源。</p>
               {feedCards(githubFeeds)}
-              <div className="mt-5 rounded-2xl border border-border bg-card px-4 py-3.5">
-                <p className="text-[12px] text-muted-foreground">
-                  想看实时 GitHub Trending 榜单（含 star 数与热度排名）？切到「热点新闻」旁的
-                  <button
-                    type="button"
-                    onClick={() => setSubTab('hot')}
-                    className="mx-1 text-primary underline-offset-2 hover:underline"
-                  >
-                    热点新闻
-                  </button>
-                  后选 GitHub 通道。
-                </p>
-              </div>
+              <p className="mt-4 text-[11.5px] text-muted-foreground">
+                实时 Trending 榜单（含 star 与热度排名）在
+                <button
+                  type="button"
+                  onClick={() => setSubTab('hot')}
+                  className="mx-1 text-primary underline-offset-2 hover:underline"
+                >
+                  热点新闻
+                </button>
+                的 GitHub 通道。
+              </p>
             </div>
           </Suspense>
         ) : null}
 
-        {subTab === 'rss' ? (
-          <>
-            {/* 分类 chips */}
-            <div className="mb-4 flex flex-wrap gap-2">
-              {CATEGORY_ORDER.map((cat) => {
-                const n = cat === '全部' ? recommended.length : counts.get(cat) ?? 0;
-                if (cat !== '全部' && n === 0) return null;
-                return (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => setCategory(cat)}
-                    className={cn(
-                      'rounded-full border px-3.5 py-1.5 text-xs font-medium transition-colors duration-150',
-                      category === cat
-                        ? 'border-primary/40 bg-primary/10 text-primary'
-                        : 'border-border bg-card text-muted-foreground hover:text-foreground',
-                    )}
-                  >
-                    {cat}
-                    {n > 0 ? <span className="ml-1 opacity-50">{n}</span> : null}
-                  </button>
-                );
-              })}
-            </div>
-
-            {feedCards(filtered)}
-          </>
-        ) : null}
+        {subTab === 'rss' ? feedCards(filtered) : null}
       </main>
     </div>
   );

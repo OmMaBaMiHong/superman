@@ -739,10 +739,12 @@ export default function TrendingConsole({ embedded = false, initialHotTab }: Tre
   return (
     <div className={embedded ? 'flex flex-col' : 'flex min-h-screen flex-col'}>
       {/* 顶部指挥条（嵌入态：隐藏返回/标题与内部通道切换，保留动作与平台 pill 栏） */}
-      <header className={cn('glass-surface-strong rounded-none border-x-0 border-t-0', embedded ? '' : 'sticky top-0 z-10')}>
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
+      <header className={cn('rounded-none border-x-0 border-t-0', embedded ? '' : 'glass-surface-strong sticky top-0 z-10')}>
+        <div className={cn('mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 sm:px-6', embedded ? 'h-10 pt-3' : 'h-14')}>
           {embedded ? (
-            <div className="min-w-0 flex-1" />
+            <span className="min-w-0 truncate font-mono text-[11px] tabular-nums text-muted-foreground">
+              {hotTab === 'news' && data ? `${data.date} · ${data.platforms.length} 平台 · ${data.total} 条` : ''}
+            </span>
           ) : (
             <div className="flex min-w-0 items-center gap-3">
               <Link
@@ -761,8 +763,8 @@ export default function TrendingConsole({ embedded = false, initialHotTab }: Tre
               </div>
             </div>
           )}
-          <div className="flex shrink-0 items-center gap-3">
-            {hotTab === 'news' && data ? (
+          <div className="flex shrink-0 items-center gap-2">
+            {hotTab === 'news' && data && !embedded ? (
               <span className="hidden font-mono text-[11px] tabular-nums text-muted-foreground sm:inline">
                 {data.date} · {data.platforms.length} 平台 · {data.total} 条
               </span>
@@ -773,8 +775,11 @@ export default function TrendingConsole({ embedded = false, initialHotTab }: Tre
                 onClick={handleSyncNow}
                 disabled={syncing}
                 aria-label="立即同步热榜"
-                title="立即读取 TrendRadar 当日数据入仓"
-                className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-primary/40 bg-primary/10 text-primary transition-colors duration-150 hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50 sm:h-9 sm:w-9"
+                title="立即同步热榜数据入仓"
+                className={cn(
+                  'inline-flex items-center justify-center rounded-full border border-primary/40 bg-primary/10 text-primary transition-colors duration-150 hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50',
+                  embedded ? 'h-8 w-8' : 'h-11 w-11 sm:h-9 sm:w-9',
+                )}
               >
                 <RefreshCw aria-hidden="true" className={cn('h-4 w-4', syncing && 'animate-spin')} />
               </button>
@@ -783,7 +788,10 @@ export default function TrendingConsole({ embedded = false, initialHotTab }: Tre
               type="button"
               onClick={() => (hotTab === 'github' ? switchRepoCat(repoCat) : void load())}
               aria-label="刷新"
-              className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:h-9 sm:w-9"
+              className={cn(
+                'inline-flex items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                embedded ? 'h-8 w-8' : 'h-11 w-11 sm:h-9 sm:w-9',
+              )}
             >
               <RefreshCw aria-hidden="true" className="h-4 w-4" />
             </button>
@@ -824,7 +832,10 @@ export default function TrendingConsole({ embedded = false, initialHotTab }: Tre
             ref={pillBarRef}
             role="tablist"
             aria-label="平台切换"
-            className="flex gap-1.5 overflow-x-auto px-4 pb-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:px-6"
+            className={cn(
+              'flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:px-6',
+              embedded ? 'pb-1.5' : 'pb-2.5',
+            )}
           >
             {platforms.map((group, index) => (
               <button
@@ -852,7 +863,7 @@ export default function TrendingConsole({ embedded = false, initialHotTab }: Tre
         ) : null}
       </header>
 
-      <main className="mx-auto w-full max-w-6xl flex-1 px-0 pb-28 pt-4 md:pb-8">
+      <main className={cn('mx-auto w-full max-w-6xl flex-1 px-0', embedded ? 'pb-6 pt-1' : 'pb-28 pt-4 md:pb-8')}>
         {hotTab === 'news' ? (
           loading ? (
             <div className="flex gap-4 px-4 sm:px-6">
