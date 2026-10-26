@@ -56,7 +56,8 @@ export interface DiscoverPageProps {
 }
 
 export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
-  const [subTab, setSubTab] = useState<SubTab>(initialTab ?? 'rss');
+  // 工作台点进来默认落在热点新闻（订阅的第一来源）
+  const [subTab, setSubTab] = useState<SubTab>(initialTab ?? 'hot');
   const [recommended, setRecommended] = useState<RecommendedFeedEntry[]>([]);
   const [subscribedUrls, setSubscribedUrls] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -181,11 +182,19 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
 
   return (
     <div className="min-h-screen bg-background">
-      <main className="mx-auto max-w-5xl px-4 pb-28 pt-4 sm:px-6 md:pb-10">
+      {/* 通道视图（热点/GitHub/DSH）满幅贴边贴底；RSS 发现流保留窄容器网格 */}
+      <main
+        className={
+          subTab === 'rss'
+            ? 'mx-auto max-w-5xl px-4 pb-28 pt-4 sm:px-6 md:pb-10'
+            : 'px-0 pb-3 pt-4'
+        }
+      >
         <SubscribeTabs
           tabs={SUB_TABS}
           active={subTab}
           onChange={setSubTab}
+          className={subTab === 'rss' ? undefined : 'px-4'}
           actions={
             subTab !== 'hot' ? (
               <button

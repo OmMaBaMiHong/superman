@@ -742,7 +742,7 @@ export default function TrendingConsole({ embedded = false, initialHotTab }: Tre
       <header className={cn('rounded-none border-x-0 border-t-0', embedded ? '' : 'glass-surface-strong sticky top-0 z-10')}>
         {embedded ? (
           /* 嵌入态：单行工具条（平台 pills + 统计 + 动作），高度对齐 RSS 分类行 */
-          <div className="mx-auto flex max-w-6xl items-center gap-1.5 px-4 pt-2 sm:px-6">
+          <div className={cn('flex items-center gap-1.5 px-4 pt-2', embedded ? '' : 'mx-auto max-w-6xl sm:px-6')}>
             {hotTab === 'news' && platforms.length > 0 ? (
               <div
                 ref={pillBarRef}
@@ -914,7 +914,7 @@ export default function TrendingConsole({ embedded = false, initialHotTab }: Tre
         ) : null}
       </header>
 
-      <main className={cn('mx-auto w-full max-w-6xl flex-1 px-0', embedded ? 'pb-6 pt-1' : 'pb-28 pt-4 md:pb-8')}>
+      <main className={cn('w-full flex-1 px-0', embedded ? 'pb-2 pt-1' : 'mx-auto max-w-6xl pb-28 pt-4 md:pb-8')}>
         {hotTab === 'news' ? (
           loading ? (
             <div className="flex gap-4 px-4 sm:px-6">
