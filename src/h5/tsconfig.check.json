@@ -1,0 +1,41 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": false,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "baseUrl": "..",
+    "paths": {
+      "@/*": ["*"],
+      "next/link": ["h5/shims/next-link.tsx"],
+      "next/navigation": ["h5/shims/next-navigation.ts"]
+    },
+    "types": ["vite/client"]
+  },
+  "include": [
+    "./**/*.ts",
+    "./**/*.tsx",
+    "../lib/api/apiClient.ts",
+    "../lib/utils.ts",
+    "../lib/router.ts",
+    "../lib/auth.ts",
+    "../lib/host.ts",
+    "../components/ui/content-type-badge.tsx",
+    "../components/ui/glass-detail-sheet.tsx",
+    "../features/trending/**/*.ts",
+    "../features/trending/**/*.tsx",
+    "../features/toast/**/*",
+    "../features/governance/hooks/useGovernanceQueueSize.ts",
+    "../features/notifications/useUnreadNotificationCount.ts",
+    "../features/mobile/components/MobileTabBar.tsx",
+    "../features/studio/components/StudioConsole.tsx",
+    "../features/reader/components/ReaderContentPage.tsx"
+  ]
+}
