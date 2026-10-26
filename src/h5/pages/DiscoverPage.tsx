@@ -172,6 +172,9 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
     [recommended, subscribedUrls],
   );
 
+  /** 加号面板可订阅项（当前通道上报的全量：热点平台 / GitHub 分类） */
+  const navPicks = navExt.picks ?? [];
+
   // 订阅管理加号：打开当前来源的勾选面板（热点/GitHub 带草稿态，RSS 即时生效）
   const openPicker = useCallback(() => {
     const prefKey = subTab === 'github' ? 'github' : subTab === 'hot' ? 'hot' : '';
