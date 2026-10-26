@@ -116,6 +116,9 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
         // 给占位串过 zod 校验，并显式锁内存缓存——否则 RSSHub 见到 DATABASE_URL 会真连 PG。
         if (!process.env.DATABASE_URL) process.env.DATABASE_URL = 'postgresql://pglite:pglite@127.0.0.1:5432/unused'
         process.env.CACHE_TYPE ??= 'memory'
+        // 嵌入 RSSHub 的 SSRF 防护模式：桌面 TUN 代理环境域名解析为 fake-ip 段，
+        // 显式声明兼容模式，避免订阅地址被误判为内网地址而拒抓。
+        process.env.RSS_NETWORK_MODE ??= 'fake-ip'
         setQueueDriver(createLocalQueueDriver(pool))
       }
       log(`存储: ${mode}（${detail}）`)
