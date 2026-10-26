@@ -755,11 +755,20 @@ export default function TrendingConsole({
     scrollToPlatform(nearestPlatformIndex(rail.scrollLeft));
   };
 
+  const allPlatforms = useMemo(() => data?.platforms ?? [], [data]);
+  // 展示口径 = 用户订阅的平台（空 = 全部）；可订阅项（picks）始终上报全量，否则勾过了就加不回来
+  // 订阅了分类时：浏览分类收敛到订阅集合内（repoCat 漂移到未订阅分类则自动切回）
+  useEffect(() => {
+    if (!categoryFilter || categoryFilter.length === 0 || !repoState) return;
+    const subscribedCats = repoState.categories.filter((cat) => categoryFilter.includes(cat.key));
+    if (subscribedCats.length === 0) return;
+    if (!subscribedCats.some((cat) => cat.key === repoCat)) setRepoCat(subscribedCats[0].key);
+  }, [categoryFilter, repoState, repoCat]);
+
   const platforms = useMemo(() => {
-    const all = data?.platforms ?? [];
-    if (!platformFilter || platformFilter.length === 0) return all;
-    return all.filter((group) => platformFilter.includes(group.platform));
-  }, [data, platformFilter]);
+    if (!platformFilter || platformFilter.length === 0) return allPlatforms;
+    return allPlatforms.filter((group) => platformFilter.includes(group.platform));
+  }, [allPlatforms, platformFilter]);
 
   // 处理器经 ref 供导航上报 effect 使用：函数本体逐渲染重建，进依赖会导致每次渲染重复上报
   const navHandlersRef = useRef({ scrollToPlatform, handleSyncNow, switchRepoCat, load, repoCat });
@@ -772,7 +781,7 @@ export default function TrendingConsole({
     onNavUpdate({
       picks:
         hotTab === 'news'
-          ? platforms.map((group) => ({ key: group.platform, label: group.platformName }))
+          ? allPlatforms.map((group) => ({ key: group.platform, label: group.platformName }))
           : hotTab === 'github' && repoState
             ? repoState.categories.map((cat) => ({ key: cat.key, label: cat.name }))
             : [],
@@ -832,7 +841,7 @@ export default function TrendingConsole({
     // 卸载/切走时清空宿主导航的二级行
     return () => onNavUpdate?.({});
     // 依赖全部来自组件状态/props（处理器走 ref），父级重渲染不会触发重复上报
-  }, [embedded, onNavUpdate, hotTab, platforms, data, syncing, activePlatform, repoState]);
+  }, [embedded, onNavUpdate, hotTab, platforms, allPlatforms, data, syncing, activePlatform, repoState]);
 
   return (
     <div className={embedded ? 'flex min-h-0 flex-1 flex-col' : 'flex min-h-screen flex-col'}>
@@ -1013,22 +1022,24 @@ export default function TrendingConsole({
         ) : hotTab === 'github' ? (
           /* GitHub 仓库：功能类目 chips + 仓库卡片列表 + 滚动分页 */
           <div className="mx-4 sm:mx-6">
-          {/* 分类 pill 栏（按用户订阅的分类过滤；「全部」恒在，供回看全量） */}
+          {/* 分类 pill 栏（按用户订阅的分类过滤；订阅后「全部」收起，浏览收敛到订阅集合） */}
           {repoState && repoState.categories.length > 0 ? (
             <div className="flex items-center gap-1.5 px-4 pb-2.5 sm:px-6">
-              <button
-                type="button"
-                onClick={() => switchRepoCat('all')}
-                className={cn(
-                  'flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors duration-150',
-                  repoCat === 'all'
-                    ? 'border-primary/40 bg-primary/10 text-primary'
-                    : 'border-border text-muted-foreground hover:text-foreground',
-                )}
-              >
-                全部
-                <span className="font-mono text-[10px] tabular-nums opacity-60">{repoState.grandTotal}</span>
-              </button>
+              {(!categoryFilter || categoryFilter.length === 0) && (
+                <button
+                  type="button"
+                  onClick={() => switchRepoCat('all')}
+                  className={cn(
+                    'flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors duration-150',
+                    repoCat === 'all'
+                      ? 'border-primary/40 bg-primary/10 text-primary'
+                      : 'border-border text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  全部
+                  <span className="font-mono text-[10px] tabular-nums opacity-60">{repoState.grandTotal}</span>
+                </button>
+              )}
               {repoState.categories
                 .filter((cat) => !categoryFilter || categoryFilter.length === 0 || categoryFilter.includes(cat.key))
                 .map((cat) => (

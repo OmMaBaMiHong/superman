@@ -18,10 +18,6 @@ import SubscribeTabs, { type NavIcon } from '../components/SubscribeTabs';
 
 const TrendingConsole = lazy(() => import('@/features/trending/components/TrendingConsole'));
 
-type Category = '全部' | 'AI' | '科技' | '开源' | '新闻热点' | '独立开发';
-
-const CATEGORY_ORDER: Category[] = ['全部', 'AI', '科技', '开源', '新闻热点', '独立开发'];
-
 /** 一级来源图标注册表：subscribe_sources.icon → lucide 组件（未知图标回退罗盘）。 */
 const SOURCE_ICONS: Record<string, NavIcon> = {
   flame: Flame,
@@ -41,17 +37,6 @@ const DEFAULT_SOURCES: SubscribeSourceEntry[] = [
   { key: 'dsh', label: 'DSH 插件', icon: 'puzzle', sort: 40 },
 ];
 
-/** 根据推荐源的 platform 和标题推断细分类。 */
-function inferCategory(item: RecommendedFeedEntry): Exclude<Category, '全部'> {
-  if (item.platform === 'ai') return 'AI';
-  if (item.platform === 'tech') return '科技';
-  if (item.url.includes('github.com') || item.title.toLowerCase().includes('trending')) return '开源';
-  if (/36氪|热榜|新闻|日报|晚报/.test(item.title)) return '新闻热点';
-  if (/独立|变现|ezindie/.test(item.title)) return '独立开发';
-  if (item.platform === 'bilibili') return '科技';
-  return '独立开发';
-}
-
 const PLATFORM_BADGE: Record<string, { label: string; className: string }> = {
   ai: { label: 'AI', className: 'border-purple-400/40 bg-purple-400/10 text-purple-500 dark:text-purple-300' },
   bilibili: { label: 'B站', className: 'border-sky-400/40 bg-sky-400/10 text-sky-600 dark:text-sky-300' },
@@ -59,10 +44,6 @@ const PLATFORM_BADGE: Record<string, { label: string; className: string }> = {
   tech: { label: '科技', className: 'border-teal-400/40 bg-teal-400/10 text-teal-600 dark:text-teal-300' },
   rss: { label: 'RSS', className: 'border-border bg-secondary text-secondary-foreground' },
 };
-
-function categoryOf(item: RecommendedFeedEntry): Exclude<Category, '全部'> {
-  return inferCategory(item);
-}
 
 export interface DiscoverPageProps {
   /** 进入时的子 tab key（/discover?tab=github 等）；缺省第一个来源。 */
@@ -76,7 +57,6 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
   const [subscribedUrls, setSubscribedUrls] = useState<Set<string>>(new Set());
   const [feedIdByUrl, setFeedIdByUrl] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
-  const [category, setCategory] = useState<Category>('全部');
   const [subscribingUrl, setSubscribingUrl] = useState<string | null>(null);
   // 用户订阅偏好：sourceKey → 子类 key 列表（空 = 全订）
   const [prefs, setPrefs] = useState<Record<string, string[]>>({});
@@ -186,87 +166,11 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
     }
   }, []);
 
-  const filtered = useMemo(
-    () => (category === '全部' ? recommended : recommended.filter((r) => categoryOf(r) === category)),
-    [recommended, category],
+  // 展示口径 = 已订阅（RSS 卡片只出订阅的博主；发现/新增走右上角加号）
+  const subscribedFeeds = useMemo(
+    () => recommended.filter((r) => subscribedUrls.has(r.url)),
+    [recommended, subscribedUrls],
   );
-
-  const counts = useMemo(() => {
-    const map = new Map<Category, number>();
-    for (const item of recommended) {
-      const cat = categoryOf(item);
-      map.set(cat, (map.get(cat) ?? 0) + 1);
-    }
-    return map;
-  }, [recommended]);
-
-  // 热点平台 / GitHub 分类勾选（空 = 全订）
-  const hotPlatformFilter = prefs.hot?.length ? prefs.hot : undefined;
-  const githubCategoryFilter = prefs.github?.length ? prefs.github : undefined;
-  const navPicks = navExt.picks ?? [];
-  const openPicker = useCallback(() => {
-    const prefKey = subTab === 'github' ? 'github' : subTab === 'hot' ? 'hot' : '';
-    setDraftKeys(prefKey ? prefs[prefKey] ?? [] : []);
-    setPickerOpen(true);
-  }, [subTab, prefs]);
-
-  const feedCards = (items: RecommendedFeedEntry[]) => {
-    if (loading) {
-      return (
-        <div className="flex min-h-[40vh] items-center justify-center">
-          <span className="gov-pulse-dot h-2 w-2 rounded-full bg-primary" aria-label="加载中" />
-        </div>
-      );
-    }
-    if (items.length === 0) {
-      return (
-        <div className="rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center">
-          <p className="text-sm font-medium text-foreground">这个分类暂时没有推荐</p>
-          <p className="mt-2 text-xs text-muted-foreground">换个分类看看，或者点右上角加号订阅你自己的博主。</p>
-        </div>
-      );
-    }
-    return (
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-        {items.map((item) => {
-          const badge = PLATFORM_BADGE[item.platform ?? 'rss'] ?? PLATFORM_BADGE.rss;
-          const subscribed = subscribedUrls.has(item.url);
-          const busy = subscribingUrl === item.url;
-          return (
-            <div
-              key={item.url}
-              className="flex flex-col gap-2.5 rounded-2xl border border-border bg-card p-4 transition-shadow hover:shadow-sm"
-            >
-              <div className="flex items-start gap-2.5">
-                <span className={cn('inline-flex shrink-0 items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold', badge.className)}>
-                  {badge.label}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">{item.title}</span>
-              </div>
-              <p className="line-clamp-2 min-h-[34px] text-[11.5px] leading-relaxed text-muted-foreground">{item.description}</p>
-              <div className="mt-auto">
-                {subscribed ? (
-                  <span className="inline-flex items-center gap-1 text-[11px] font-medium text-success">
-                    <Check className="h-3 w-3" aria-hidden="true" /> 已订阅
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void subscribe(item)}
-                    className="inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-3.5 py-1.5 text-[11.5px] font-medium text-primary transition-all duration-150 hover:bg-primary/20 active:scale-[0.97] disabled:opacity-50"
-                  >
-                    {busy ? <RefreshCw className="h-3 w-3 animate-spin" aria-hidden="true" /> : <Plus className="h-3 w-3" aria-hidden="true" />}
-                    {busy ? '订阅中…' : '订阅'}
-                  </button>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
 
   const trendingView = (channel: 'news' | 'github' | 'dsh') => (
     <Suspense
@@ -279,34 +183,12 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
       <TrendingConsole
         embedded
         initialHotTab={channel}
-        platformFilter={subTab === 'hot' ? hotPlatformFilter : undefined}
-        categoryFilter={subTab === 'github' ? githubCategoryFilter : undefined}
+        platformFilter={subTab === 'hot' ? prefs.hot?.length ? prefs.hot : undefined : undefined}
+        categoryFilter={subTab === 'github' ? prefs.github?.length ? prefs.github : undefined : undefined}
         onNavUpdate={handleNavUpdate}
       />
     </Suspense>
   );
-
-  // RSS 二级分类 chips（紧贴一级下方，由统一导航渲染）
-  const rssSecondary = CATEGORY_ORDER.map((cat) => {
-    const n = cat === '全部' ? recommended.length : counts.get(cat) ?? 0;
-    if (cat !== '全部' && n === 0) return null;
-    return (
-      <button
-        key={cat}
-        type="button"
-        onClick={() => setCategory(cat)}
-        className={cn(
-          'flex h-8 shrink-0 items-center rounded-full border px-3 text-xs font-medium transition-colors duration-150',
-          category === cat
-            ? 'border-primary/40 bg-primary/10 text-primary'
-            : 'border-border bg-card text-muted-foreground hover:text-foreground',
-        )}
-      >
-        {cat}
-        {n > 0 ? <span className="ml-1 opacity-50">{n}</span> : null}
-      </button>
-    );
-  });
 
   // 加号面板：按当前来源渲染可订阅项（勾选保存在插件本地库）
   const pickerTitle =
@@ -338,7 +220,7 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
 
   return (
     <div className={subTab === 'rss' ? 'min-h-screen bg-background' : 'flex min-h-screen flex-col bg-background'}>
-      {/* 通道视图（热点/GitHub/DSH）满幅贴边贴底；RSS 发现流保留窄容器网格 */}
+      {/* 通道视图（热点/GitHub/DSH）满幅贴边贴底；RSS 订阅流保留窄容器网格 */}
       <main
         className={
           subTab === 'rss'
@@ -376,17 +258,17 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
               ) : null}
             </>
           }
-          secondary={subTab === 'rss' ? rssSecondary : navExt.secondary}
+          secondary={subTab === 'rss' ? null : navExt.secondary}
           stats={subTab === 'rss' ? null : navExt.stats}
         />
 
         {subTab === 'hot' ? (
-          // 热点新闻：平台榜单（插件自采 trend_radar_items + 中台补充渠道，30 分钟一轮；按订阅平台过滤）
+          // 热点新闻：平台榜单（按订阅平台过滤；勾选入口在加号面板）
           trendingView('news')
         ) : null}
 
         {subTab === 'github' ? (
-          // GitHub：中台 GitHub 趋势仓库通道（分类 pills 按订阅过滤）
+          // GitHub：中台 GitHub 趋势仓库通道（分类按订阅过滤）
           trendingView('github')
         ) : null}
 
@@ -395,7 +277,25 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
           trendingView('dsh')
         ) : null}
 
-        {subTab === 'rss' ? feedCards(filtered) : null}
+        {subTab === 'rss' ? (
+          <>
+            {feedCards(subscribedFeeds)}
+            {subscribedFeeds.length > 0 ? (
+              <p className="mt-4 text-[11.5px] text-muted-foreground">
+                想加新博主？点右上角
+                <button
+                  type="button"
+                  onClick={openPicker}
+                  className="mx-1 inline-flex h-6 w-6 items-center justify-center rounded-full border border-primary/40 bg-primary/10 align-middle text-primary"
+                  aria-label="订阅博主"
+                >
+                  <Plus aria-hidden="true" className="h-3 w-3" />
+                </button>
+                订阅。
+              </p>
+            ) : null}
+          </>
+        ) : null}
 
         {!['hot', 'rss', 'github', 'dsh'].includes(subTab) ? (
           // 配置化新增的来源：内容视图按 key 渐进接入
