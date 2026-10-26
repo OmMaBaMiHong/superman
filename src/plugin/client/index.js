@@ -122,7 +122,8 @@ window.__ModuleLoader__.load({
             h('button', { className: 'sm-cmd-btn sm-open-btn', onClick: openWorkbench }, '↗ 独立窗口'))),
         // ?host=dsh：DSH Web 客户端（http 源）里 iframe 无法自证宿主身份，
         // 显式标记后 H5 启用免登录通道与面板内导航（dsh-app:// 桌面壳靠协议名自证，无需参数）。
-        h('iframe', { className: 'sm-page-frame', src: '/s/app?host=dsh', title: PANEL_LABEL }))
+        // ?v=时间戳：每次打开面板都强制拉最新页面（dsh-app 转发层有缓存，不带参数会吃到旧构建）
+        h('iframe', { className: 'sm-page-frame', src: '/s/app?host=dsh&v=' + Date.now(), title: PANEL_LABEL }))
     }
 
     function apply(ctx) {
