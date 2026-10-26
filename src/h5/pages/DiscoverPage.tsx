@@ -172,6 +172,52 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
     [recommended, subscribedUrls],
   );
 
+  // RSS 分类标签（按已订阅博主推断分类，筛选订阅流）
+  const RSS_CATS = ['全部', 'AI', '科技', '开源', '新闻热点', '独立开发'] as const;
+  type RssCat = (typeof RSS_CATS)[number];
+  function inferRssCat(item: RecommendedFeedEntry): Exclude<RssCat, '全部'> {
+    if (item.platform === 'ai') return 'AI';
+    if (item.platform === 'tech') return '科技';
+    if (item.url.includes('github.com') || item.title.toLowerCase().includes('trending')) return '开源';
+    if (/36氪|热榜|新闻|日报|晚报/.test(item.title)) return '新闻热点';
+    if (/独立|变现|ezindie/.test(item.title)) return '独立开发';
+    if (item.platform === 'bilibili') return '科技';
+    return '独立开发';
+  }
+  const [rssCat, setRssCat] = useState<RssCat>('全部');
+  const rssList = useMemo(
+    () => (rssCat === '全部' ? subscribedFeeds : subscribedFeeds.filter((r) => inferRssCat(r) === rssCat)),
+    [subscribedFeeds, rssCat],
+  );
+  const rssCounts = useMemo(() => {
+    const map = new Map<RssCat, number>();
+    for (const item of subscribedFeeds) {
+      const cat = inferRssCat(item);
+      map.set(cat, (map.get(cat) ?? 0) + 1);
+    }
+    return map;
+  }, [subscribedFeeds]);
+  const rssSecondary = RSS_CATS.map((cat) => {
+    const n = cat === '全部' ? subscribedFeeds.length : rssCounts.get(cat) ?? 0;
+    if (cat !== '全部' && n === 0) return null;
+    return (
+      <button
+        key={cat}
+        type="button"
+        onClick={() => setRssCat(cat)}
+        className={cn(
+          'flex h-8 shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-3 text-xs font-medium transition-colors duration-150',
+          rssCat === cat
+            ? 'border-primary/40 bg-primary/10 text-primary'
+            : 'border-border bg-card text-muted-foreground hover:text-foreground',
+        )}
+      >
+        {cat}
+        {n > 0 ? <span className="font-mono text-[10px] tabular-nums opacity-50">{n}</span> : null}
+      </button>
+    );
+  });
+
   // 订阅管理加号：打开当前来源的勾选面板（热点/GitHub 带草稿态，RSS 即时生效）
   const openPicker = useCallback(() => {
     const prefKey = subTab === 'github' ? 'github' : subTab === 'hot' ? 'hot' : '';
@@ -335,7 +381,7 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
               ) : null}
             </>
           }
-          secondary={subTab === 'rss' ? null : navExt.secondary}
+          secondary={subTab === 'rss' ? rssSecondary : navExt.secondary}
           stats={subTab === 'rss' ? null : navExt.stats}
         />
 
@@ -356,7 +402,7 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
 
         {subTab === 'rss' ? (
           <>
-            {feedCards(subscribedFeeds)}
+            {feedCards(rssList)}
             {subscribedFeeds.length > 0 ? (
               <p className="mt-4 text-[11.5px] text-muted-foreground">
                 想加新博主？点右上角

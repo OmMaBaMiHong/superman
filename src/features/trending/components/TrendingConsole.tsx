@@ -771,54 +771,138 @@ export default function TrendingConsole({
   }, [allPlatforms, platformFilter]);
 
   // 处理器经 ref 供导航上报 effect 使用：函数本体逐渲染重建，进依赖会导致每次渲染重复上报
-  const navHandlersRef = useRef({ scrollToPlatform, handleSyncNow, switchRepoCat, load, repoCat });
-  navHandlersRef.current = { scrollToPlatform, handleSyncNow, switchRepoCat, load, repoCat };
+  const navHandlersRef = useRef({
+    scrollToPlatform,
+    handleSyncNow,
+    switchRepoCat,
+    switchDshCat,
+    load,
+    repoCat,
+    dshCats,
+    dshCat,
+    repoState,
+  });
+  navHandlersRef.current = {
+    scrollToPlatform,
+    handleSyncNow,
+    switchRepoCat,
+    switchDshCat,
+    load,
+    repoCat,
+    dshCats,
+    dshCat,
+    repoState,
+  };
 
   // 嵌入态：二级 pills / 统计 / 动作上报给订阅页统一导航渲染（几何由 SubscribeTabs 统一管）
   useEffect(() => {
     if (!embedded || !onNavUpdate) return;
-    const handlers = navHandlersRef.current;
+    const h = navHandlersRef.current;
+    const pill = (
+      active: boolean,
+      onClick: () => void,
+      content: ReactNode,
+    ) => (
+      <button
+        type="button"
+        role="tab"
+        aria-selected={active}
+        onClick={onClick}
+        className={cn(
+          'flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-xs font-medium transition-colors duration-150',
+          active
+            ? 'border-primary/40 bg-primary/10 text-primary'
+            : 'border-border text-muted-foreground hover:text-foreground',
+        )}
+      >
+        {content}
+      </button>
+    );
+
+    let secondary: ReactNode = null;
+    let stats: string | undefined = undefined;
+    if (hotTab === 'news') {
+      secondary =
+        platforms.length > 0 ? (
+          <>
+            {platforms.map((group, index) =>
+              pill(
+                activePlatform === index,
+                () => h.scrollToPlatform(index),
+                <>
+                  {group.platformName}
+                  <span className="font-mono text-[10px] tabular-nums opacity-60">{group.items.length}</span>
+                </>,
+              ),
+            )}
+          </>
+        ) : null;
+      stats = data
+        ? `${data.date} · ${platforms.reduce((sum, group) => sum + group.items.length, 0)} 条`
+        : undefined;
+    } else if (hotTab === 'github' && h.repoState) {
+      const cats = h.repoState.categories.filter(
+        (cat) => !categoryFilter || categoryFilter.length === 0 || categoryFilter.includes(cat.key),
+      );
+      secondary = (
+        <>
+          {pill(h.repoCat === 'all', () => h.switchRepoCat('all'), (
+            <>
+              全部
+              <span className="font-mono text-[10px] tabular-nums opacity-60">{h.repoState.grandTotal}</span>
+            </>
+          ))}
+          {cats.map((cat) =>
+            pill(h.repoCat === cat.key, () => h.switchRepoCat(cat.key), (
+              <>
+                {cat.name}
+                <span className="font-mono text-[10px] tabular-nums opacity-60">{cat.count}</span>
+              </>
+            )),
+          )}
+        </>
+      );
+      stats = `共 ${h.repoState.grandTotal} 个仓库`;
+    } else if (hotTab === 'dsh' && h.dshCats.length > 0) {
+      const dshTotal = h.dshCats.reduce((sum, cat) => sum + cat.pluginCount, 0);
+      secondary = (
+        <>
+          {pill(h.dshCat === 'all', () => h.switchDshCat('all'), (
+            <>
+              全部
+              <span className="font-mono text-[10px] tabular-nums opacity-60">{dshTotal}</span>
+            </>
+          ))}
+          {h.dshCats
+            .filter((cat) => cat.pluginCount > 0)
+            .map((cat) =>
+              pill(h.dshCat === cat.slug, () => h.switchDshCat(cat.slug), (
+                <>
+                  {cat.name}
+                  <span className="font-mono text-[10px] tabular-nums opacity-60">{cat.pluginCount}</span>
+                </>
+              )),
+            )}
+        </>
+      );
+      stats = `共 ${dshTotal} 个插件`;
+    }
+
     onNavUpdate({
       picks:
         hotTab === 'news'
           ? allPlatforms.map((group) => ({ key: group.platform, label: group.platformName }))
-          : hotTab === 'github' && repoState
-            ? repoState.categories.map((cat) => ({ key: cat.key, label: cat.name }))
+          : hotTab === 'github' && h.repoState
+            ? h.repoState.categories.map((cat) => ({ key: cat.key, label: cat.name }))
             : [],
-      secondary:
-        hotTab === 'news' && platforms.length > 0 ? (
-          <>
-            {platforms.map((group, index) => (
-              <button
-                key={group.platform}
-                type="button"
-                role="tab"
-                aria-selected={activePlatform === index}
-                aria-current={activePlatform === index ? 'true' : undefined}
-                onClick={() => handlers.scrollToPlatform(index)}
-                className={cn(
-                  'flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors duration-150',
-                  activePlatform === index
-                    ? 'border-primary/40 bg-primary/10 text-primary'
-                    : 'border-border text-muted-foreground hover:text-foreground',
-                )}
-              >
-                {group.platformName}
-                <span className="font-mono text-[10px] tabular-nums opacity-60">{group.items.length}</span>
-              </button>
-            ))}
-          </>
-        ) : null,
-      stats:
-        hotTab === 'news' && data
-          ? `${data.date} · ${platforms.reduce((sum, group) => sum + group.items.length, 0)} 条`
-          : undefined,
+      secondary,
+      stats,
       actions: (
         <>
           {hotTab === 'news' ? (
             <button
               type="button"
-              onClick={handlers.handleSyncNow}
+              onClick={h.handleSyncNow}
               disabled={syncing}
               aria-label="立即同步热榜"
               title="立即同步热榜数据入仓"
@@ -829,7 +913,13 @@ export default function TrendingConsole({
           ) : null}
           <button
             type="button"
-            onClick={() => (hotTab === 'github' ? handlers.switchRepoCat(handlers.repoCat) : void handlers.load())}
+            onClick={() =>
+              hotTab === 'github'
+                ? h.switchRepoCat(h.repoCat)
+                : hotTab === 'dsh'
+                  ? h.switchDshCat(h.dshCat)
+                  : void h.load()
+            }
             aria-label="刷新"
             className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           >
@@ -841,7 +931,21 @@ export default function TrendingConsole({
     // 卸载/切走时清空宿主导航的二级行
     return () => onNavUpdate?.({});
     // 依赖全部来自组件状态/props（处理器走 ref），父级重渲染不会触发重复上报
-  }, [embedded, onNavUpdate, hotTab, platforms, allPlatforms, data, syncing, activePlatform, repoState]);
+  }, [
+    embedded,
+    onNavUpdate,
+    hotTab,
+    platforms,
+    allPlatforms,
+    data,
+    syncing,
+    activePlatform,
+    repoState,
+    repoCat,
+    dshCats,
+    dshCat,
+    categoryFilter,
+  ]);
 
   return (
     <div className={embedded ? 'flex min-h-0 flex-1 flex-col' : 'flex min-h-screen flex-col'}>
@@ -1027,7 +1131,7 @@ export default function TrendingConsole({
           /* GitHub 仓库：功能类目 chips + 仓库卡片列表 + 滚动分页 */
           <div className="mx-4 sm:mx-6">
           {/* 分类 pill 栏（按用户订阅的分类过滤；订阅后「全部」收起，浏览收敛到订阅集合） */}
-          {repoState && repoState.categories.length > 0 ? (
+          {!embedded && repoState && repoState.categories.length > 0 ? (
             <div className="flex items-center gap-1.5 px-4 pb-2.5 sm:px-6">
               {(!categoryFilter || categoryFilter.length === 0) && (
                 <button
@@ -1101,7 +1205,7 @@ export default function TrendingConsole({
         ) : (
           /* DSH 插件市场：分类 chips + 插件卡片 + 滚动分页 */
           <div className="mx-4 sm:mx-6">
-            {dshCats.some((cat) => cat.pluginCount > 0) ? (
+            {!embedded && dshCats.some((cat) => cat.pluginCount > 0) && (
               <div className="mb-3 flex flex-wrap gap-1.5">
                 <button
                   type="button"
@@ -1133,7 +1237,7 @@ export default function TrendingConsole({
                   </button>
                 ))}
               </div>
-            ) : null}
+            )}
             {dshError ? (
               <div className="rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center">
                 <p className="text-sm font-medium text-foreground">{dshError}</p>
