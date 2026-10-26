@@ -761,7 +761,9 @@ export default function TrendingConsole({
   }, [categoryFilter, repoState, repoCat]);
 
   const platforms = useMemo(() => {
-    if (!platformFilter || platformFilter.length === 0) return allPlatforms;
+    // 订阅制严格口径：platformFilter 为 undefined（独立形态未接订阅制）才展示全量；
+    // 空数组 = 用户一个平台都没勾 → 一条不展示（面板显示订阅引导）。
+    if (platformFilter === undefined) return allPlatforms;
     return allPlatforms.filter((group) => platformFilter.includes(group.platform));
   }, [allPlatforms, platformFilter]);
 
