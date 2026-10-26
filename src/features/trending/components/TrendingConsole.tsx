@@ -854,8 +854,8 @@ export default function TrendingConsole({
       onRefresh = () => h.switchDshCat(h.dshCat);
     }
     onNavUpdate({
-      pills,
-      onPill: (key: string) => {
+      pillGroups: pills.length > 0 ? [pills] : [],
+      onPill: (_groupIndex: number, key: string) => {
         if (hotTab === 'news') {
           const idx = h.platforms.findIndex((group) => group.platform === key);
           if (idx >= 0) h.scrollToPlatform(idx);

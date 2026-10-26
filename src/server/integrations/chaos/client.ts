@@ -468,6 +468,8 @@ export interface ChaosGithubRepo {
   /** 中文描述（LLM 异步回填，未就绪为 null，前端回退英文原文） */
   descriptionZh: string | null;
   topics: string[];
+  /** 中台标签全量（含 gh-xxx / gh-xxx--子类 多级），订阅过滤与级联分类都用它 */
+  tags: string[];
   category: string;
   categoryName: string;
   url: string | null;
@@ -555,6 +557,7 @@ export function governGithubMaterials(payload: unknown, minStars: number): Chaos
     const { category, categoryName } = classifyGithubRepo(tags, typeof gh.categorySlug === 'string' ? gh.categorySlug : null);
     const repo: ChaosGithubRepo = {
       id: typeof r.id === 'string' ? r.id : title,
+      tags,
       repo: title,
       description: typeof r.summary === 'string' && r.summary.trim() ? r.summary.trim() : null,
       descriptionZh: null,
@@ -586,11 +589,40 @@ export function governGithubMaterials(payload: unknown, minStars: number): Chaos
   return repos;
 }
 
-/** 拉取 GitHub 素材并治理成仓库卡片全量（分页切片由路由层在缓存上做，避免翻页回源）。 */
+/** 拉取 GitHub 素材并治理成仓库卡片全量（分页切片由路由层在缓存上做，避免翻页回源）。
+ *
+ * 采样策略：中台素材接口只支持 id 倒序——只拉「最新 200」会被最后一轮采集的最后一个
+ * topic 独占（实测 200/200 全是同一分类）。因此按 18 个治理分类各拉最新 100，
+ * 再叠加一份全量 200 兜住无治理标签的历史行，去重合并后全类目均衡覆盖。
+ */
 export async function readChaosGithubRepos(
   db: Queryable | null,
-  options: { minStars?: number } = {},
+  options: { minStars?: number; tags?: string[] } = {},
 ): Promise<ChaosResult<ChaosGithubRepo[]>> {
   const minStars = Math.max(0, Math.floor(options.minStars ?? GITHUB_DEFAULT_MIN_STARS));
-  return degrade(db, '/open/v1/materials?limit=200&junk=false', (payload) => governGithubMaterials(payload, minStars));
+  const config = await readPlatformConfig(db ?? null);
+  if (!config) return { data: null, status: 'unconfigured' };
+  // 订阅制：传了 tags 就只按勾选的标签拉取；未传 = 全量（管理侧用）
+  const jobs: Array<string | null> =
+    options.tags && options.tags.length > 0 ? [...options.tags] : [null, ...Object.keys(GITHUB_CATEGORY_NAMES)];
+  const payloads: unknown[] = [];
+  let failures = 0;
+  const fetchOnce = async (tag: string | null): Promise<void> => {
+    const query = new URLSearchParams({ limit: '100', junk: 'false' });
+    if (tag) query.set('tag', tag);
+    try {
+      const payload = await platform<{ items?: unknown[] }>(`/open/v1/materials?${query}`, { open: true }, db);
+      payloads.push(payload);
+    } catch {
+      failures += 1;
+    }
+  };
+  for (let i = 0; i < jobs.length; i += 6) {
+    await Promise.all(jobs.slice(i, i + 6).map((tag) => fetchOnce(tag)));
+  }
+  if (payloads.length === 0) {
+    return { data: null, status: failures > 0 ? 'unavailable' : 'missing' };
+  }
+  const items = payloads.flatMap((payload) => asArray(asRecord(payload).items));
+  return { data: governGithubMaterials({ items }, minStars), status: 'ready' };
 }

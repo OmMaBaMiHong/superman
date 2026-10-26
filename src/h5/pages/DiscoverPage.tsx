@@ -312,13 +312,15 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
   const activeNav: SubscribeNavState =
     subTab === 'rss'
       ? {
-          pills: RSS_CATS.filter((cat) => cat === '全部' || (rssCounts.get(cat) ?? 0) > 0).map((cat) => ({
-            key: cat,
-            label: cat,
-            count: cat === '全部' ? subscribedFeeds.length : rssCounts.get(cat),
-            active: rssCat === cat,
-          })),
-          onPill: (key) => setRssCat(key as RssCat),
+          pillGroups: [
+            RSS_CATS.filter((cat) => cat === '全部' || (rssCounts.get(cat) ?? 0) > 0).map((cat) => ({
+              key: cat,
+              label: cat,
+              count: cat === '全部' ? subscribedFeeds.length : rssCounts.get(cat),
+              active: rssCat === cat,
+            })),
+          ],
+          onPill: (_groupIndex: number, key: string) => setRssCat(key as RssCat),
           onRefresh: () => void load(),
         }
       : navState;
@@ -333,7 +335,7 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
           tabs={sources.map((s) => ({ key: s.key, label: s.label, Icon: SOURCE_ICONS[s.icon] ?? Compass }))}
           active={subTab}
           onChange={setSubTab}
-          pills={activeNav.pills}
+          pillGroups={activeNav.pillGroups}
           onPill={activeNav.onPill}
           stats={activeNav.stats}
           plus={plusButton}
@@ -420,10 +422,10 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
                 <p className="py-6 text-center text-xs text-muted-foreground">插件市场订阅即将开放。</p>
               ) : (
                 <>
-                  {(navState.pills ?? []).length === 0 ? (
+                  {(navState.pillGroups?.[0] ?? []).length === 0 ? (
                     <p className="py-6 text-center text-xs text-muted-foreground">数据加载中…</p>
                   ) : (
-                    (navState.pills ?? []).map((pick) => {
+                    (navState.pillGroups?.[0] ?? []).map((pick) => {
                       const checked = draftKeys.includes(pick.key);
                       return (
                         <button

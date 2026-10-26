@@ -692,11 +692,11 @@ const ROUTES: RouteDef[] = [
     const minStarsRaw = query.get('minStars')?.trim() ?? ''
     const minStarsParsed = minStarsRaw === '' ? Number.NaN : Number(minStarsRaw)
     const minStars = Number.isFinite(minStarsParsed) && minStarsParsed >= 0 ? Math.floor(minStarsParsed) : GITHUB_DEFAULT_MIN_STARS
-    const cacheKey = `chaos_github_repos:${minStars}`
+    const cacheKey = `chaos_github_repos:${minStars}:${subscribedTags.slice().sort().join(',')}`
     const TTL_MS = 10 * 60_000
     let repos: ChaosGithubRepo[] | null = null
     let fetchedAt: string | undefined
-    if (!refresh) {
+    if (!refresh && subscribedTags.length > 0) {
       const cached = readBoardSlices([cacheKey])
       const payload = cached?.[cacheKey]?.payload as { items?: ChaosGithubRepo[]; fetchedAt?: string } | undefined
       const age = payload?.fetchedAt ? Date.now() - new Date(payload.fetchedAt).getTime() : Number.POSITIVE_INFINITY
@@ -705,8 +705,9 @@ const ROUTES: RouteDef[] = [
         fetchedAt = payload.fetchedAt
       }
     }
-    if (!repos) {
-      const result = await readChaosGithubRepos(db as never, { minStars })
+    // 订阅制：未勾选 = 不从中台拉取、不展示（空列表由面板出订阅引导）
+    if (!repos && subscribedTags.length > 0) {
+      const result = await readChaosGithubRepos(db as never, { minStars, tags: subscribedTags })
       if (!result.data) {
         json(res, 200, { ok: true, data: { items: [], total: 0, page, pageSize, hasMore: false, categories: [], status: result.status } })
         return
@@ -715,6 +716,13 @@ const ROUTES: RouteDef[] = [
       fetchedAt = new Date().toISOString()
       writeBoardSlices({ [cacheKey]: { items: repos, fetchedAt } })
     }
+    // 订阅制：只展示/拉取用户勾选的 GitHub 标签（user_source_prefs source='github'）。
+    // 未勾选 = 不从中台拉取、不展示（空列表由面板出订阅引导）。
+    const prefRows = await db.query(
+      `SELECT pref_key FROM user_source_prefs WHERE user_id = $1 AND source_key = 'github'`,
+      [session.userId],
+    )
+    const subscribedTags = prefRows.rows.map((row) => String(row.pref_key)).filter((key) => key !== '')
     // 功能类目统计（治理菜单）基于全量，分页过滤只作用于 items
     const counter = new Map<string, { key: string; name: string; count: number }>()
     for (const repo of repos) {
@@ -723,13 +731,43 @@ const ROUTES: RouteDef[] = [
       counter.set(repo.category, hit)
     }
     const categories = [...counter.values()].sort((a, b) => b.count - a.count)
-    const filtered = category === 'all' ? repos : repos.filter((r) => r.category === category)
+    const matched = subscribedTags.length === 0
+      ? []
+      : repos.filter((r) => r.tags.some((tag) => subscribedTags.includes(tag)))
+    const filtered = category === 'all' ? matched : matched.filter((r) => r.tags.includes(category))
     const start = (page - 1) * pageSize
     const paged = filtered.slice(start, start + pageSize)
     // 中文描述：缓存命中直接贴；缺失的响应后异步回填（本轮受理数随响应告知，前端单次补拉一次）
     const { items, pending } = applyZhDescriptions(paged)
     const translating = scheduleGhTranslation(db, session?.userId, pending)
-    json(res, 200, { ok: true, data: { items, total: filtered.length, grandTotal: repos.length, page, pageSize, hasMore: start + pageSize < filtered.length, categories, fetchedAt, translating } })
+    // 二级子分类（选中一级后由 SubscribeTabs 级联展示）：从匹配仓库的 tags 归纳
+    const childCategories = new Map<string, { key: string; name: string; count: number }>()
+    if (category !== 'all') {
+      for (const repo of matched) {
+        for (const tag of repo.tags) {
+          if (!tag.startsWith(`${category}--`) || tag === category) continue
+          const child = childCategories.get(tag) ?? { key: tag, name: tag.split('--').pop() ?? tag, count: 0 }
+          child.count += 1
+          childCategories.set(tag, child)
+        }
+      }
+    }
+    json(res, 200, {
+      ok: true,
+      data: {
+        items,
+        total: filtered.length,
+        grandTotal: repos.length,
+        page,
+        pageSize,
+        hasMore: start + pageSize < filtered.length,
+        categories,
+        childCategories: [...childCategories.values()].sort((a, b) => b.count - a.count),
+        subscribedTags,
+        fetchedAt,
+        translating,
+      },
+    })
   }),
   route('GET', '/chaos/channels', async ({ res, db }) => {
     const result = await readChaosChannels(db as never)
