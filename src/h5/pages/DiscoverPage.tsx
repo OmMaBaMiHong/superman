@@ -327,11 +327,7 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
     <div className={subTab === 'rss' ? 'min-h-screen bg-background' : 'flex min-h-screen flex-col bg-background'}>
       {/* 通道视图（热点/GitHub/DSH）满幅贴边贴底；RSS 订阅流保留窄容器网格 */}
       <main
-        className={
-          subTab === 'rss'
-            ? 'mx-auto max-w-5xl px-4 pb-28 pt-4 sm:px-6 md:pb-10'
-            : 'flex min-h-0 flex-1 flex-col px-0 pb-3 pt-4'
-        }
+        className="flex min-h-0 flex-1 flex-col px-0 pb-3 pt-4"
       >
         <SubscribeTabs
           tabs={sources.map((s) => ({ key: s.key, label: s.label, Icon: SOURCE_ICONS[s.icon] ?? Compass }))}
@@ -343,7 +339,7 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
           plus={plusButton}
           sync={subTab === 'hot' && navState.canSync ? { syncing: !!navState.syncing, onSync: navState.onSync! } : null}
           onRefresh={activeNav.onRefresh}
-          className={subTab === 'rss' ? undefined : 'px-4 shrink-0'}
+          className="px-4 shrink-0"
         />
 
         {subTab === 'hot' ? (
