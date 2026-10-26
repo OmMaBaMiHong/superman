@@ -969,9 +969,13 @@ export default function TrendingConsole({
             </div>
           ) : platforms.length === 0 ? (
             <div className="mx-4 rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center sm:mx-6">
-              <p className="text-sm font-medium text-foreground">新闻热榜数据接入中</p>
+              <p className="text-sm font-medium text-foreground">
+                {embedded && platformFilter !== undefined ? '还没有订阅平台' : '新闻热榜数据接入中'}
+              </p>
               <p className="mt-2 text-xs text-muted-foreground">
-                中台资讯源就位后自动展示；GitHub 仓库在「GitHub」tab 查看。
+                {embedded && platformFilter !== undefined
+                  ? '点上方「+」勾选要订阅的平台，榜单会出现在这里。'
+                  : '中台资讯源就位后自动展示；GitHub 仓库在「GitHub」tab 查看。'}
               </p>
             </div>
           ) : (
