@@ -2656,6 +2656,20 @@ export async function listRecommendedFeeds(
   return requestApi('/api/feeds/recommended', undefined, options);
 }
 
+/** 订阅来源（订阅页一级导航，subscribe_sources 表下发）。 */
+export interface SubscribeSourceEntry {
+  key: string;
+  label: string;
+  icon: string;
+  sort: number;
+}
+
+export async function listSubscribeSources(
+  options?: RequestApiOptions,
+): Promise<SubscribeSourceEntry[]> {
+  return requestApi('/api/subscribe/sources', undefined, options);
+}
+
 /** 送回审批台：archived → candidate（阅读器「送审批」）。 */
 export async function requeueGovernanceItem(
   id: string,

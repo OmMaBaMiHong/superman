@@ -1550,6 +1550,14 @@ const ROUTES: RouteDef[] = [
     }
   }),
 
+  // 订阅来源配置：订阅页一级导航数据驱动（subscribe_sources 表，新增来源插行即可）
+  route('GET', '/subscribe/sources', async ({ res, db }) => {
+    const { rows } = await db.query(
+      `SELECT key, label, icon, sort FROM subscribe_sources WHERE enabled = 1 ORDER BY sort ASC`,
+    )
+    json(res, 200, { ok: true, data: { items: rows } })
+  }),
+
   route('GET', '/feeds/recommended', async ({ res, db }) => {
     const { rows: rawBuiltinRows } = await db.query(
       `

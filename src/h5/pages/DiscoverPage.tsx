@@ -1,15 +1,17 @@
 'use client';
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, Flame, Github, Plus, Puzzle, RefreshCw, Rss } from 'lucide-react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Check, Compass, Flame, Github, Plus, Puzzle, RefreshCw, Rss } from 'lucide-react';
 import {
   createFeed,
   listRecommendedFeeds,
   listFeedItems,
+  listSubscribeSources,
   type RecommendedFeedEntry,
+  type SubscribeSourceEntry,
 } from '@/lib/api/apiClient';
 import { cn } from '@/lib/utils';
-import SubscribeTabs from '../components/SubscribeTabs';
+import SubscribeTabs, { type NavIcon } from '../components/SubscribeTabs';
 
 const TrendingConsole = lazy(() => import('@/features/trending/components/TrendingConsole'));
 
@@ -17,14 +19,23 @@ type Category = '全部' | 'AI' | '科技' | '开源' | '新闻热点' | '独立
 
 const CATEGORY_ORDER: Category[] = ['全部', 'AI', '科技', '开源', '新闻热点', '独立开发'];
 
-/** 订阅页一级子 tab：热点新闻 / RSS 订阅 / GitHub / DSH 插件。 */
-type SubTab = 'hot' | 'rss' | 'github' | 'dsh';
+/** 一级来源图标注册表：subscribe_sources.icon → lucide 组件（未知图标回退罗盘）。 */
+const SOURCE_ICONS: Record<string, NavIcon> = {
+  flame: Flame,
+  rss: Rss,
+  github: Github,
+  puzzle: Puzzle,
+  bell: Rss,
+  zap: Flame,
+  newspaper: Rss,
+};
 
-const SUB_TABS: Array<{ key: SubTab; label: string; Icon: typeof Flame }> = [
-  { key: 'hot', label: '热点新闻', Icon: Flame },
-  { key: 'rss', label: 'RSS 订阅', Icon: Rss },
-  { key: 'github', label: 'GitHub', Icon: Github },
-  { key: 'dsh', label: 'DSH 插件', Icon: Puzzle },
+/** 数据库不可用/无配置时的兜底来源（与 0016 迁移种子一致）。 */
+const DEFAULT_SOURCES: SubscribeSourceEntry[] = [
+  { key: 'hot', label: '热点新闻', icon: 'flame', sort: 10 },
+  { key: 'rss', label: 'RSS 订阅', icon: 'rss', sort: 20 },
+  { key: 'github', label: 'GitHub', icon: 'github', sort: 30 },
+  { key: 'dsh', label: 'DSH 插件', icon: 'puzzle', sort: 40 },
 ];
 
 /** 根据推荐源的 platform 和标题推断细分类。 */
@@ -51,28 +62,36 @@ function categoryOf(item: RecommendedFeedEntry): Exclude<Category, '全部'> {
 }
 
 export interface DiscoverPageProps {
-  /** 进入时的子 tab（/discover?tab=hot|github|dsh）；缺省 RSS 发现流。 */
-  initialTab?: 'hot' | 'github' | 'dsh';
+  /** 进入时的子 tab key（/discover?tab=github 等）；缺省第一个来源。 */
+  initialTab?: string;
 }
 
 export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
-  // 工作台点进来默认落在热点新闻（订阅的第一来源）
-  const [subTab, setSubTab] = useState<SubTab>(initialTab ?? 'hot');
+  const [sources, setSources] = useState<SubscribeSourceEntry[]>(DEFAULT_SOURCES);
+  const [subTab, setSubTab] = useState<string>(initialTab ?? DEFAULT_SOURCES[0]?.key ?? 'hot');
   const [recommended, setRecommended] = useState<RecommendedFeedEntry[]>([]);
   const [subscribedUrls, setSubscribedUrls] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [category, setCategory] = useState<Category>('全部');
   const [subscribingUrl, setSubscribingUrl] = useState<string | null>(null);
+  // 通道视图（热点控制台等）上报给统一导航的二级内容/统计/动作
+  const [navExt, setNavExt] = useState<{ secondary?: ReactNode; stats?: ReactNode; actions?: ReactNode }>({});
+  const handleNavUpdate = useCallback(
+    (next: { secondary?: ReactNode; stats?: ReactNode; actions?: ReactNode }) => setNavExt(next),
+    [],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [rec, feeds] = await Promise.all([
+      const [rec, feeds, src] = await Promise.all([
         listRecommendedFeeds({ notifyOnError: false }),
         listFeedItems({ notifyOnError: false }),
+        listSubscribeSources({ notifyOnError: false }).catch(() => DEFAULT_SOURCES),
       ]);
       setRecommended(rec);
       setSubscribedUrls(new Set(feeds.items.map((f) => f.url)));
+      if (src.length > 0) setSources(src);
     } catch {
       // 静默：保持已有状态
     } finally {
@@ -83,6 +102,11 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // 切到非通道视图时清掉通道上报的二级内容（避免残留）
+  useEffect(() => {
+    if (subTab === 'rss') setNavExt({});
+  }, [subTab]);
 
   const subscribe = useCallback(async (item: RecommendedFeedEntry) => {
     setSubscribingUrl(item.url);
@@ -176,9 +200,31 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
         </div>
       }
     >
-      <TrendingConsole embedded initialHotTab={channel} />
+      <TrendingConsole embedded initialHotTab={channel} onNavUpdate={handleNavUpdate} />
     </Suspense>
   );
+
+  // RSS 二级分类 chips（紧贴一级下方，由统一导航渲染）
+  const rssSecondary = CATEGORY_ORDER.map((cat) => {
+    const n = cat === '全部' ? recommended.length : counts.get(cat) ?? 0;
+    if (cat !== '全部' && n === 0) return null;
+    return (
+      <button
+        key={cat}
+        type="button"
+        onClick={() => setCategory(cat)}
+        className={cn(
+          'flex h-8 shrink-0 items-center rounded-full border px-3 text-xs font-medium transition-colors duration-150',
+          category === cat
+            ? 'border-primary/40 bg-primary/10 text-primary'
+            : 'border-border bg-card text-muted-foreground hover:text-foreground',
+        )}
+      >
+        {cat}
+        {n > 0 ? <span className="ml-1 opacity-50">{n}</span> : null}
+      </button>
+    );
+  });
 
   return (
     <div className={subTab === 'rss' ? 'min-h-screen bg-background' : 'flex min-h-screen flex-col bg-background'}>
@@ -191,7 +237,7 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
         }
       >
         <SubscribeTabs
-          tabs={SUB_TABS}
+          tabs={sources.map((s) => ({ key: s.key, label: s.label, Icon: SOURCE_ICONS[s.icon] ?? Compass }))}
           active={subTab}
           onChange={setSubTab}
           className={subTab === 'rss' ? undefined : 'px-4 shrink-0'}
@@ -207,30 +253,8 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
               </button>
             ) : null
           }
-          secondary={
-            subTab === 'rss'
-              ? CATEGORY_ORDER.map((cat) => {
-                  const n = cat === '全部' ? recommended.length : counts.get(cat) ?? 0;
-                  if (cat !== '全部' && n === 0) return null;
-                  return (
-                    <button
-                      key={cat}
-                      type="button"
-                      onClick={() => setCategory(cat)}
-                      className={cn(
-                        'flex h-8 items-center rounded-full border px-3 text-xs font-medium transition-colors duration-150',
-                        category === cat
-                          ? 'border-primary/40 bg-primary/10 text-primary'
-                          : 'border-border bg-card text-muted-foreground hover:text-foreground',
-                      )}
-                    >
-                      {cat}
-                      {n > 0 ? <span className="ml-1 opacity-50">{n}</span> : null}
-                    </button>
-                  );
-                })
-              : null
-          }
+          secondary={subTab === 'rss' ? rssSecondary : navExt.secondary}
+          stats={subTab === 'rss' ? null : navExt.stats}
         />
 
         {subTab === 'hot' ? (
@@ -239,16 +263,23 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
         ) : null}
 
         {subTab === 'github' ? (
-          // GitHub：中台 GitHub 趋势仓库通道（star 数 / 分类切换在热点控制台内）
+          // GitHub：中台 GitHub 趋势仓库通道
           trendingView('github')
         ) : null}
 
         {subTab === 'dsh' ? (
-          // DSH 插件：中台插件市场
+          // DSH 插件：中台插件市场通道
           trendingView('dsh')
         ) : null}
 
         {subTab === 'rss' ? feedCards(filtered) : null}
+
+        {!['hot', 'rss', 'github', 'dsh'].includes(subTab) ? (
+          // 配置化新增的来源：内容视图按 key 渐进接入
+          <div className="rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center">
+            <p className="text-sm font-medium text-foreground">「{sources.find((s) => s.key === subTab)?.label ?? subTab}」内容视图即将上线</p>
+          </div>
+        ) : null}
       </main>
     </div>
   );
