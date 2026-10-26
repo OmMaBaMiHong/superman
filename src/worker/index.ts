@@ -316,8 +316,10 @@ export async function fetchAndIngestFeed(
   let inserted = 0;
 
   try {
+    // RSSHub 走内嵌实例：路由冷启动 + 上游 API 链路慢，10s 默认超时不够（内嵌应用自身 30s）
+    const isHubFeed = isRssHubUrl(feed.url)
     const res = await deps.fetchFeedXml(feed.url, {
-      timeoutMs: settings.rssTimeoutMs,
+      timeoutMs: isHubFeed ? Math.max(settings.rssTimeoutMs, 45_000) : settings.rssTimeoutMs,
       userAgent: settings.rssUserAgent,
       etag: feed.etag,
       lastModified: feed.lastModified,
