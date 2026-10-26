@@ -855,6 +855,8 @@ export default function TrendingConsole({
     }
     onNavUpdate({
       pillGroups: pills.length > 0 ? [pills] : [],
+      // picks = 全量可订阅目录（不受订阅过滤）——加号勾选面板用
+      picks: allPlatforms.map((group) => ({ key: group.platform, label: group.platformName })),
       onPill: (_groupIndex: number, key: string) => {
         if (hotTab === 'news') {
           const idx = h.platforms.findIndex((group) => group.platform === key);

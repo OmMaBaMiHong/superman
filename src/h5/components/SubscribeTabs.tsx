@@ -27,6 +27,8 @@ export interface SubscribePill {
 export interface SubscribeNavState {
   /** 每层一组 pills；组内 key 点击经 onPill 回给视图 */
   pillGroups?: Array<SubscribePill[]>;
+  /** 全量可订阅目录（不受订阅过滤，加号勾选面板用） */
+  picks?: SubscribePill[];
   onPill?: (groupIndex: number, key: string) => void;
   /** 最后一组的行尾统计（日期·条数…） */
   stats?: string;
