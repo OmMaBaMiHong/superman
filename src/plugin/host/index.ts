@@ -115,7 +115,7 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
         process.env.SUPERMAN_STORAGE = 'pglite'
         // 嵌入 RSSHub 的配置校验要求 DATABASE_URL 是字符串（PGlite 形态本无 PG 连接）：
         // 给占位串过 zod 校验，并显式锁内存缓存——否则 RSSHub 见到 DATABASE_URL 会真连 PG。
-        if (!process.env.DATABASE_URL) process.env.DATABASE_URL = 'postgresql://pglite@127.0.0.1:5432/unused'
+        if (!process.env.DATABASE_URL) process.env.DATABASE_URL = 'postgresql://pglite:pglite@127.0.0.1:5432/unused'
         process.env.CACHE_TYPE ??= 'memory'
         setQueueDriver(createLocalQueueDriver(pool))
       }
