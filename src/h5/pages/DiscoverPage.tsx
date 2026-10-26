@@ -172,6 +172,13 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
     [recommended, subscribedUrls],
   );
 
+  // 订阅管理加号：打开当前来源的勾选面板（热点/GitHub 带草稿态，RSS 即时生效）
+  const openPicker = useCallback(() => {
+    const prefKey = subTab === 'github' ? 'github' : subTab === 'hot' ? 'hot' : '';
+    setDraftKeys(prefKey ? prefs[prefKey] ?? [] : []);
+    setPickerOpen(true);
+  }, [subTab, prefs]);
+
   const trendingView = (channel: 'news' | 'github' | 'dsh') => (
     <Suspense
       fallback={
