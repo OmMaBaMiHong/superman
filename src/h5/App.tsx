@@ -183,8 +183,8 @@ function App() {
   } else if (route === '/profile') {
     view = <H5ProfilePage username={session.username} />;
   } else if (route === '/discover') {
-    // 订阅页子 tab：hot=热点新闻 / rss=博主 RSS / github=GitHub（缺省落在 RSS 发现流）
-    const subTab = tabParam === 'hot' || tabParam === 'github' ? tabParam : undefined;
+    // 订阅页子 tab：hot=热点新闻 / github=GitHub / dsh=DSH 插件（缺省落在 RSS 发现流）
+    const subTab = tabParam === 'hot' || tabParam === 'github' || tabParam === 'dsh' ? tabParam : undefined;
     view = <H5DiscoverPage initialTab={subTab} />;
   } else {
     view = <H5ReaderPage />;

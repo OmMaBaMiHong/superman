@@ -742,7 +742,7 @@ export default function TrendingConsole({ embedded = false, initialHotTab }: Tre
       <header className={cn('rounded-none border-x-0 border-t-0', embedded ? '' : 'glass-surface-strong sticky top-0 z-10')}>
         {embedded ? (
           /* 嵌入态：单行工具条（平台 pills + 统计 + 动作），高度对齐 RSS 分类行 */
-          <div className="mx-auto flex max-w-6xl items-center gap-1.5 px-4 pt-3 sm:px-6">
+          <div className="mx-auto flex max-w-6xl items-center gap-1.5 px-4 pt-2 sm:px-6">
             {hotTab === 'news' && platforms.length > 0 ? (
               <div
                 ref={pillBarRef}

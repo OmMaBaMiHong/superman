@@ -1,7 +1,7 @@
 'use client';
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, Flame, Github, Plus, RefreshCw, Rss } from 'lucide-react';
+import { Check, Flame, Github, Plus, Puzzle, RefreshCw, Rss } from 'lucide-react';
 import {
   createFeed,
   listRecommendedFeeds,
@@ -9,6 +9,7 @@ import {
   type RecommendedFeedEntry,
 } from '@/lib/api/apiClient';
 import { cn } from '@/lib/utils';
+import SubscribeTabs from '../components/SubscribeTabs';
 
 const TrendingConsole = lazy(() => import('@/features/trending/components/TrendingConsole'));
 
@@ -16,13 +17,14 @@ type Category = '全部' | 'AI' | '科技' | '开源' | '新闻热点' | '独立
 
 const CATEGORY_ORDER: Category[] = ['全部', 'AI', '科技', '开源', '新闻热点', '独立开发'];
 
-/** 订阅页子 tab：热点新闻（平台榜单）/ RSS 订阅（博主发现流）/ GitHub（仓库订阅）。 */
-type SubTab = 'hot' | 'rss' | 'github';
+/** 订阅页一级子 tab：热点新闻 / RSS 订阅 / GitHub / DSH 插件。 */
+type SubTab = 'hot' | 'rss' | 'github' | 'dsh';
 
 const SUB_TABS: Array<{ key: SubTab; label: string; Icon: typeof Flame }> = [
   { key: 'hot', label: '热点新闻', Icon: Flame },
   { key: 'rss', label: 'RSS 订阅', Icon: Rss },
   { key: 'github', label: 'GitHub', Icon: Github },
+  { key: 'dsh', label: 'DSH 插件', Icon: Puzzle },
 ];
 
 /** 根据推荐源的 platform 和标题推断细分类。 */
@@ -49,8 +51,8 @@ function categoryOf(item: RecommendedFeedEntry): Exclude<Category, '全部'> {
 }
 
 export interface DiscoverPageProps {
-  /** 进入时的子 tab（/discover?tab=hot|github）；缺省 RSS 发现流。 */
-  initialTab?: 'hot' | 'github';
+  /** 进入时的子 tab（/discover?tab=hot|github|dsh）；缺省 RSS 发现流。 */
+  initialTab?: 'hot' | 'github' | 'dsh';
 }
 
 export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
@@ -96,11 +98,6 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
   const filtered = useMemo(
     () => (category === '全部' ? recommended : recommended.filter((r) => categoryOf(r) === category)),
     [recommended, category],
-  );
-
-  const githubFeeds = useMemo(
-    () => recommended.filter((r) => categoryOf(r) === '开源' || r.url.includes('github.com')),
-    [recommended],
   );
 
   const counts = useMemo(() => {
@@ -170,102 +167,76 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
     );
   };
 
+  const trendingView = (channel: 'news' | 'github' | 'dsh') => (
+    <Suspense
+      fallback={
+        <div className="flex min-h-[40vh] items-center justify-center">
+          <span className="gov-pulse-dot h-2 w-2 rounded-full bg-primary" aria-label="加载中" />
+        </div>
+      }
+    >
+      <TrendingConsole embedded initialHotTab={channel} />
+    </Suspense>
+  );
+
   return (
     <div className="min-h-screen bg-background">
       <main className="mx-auto max-w-5xl px-4 pb-28 pt-4 sm:px-6 md:pb-10">
-        {/* 子 tab + 分类（RSS 态）同行紧凑排布 */}
-        <div className="mb-3 flex flex-wrap items-center gap-1.5">
-          {SUB_TABS.map(({ key, label, Icon }) => (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              aria-selected={subTab === key}
-              onClick={() => setSubTab(key)}
-              className={cn(
-                'flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors duration-150',
-                'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                subTab === key
-                  ? 'border-primary/40 bg-primary/10 text-primary'
-                  : 'border-border text-muted-foreground hover:text-foreground',
-              )}
-            >
-              <Icon aria-hidden="true" className="h-3.5 w-3.5" />
-              {label}
-            </button>
-          ))}
-          {subTab === 'rss' ? <span aria-hidden="true" className="mx-1 h-4 w-px bg-border" /> : null}
-          {subTab === 'rss'
-            ? CATEGORY_ORDER.map((cat) => {
-                const n = cat === '全部' ? recommended.length : counts.get(cat) ?? 0;
-                if (cat !== '全部' && n === 0) return null;
-                return (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => setCategory(cat)}
-                    className={cn(
-                      'flex h-8 items-center rounded-full border px-3 text-xs font-medium transition-colors duration-150',
-                      category === cat
-                        ? 'border-primary/40 bg-primary/10 text-primary'
-                        : 'border-border bg-card text-muted-foreground hover:text-foreground',
-                    )}
-                  >
-                    {cat}
-                    {n > 0 ? <span className="ml-1 opacity-50">{n}</span> : null}
-                  </button>
-                );
-              })
-            : null}
-          {subTab !== 'hot' ? (
-            <button
-              type="button"
-              onClick={() => void load()}
-              aria-label="刷新"
-              className="ml-auto inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            >
-              <RefreshCw aria-hidden="true" className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
-            </button>
-          ) : null}
-        </div>
+        <SubscribeTabs
+          tabs={SUB_TABS}
+          active={subTab}
+          onChange={setSubTab}
+          actions={
+            subTab !== 'hot' ? (
+              <button
+                type="button"
+                onClick={() => void load()}
+                aria-label="刷新"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                <RefreshCw aria-hidden="true" className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
+              </button>
+            ) : null
+          }
+          secondary={
+            subTab === 'rss'
+              ? CATEGORY_ORDER.map((cat) => {
+                  const n = cat === '全部' ? recommended.length : counts.get(cat) ?? 0;
+                  if (cat !== '全部' && n === 0) return null;
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setCategory(cat)}
+                      className={cn(
+                        'flex h-8 items-center rounded-full border px-3 text-xs font-medium transition-colors duration-150',
+                        category === cat
+                          ? 'border-primary/40 bg-primary/10 text-primary'
+                          : 'border-border bg-card text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      {cat}
+                      {n > 0 ? <span className="ml-1 opacity-50">{n}</span> : null}
+                    </button>
+                  );
+                })
+              : null
+          }
+        />
 
         {subTab === 'hot' ? (
-          // 热点新闻：平台榜单（插件自采的 trend_radar_items，30 分钟一轮）
-          <Suspense
-            fallback={
-              <div className="flex min-h-[40vh] items-center justify-center">
-                <span className="gov-pulse-dot h-2 w-2 rounded-full bg-primary" aria-label="加载中" />
-              </div>
-            }
-          >
-            <TrendingConsole embedded initialHotTab="news" />
-          </Suspense>
+          // 热点新闻：平台榜单（插件自采 trend_radar_items + 中台补充渠道，30 分钟一轮）
+          trendingView('news')
         ) : null}
 
         {subTab === 'github' ? (
-          // GitHub：仓库订阅源 + 中台 GitHub 趋势通道
-          <Suspense
-            fallback={
-              <div className="flex min-h-[40vh] items-center justify-center">
-                <span className="gov-pulse-dot h-2 w-2 rounded-full bg-primary" aria-label="加载中" />
-              </div>
-            }
-          >
-            <div>
-              {feedCards(githubFeeds)}
-              <p className="mt-4 text-[11.5px] text-muted-foreground">
-                实时 Trending 榜单（含 star 与热度排名）在
-                <button
-                  type="button"
-                  onClick={() => setSubTab('hot')}
-                  className="mx-1 text-primary underline-offset-2 hover:underline"
-                >
-                  热点新闻
-                </button>
-                的 GitHub 通道。
-              </p>
-            </div>
-          </Suspense>
+          // GitHub：中台 GitHub 趋势仓库通道（star 数 / 分类切换在热点控制台内）
+          trendingView('github')
+        ) : null}
+
+        {subTab === 'dsh' ? (
+          // DSH 插件：中台插件市场
+          trendingView('dsh')
         ) : null}
 
         {subTab === 'rss' ? feedCards(filtered) : null}
