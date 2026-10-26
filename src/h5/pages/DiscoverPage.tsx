@@ -217,6 +217,16 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
                 );
               })
             : null}
+          {subTab !== 'hot' ? (
+            <button
+              type="button"
+              onClick={() => void load()}
+              aria-label="刷新"
+              className="ml-auto inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            >
+              <RefreshCw aria-hidden="true" className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
+            </button>
+          ) : null}
         </div>
 
         {subTab === 'hot' ? (

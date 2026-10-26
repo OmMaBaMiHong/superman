@@ -740,33 +740,42 @@ export default function TrendingConsole({ embedded = false, initialHotTab }: Tre
     <div className={embedded ? 'flex flex-col' : 'flex min-h-screen flex-col'}>
       {/* 顶部指挥条（嵌入态：隐藏返回/标题与内部通道切换，保留动作与平台 pill 栏） */}
       <header className={cn('rounded-none border-x-0 border-t-0', embedded ? '' : 'glass-surface-strong sticky top-0 z-10')}>
-        <div className={cn('mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 sm:px-6', embedded ? 'h-10 pt-3' : 'h-14')}>
-          {embedded ? (
-            <span className="min-w-0 truncate font-mono text-[11px] tabular-nums text-muted-foreground">
-              {hotTab === 'news' && data ? `${data.date} · ${data.platforms.length} 平台 · ${data.total} 条` : ''}
-            </span>
-          ) : (
-            <div className="flex min-w-0 items-center gap-3">
-              <Link
-                href="/"
-                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:h-9 sm:w-9"
-                aria-label="返回阅读器"
+        {embedded ? (
+          /* 嵌入态：单行工具条（平台 pills + 统计 + 动作），高度对齐 RSS 分类行 */
+          <div className="mx-auto flex max-w-6xl items-center gap-1.5 px-4 pt-3 sm:px-6">
+            {hotTab === 'news' && platforms.length > 0 ? (
+              <div
+                ref={pillBarRef}
+                role="tablist"
+                aria-label="平台切换"
+                className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
               >
-                <ArrowLeft aria-hidden="true" className="h-4 w-4" />
-              </Link>
-              <div className="min-w-0">
-                <h1 className="flex items-center gap-1.5 truncate text-sm font-semibold text-foreground">
-                  <Flame aria-hidden="true" className="h-4 w-4 text-primary" />
-                  热点雷达
-                </h1>
-                <p className="text-[11px] text-muted-foreground">Trend Radar</p>
+                {platforms.map((group, index) => (
+                  <button
+                    key={group.platform}
+                    type="button"
+                    role="tab"
+                    aria-selected={activePlatform === index}
+                    aria-current={activePlatform === index ? 'true' : undefined}
+                    onClick={() => scrollToPlatform(index)}
+                    className={cn(
+                      'flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors duration-150',
+                      activePlatform === index
+                        ? 'border-primary/40 bg-primary/10 text-primary'
+                        : 'border-border text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    {group.platformName}
+                    <span className="font-mono text-[10px] tabular-nums opacity-60">{group.items.length}</span>
+                  </button>
+                ))}
               </div>
-            </div>
-          )}
-          <div className="flex shrink-0 items-center gap-2">
-            {hotTab === 'news' && data && !embedded ? (
-              <span className="hidden font-mono text-[11px] tabular-nums text-muted-foreground sm:inline">
-                {data.date} · {data.platforms.length} 平台 · {data.total} 条
+            ) : (
+              <div className="min-w-0 flex-1" />
+            )}
+            {hotTab === 'news' && data ? (
+              <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+                {data.date} · {data.total} 条
               </span>
             ) : null}
             {hotTab === 'news' ? (
@@ -776,10 +785,7 @@ export default function TrendingConsole({ embedded = false, initialHotTab }: Tre
                 disabled={syncing}
                 aria-label="立即同步热榜"
                 title="立即同步热榜数据入仓"
-                className={cn(
-                  'inline-flex items-center justify-center rounded-full border border-primary/40 bg-primary/10 text-primary transition-colors duration-150 hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50',
-                  embedded ? 'h-8 w-8' : 'h-11 w-11 sm:h-9 sm:w-9',
-                )}
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-primary/40 bg-primary/10 text-primary transition-colors duration-150 hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
               >
                 <RefreshCw aria-hidden="true" className={cn('h-4 w-4', syncing && 'animate-spin')} />
               </button>
@@ -788,15 +794,60 @@ export default function TrendingConsole({ embedded = false, initialHotTab }: Tre
               type="button"
               onClick={() => (hotTab === 'github' ? switchRepoCat(repoCat) : void load())}
               aria-label="刷新"
-              className={cn(
-                'inline-flex items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                embedded ? 'h-8 w-8' : 'h-11 w-11 sm:h-9 sm:w-9',
-              )}
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
               <RefreshCw aria-hidden="true" className="h-4 w-4" />
             </button>
           </div>
-        </div>
+        ) : (
+          <>
+            <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
+              <div className="flex min-w-0 items-center gap-3">
+                <Link
+                  href="/"
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:h-9 sm:w-9"
+                  aria-label="返回阅读器"
+                >
+                  <ArrowLeft aria-hidden="true" className="h-4 w-4" />
+                </Link>
+                <div className="min-w-0">
+                  <h1 className="flex items-center gap-1.5 truncate text-sm font-semibold text-foreground">
+                    <Flame aria-hidden="true" className="h-4 w-4 text-primary" />
+                    热点雷达
+                  </h1>
+                  <p className="text-[11px] text-muted-foreground">Trend Radar</p>
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-3">
+                {hotTab === 'news' && data ? (
+                  <span className="hidden font-mono text-[11px] tabular-nums text-muted-foreground sm:inline">
+                    {data.date} · {data.platforms.length} 平台 · {data.total} 条
+                  </span>
+                ) : null}
+                {hotTab === 'news' ? (
+                  <button
+                    type="button"
+                    onClick={handleSyncNow}
+                    disabled={syncing}
+                    aria-label="立即同步热榜"
+                    title="立即同步热榜数据入仓"
+                    className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-primary/40 bg-primary/10 text-primary transition-colors duration-150 hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50 sm:h-9 sm:w-9"
+                  >
+                    <RefreshCw aria-hidden="true" className={cn('h-4 w-4', syncing && 'animate-spin')} />
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => (hotTab === 'github' ? switchRepoCat(repoCat) : void load())}
+                  aria-label="刷新"
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:h-9 sm:w-9"
+                >
+                  <RefreshCw aria-hidden="true" className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </>
+        )}
 
         {/* 数据通道子 tab：新闻热点 / GitHub / DSH（嵌入态由父级订阅子 tab 控制，不再重复展示） */}
         {!embedded && (
@@ -826,8 +877,8 @@ export default function TrendingConsole({ embedded = false, initialHotTab }: Tre
           </div>
         )}
 
-        {/* 平台 pill 栏（与轨道双向联动，仅新闻热点 tab） */}
-        {hotTab === 'news' && platforms.length > 0 ? (
+        {/* 平台 pill 栏（与轨道双向联动，仅新闻热点 tab；嵌入态已并入上方单行工具条） */}
+        {!embedded && hotTab === 'news' && platforms.length > 0 ? (
           <div
             ref={pillBarRef}
             role="tablist"
