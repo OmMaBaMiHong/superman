@@ -737,12 +737,12 @@ export default function TrendingConsole({ embedded = false, initialHotTab }: Tre
   const platforms = data?.platforms ?? [];
 
   return (
-    <div className={embedded ? 'flex flex-col' : 'flex min-h-screen flex-col'}>
+    <div className={embedded ? 'flex min-h-0 flex-1 flex-col' : 'flex min-h-screen flex-col'}>
       {/* 顶部指挥条（嵌入态：隐藏返回/标题与内部通道切换，保留动作与平台 pill 栏） */}
-      <header className={cn('rounded-none border-x-0 border-t-0', embedded ? '' : 'glass-surface-strong sticky top-0 z-10')}>
+      <header className={cn('rounded-none border-x-0 border-t-0', embedded ? 'shrink-0' : 'glass-surface-strong sticky top-0 z-10')}>
         {embedded ? (
           /* 嵌入态：单行工具条（平台 pills + 统计 + 动作），高度对齐 RSS 分类行 */
-          <div className={cn('flex items-center gap-1.5 px-4 pt-2', embedded ? '' : 'mx-auto max-w-6xl sm:px-6')}>
+          <div className={cn('flex shrink-0 items-center gap-1.5 px-4 pt-2', embedded ? '' : 'mx-auto max-w-6xl sm:px-6')}>
             {hotTab === 'news' && platforms.length > 0 ? (
               <div
                 ref={pillBarRef}
@@ -914,7 +914,7 @@ export default function TrendingConsole({ embedded = false, initialHotTab }: Tre
         ) : null}
       </header>
 
-      <main className={cn('w-full flex-1 px-0', embedded ? 'pb-2 pt-1' : 'mx-auto max-w-6xl pb-28 pt-4 md:pb-8')}>
+      <main className={cn('w-full flex-1 px-0', embedded ? 'flex min-h-0 flex-1 flex-col pb-2 pt-1' : 'mx-auto max-w-6xl pb-28 pt-4 md:pb-8')}>
         {hotTab === 'news' ? (
           loading ? (
             <div className="flex gap-4 px-4 sm:px-6">
@@ -952,13 +952,18 @@ export default function TrendingConsole({ embedded = false, initialHotTab }: Tre
                 'relative flex gap-4 overflow-x-auto px-4 sm:px-6',
                 draggingRail ? 'cursor-grabbing select-none' : 'cursor-grab snap-x snap-mandatory',
                 '[scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+                embedded && 'min-h-0 flex-1 items-stretch',
               )}
             >
               {platforms.map((group) => (
                 <section
                   key={group.platform}
                   data-platform-column={group.platform}
-                  className="gov-card flex h-[calc(100vh-15rem)] max-h-[42rem] w-[88vw] shrink-0 snap-start flex-col overflow-hidden [--gov-accent:var(--glass-border)] md:w-[380px]"
+                  className={cn(
+                    'gov-card flex w-[88vw] shrink-0 snap-start flex-col overflow-hidden [--gov-accent:var(--glass-border)] md:w-[380px]',
+                    // 嵌入态列高随面板撑满（父链 flex 已算好剩余高度）；独立态按视口预算
+                    embedded ? 'h-full min-h-0' : 'h-[calc(100vh-15rem)] max-h-[42rem]',
+                  )}
                 >
                   <header className="flex shrink-0 items-center justify-between border-b border-border px-3.5 py-2.5">
                     <h2 className="truncate text-[13px] font-semibold text-foreground">

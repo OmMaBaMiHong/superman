@@ -181,20 +181,20 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
   );
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className={subTab === 'rss' ? 'min-h-screen bg-background' : 'flex min-h-screen flex-col bg-background'}>
       {/* 通道视图（热点/GitHub/DSH）满幅贴边贴底；RSS 发现流保留窄容器网格 */}
       <main
         className={
           subTab === 'rss'
             ? 'mx-auto max-w-5xl px-4 pb-28 pt-4 sm:px-6 md:pb-10'
-            : 'px-0 pb-3 pt-4'
+            : 'flex min-h-0 flex-1 flex-col px-0 pb-3 pt-4'
         }
       >
         <SubscribeTabs
           tabs={SUB_TABS}
           active={subTab}
           onChange={setSubTab}
-          className={subTab === 'rss' ? undefined : 'px-4'}
+          className={subTab === 'rss' ? undefined : 'px-4 shrink-0'}
           actions={
             subTab !== 'hot' ? (
               <button
