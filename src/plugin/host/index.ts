@@ -113,6 +113,9 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
       } else {
         // pglite：pg-boss 需要真 PG 服务器，切本地队列驱动（流水线执行本就轮询 pipeline_jobs）
         process.env.SUPERMAN_STORAGE = 'pglite'
+        // 嵌入 RSSHub 的配置校验要求 DATABASE_URL 是字符串（PGlite 形态本无 PG 连接），
+        // 给占位串让它过 zod 校验；占位地址不会有任何真实连接。
+        if (!process.env.DATABASE_URL) process.env.DATABASE_URL = 'postgresql://pglite@127.0.0.1:5432/unused'
         setQueueDriver(createLocalQueueDriver(pool))
       }
       log(`存储: ${mode}（${detail}）`)

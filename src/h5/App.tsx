@@ -110,11 +110,10 @@ function App() {
     }
   }, [session, route]);
 
-  // DSH 宿主：首次进入面板总是落「订阅」（/discover），即使用户上次停在其他 tab
+  // DSH 宿主：每次面板打开都强制落「订阅」（/discover，默认热点新闻子 tab）。
+  // iframe 每次打开都是全新加载，不存在"恢复上次位置"的诉求；上次停在哪都拉回订阅。
   useEffect(() => {
     if (HOST !== 'dsh' || !session?.authenticated) return;
-    if (sessionStorage.getItem('superman.discoverLanded')) return;
-    sessionStorage.setItem('superman.discoverLanded', '1');
     if (route !== '/discover') navigateTo('/discover');
   }, [session?.authenticated]);
 
