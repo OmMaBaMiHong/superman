@@ -202,25 +202,6 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
     </button>
   );
 
-  const trendingView = (channel: 'news' | 'github' | 'dsh') => (
-    <Suspense
-      fallback={
-        <div className="flex min-h-[40vh] items-center justify-center">
-          <span className="gov-pulse-dot h-2 w-2 rounded-full bg-primary" aria-label="加载中" />
-        </div>
-      }
-    >
-      <TrendingConsole
-        embedded
-        initialHotTab={channel}
-        // 订阅制：勾了才展示（空数组 = 未勾选任何子类 → 通道显示引导）
-        platformFilter={subTab === 'hot' ? prefs.hot ?? [] : undefined}
-        categoryFilter={subTab === 'github' ? prefs.github ?? [] : undefined}
-        onNavUpdate={handleNavUpdate}
-      />
-    </Suspense>
-  );
-
   // 订阅管理加号：按当前来源渲染可订阅项（勾选保存在插件本地库）
   const pickerTitle =
     subTab === 'hot'
