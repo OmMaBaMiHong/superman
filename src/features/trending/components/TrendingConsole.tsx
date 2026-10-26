@@ -387,9 +387,11 @@ export interface TrendingConsoleProps {
   initialHotTab?: 'news' | 'github' | 'dsh';
   /** 用户订阅的平台 key 白名单（空/缺省 = 全部）；作用于 pills、轨道与统计 */
   platformFilter?: string[];
+  /** 用户订阅的 GitHub 分类 key（空/缺省 = 全部）；作用于分类 pills */
+  categoryFilter?: string[];
   /**
-   * 嵌入态导航上报：把二级 pills / 统计 / 动作交给订阅页统一导航（SubscribeTabs）
-   * 渲染，本组件自身不再画导航。独立形态不传即用自带页头。
+   * 嵌入态导航上报：把二级 pills / 统计 / 动作 / 可订阅项交给订阅页统一导航
+   * （SubscribeTabs）渲染，本组件自身不再画导航。独立形态不传即用自带页头。
    */
   onNavUpdate?: (state: {
     secondary?: ReactNode;
@@ -403,6 +405,7 @@ export default function TrendingConsole({
   embedded = false,
   initialHotTab,
   platformFilter,
+  categoryFilter,
   onNavUpdate,
 }: TrendingConsoleProps = {}) {
   const [data, setData] = useState<TrendRadarToday | null>(null);
@@ -767,7 +770,12 @@ export default function TrendingConsole({
     if (!embedded || !onNavUpdate) return;
     const handlers = navHandlersRef.current;
     onNavUpdate({
-      picks: platforms.map((group) => ({ key: group.platform, label: group.platformName })),
+      picks:
+        hotTab === 'news'
+          ? platforms.map((group) => ({ key: group.platform, label: group.platformName }))
+          : hotTab === 'github' && repoState
+            ? repoState.categories.map((cat) => ({ key: cat.key, label: cat.name }))
+            : [],
       secondary:
         hotTab === 'news' && platforms.length > 0 ? (
           <>
@@ -824,7 +832,7 @@ export default function TrendingConsole({
     // 卸载/切走时清空宿主导航的二级行
     return () => onNavUpdate?.({});
     // 依赖全部来自组件状态/props（处理器走 ref），父级重渲染不会触发重复上报
-  }, [embedded, onNavUpdate, hotTab, platforms, data, syncing, activePlatform]);
+  }, [embedded, onNavUpdate, hotTab, platforms, data, syncing, activePlatform, repoState]);
 
   return (
     <div className={embedded ? 'flex min-h-0 flex-1 flex-col' : 'flex min-h-screen flex-col'}>
@@ -1005,22 +1013,25 @@ export default function TrendingConsole({
         ) : hotTab === 'github' ? (
           /* GitHub 仓库：功能类目 chips + 仓库卡片列表 + 滚动分页 */
           <div className="mx-4 sm:mx-6">
-            {repoState && repoState.categories.length > 0 ? (
-              <div className="mb-3 flex flex-wrap gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => switchRepoCat('all')}
-                  className={cn(
-                    'flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors duration-150',
-                    repoCat === 'all'
-                      ? 'border-primary/40 bg-primary/10 text-primary'
-                      : 'border-border text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  全部
-                  <span className="font-mono text-[10px] tabular-nums opacity-60">{repoState.grandTotal}</span>
-                </button>
-                {repoState.categories.map((cat) => (
+          {/* 分类 pill 栏（按用户订阅的分类过滤；「全部」恒在，供回看全量） */}
+          {repoState && repoState.categories.length > 0 ? (
+            <div className="flex items-center gap-1.5 px-4 pb-2.5 sm:px-6">
+              <button
+                type="button"
+                onClick={() => switchRepoCat('all')}
+                className={cn(
+                  'flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors duration-150',
+                  repoCat === 'all'
+                    ? 'border-primary/40 bg-primary/10 text-primary'
+                    : 'border-border text-muted-foreground hover:text-foreground',
+                )}
+              >
+                全部
+                <span className="font-mono text-[10px] tabular-nums opacity-60">{repoState.grandTotal}</span>
+              </button>
+              {repoState.categories
+                .filter((cat) => !categoryFilter || categoryFilter.length === 0 || categoryFilter.includes(cat.key))
+                .map((cat) => (
                   <button
                     key={cat.key}
                     type="button"
@@ -1036,8 +1047,8 @@ export default function TrendingConsole({
                     <span className="font-mono text-[10px] tabular-nums opacity-60">{cat.count}</span>
                   </button>
                 ))}
-              </div>
-            ) : null}
+            </div>
+          ) : null}
             {repoError ? (
               <div className="rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center">
                 <p className="text-sm font-medium text-foreground">{repoError}</p>

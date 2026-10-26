@@ -4,6 +4,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ReactNo
 import { Check, Compass, Flame, Github, Plus, Puzzle, RefreshCw, Rss } from 'lucide-react';
 import {
   createFeed,
+  deleteFeed,
   listRecommendedFeeds,
   listFeedItems,
   listSubscribePrefs,
@@ -73,6 +74,7 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
   const [subTab, setSubTab] = useState<string>(initialTab ?? DEFAULT_SOURCES[0]?.key ?? 'hot');
   const [recommended, setRecommended] = useState<RecommendedFeedEntry[]>([]);
   const [subscribedUrls, setSubscribedUrls] = useState<Set<string>>(new Set());
+  const [feedIdByUrl, setFeedIdByUrl] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [category, setCategory] = useState<Category>('全部');
   const [subscribingUrl, setSubscribingUrl] = useState<string | null>(null);
@@ -81,7 +83,7 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [draftKeys, setDraftKeys] = useState<string[]>([]);
   const [savingPrefs, setSavingPrefs] = useState(false);
-  // 通道视图（热点控制台等）上报给统一导航的二级内容/统计/动作/可选项
+  // 通道视图（热点控制台等）上报给统一导航的二级内容/统计/动作/可订阅项
   const [navExt, setNavExt] = useState<{
     secondary?: ReactNode;
     stats?: ReactNode;
@@ -115,6 +117,7 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
       ]);
       setRecommended(rec);
       setSubscribedUrls(new Set(feeds.items.map((f) => f.url)));
+      setFeedIdByUrl(new Map(feeds.items.map((f) => [f.url, String((f as { id?: string }).id ?? '')])));
       if (src.length > 0) setSources(src);
       const grouped: Record<string, string[]> = {};
       for (const row of prefRows) {
@@ -149,21 +152,39 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
     }
   }, []);
 
-  const savePrefs = useCallback(
-    async (source: string, keys: string[]) => {
-      setSavingPrefs(true);
+  const unsubscribe = useCallback(
+    async (item: RecommendedFeedEntry) => {
+      const feedId = feedIdByUrl.get(item.url);
+      if (!feedId) return;
+      setSubscribingUrl(item.url);
       try {
-        await saveSubscribePrefs(source, keys);
-        setPrefs((prev) => ({ ...prev, [source]: keys }));
-        setPickerOpen(false);
+        await deleteFeed(feedId);
+        setSubscribedUrls((prev) => {
+          const next = new Set(prev);
+          next.delete(item.url);
+          return next;
+        });
       } catch {
         // apiClient 已统一 toast
       } finally {
-        setSavingPrefs(false);
+        setSubscribingUrl(null);
       }
     },
-    [],
+    [feedIdByUrl],
   );
+
+  const savePrefs = useCallback(async (source: string, keys: string[]) => {
+    setSavingPrefs(true);
+    try {
+      await saveSubscribePrefs(source, keys);
+      setPrefs((prev) => ({ ...prev, [source]: keys }));
+      setPickerOpen(false);
+    } catch {
+      // apiClient 已统一 toast
+    } finally {
+      setSavingPrefs(false);
+    }
+  }, []);
 
   const filtered = useMemo(
     () => (category === '全部' ? recommended : recommended.filter((r) => categoryOf(r) === category)),
@@ -179,13 +200,15 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
     return map;
   }, [recommended]);
 
-  // 热点平台勾选（空 = 全订）
+  // 热点平台 / GitHub 分类勾选（空 = 全订）
   const hotPlatformFilter = prefs.hot?.length ? prefs.hot : undefined;
-  const hotPicks = navExt.picks ?? [];
-  const openHotPicker = useCallback(() => {
-    setDraftKeys(hotPlatformFilter ?? hotPicks.map((p) => p.key));
+  const githubCategoryFilter = prefs.github?.length ? prefs.github : undefined;
+  const navPicks = navExt.picks ?? [];
+  const openPicker = useCallback(() => {
+    const prefKey = subTab === 'github' ? 'github' : subTab === 'hot' ? 'hot' : '';
+    setDraftKeys(prefKey ? prefs[prefKey] ?? [] : []);
     setPickerOpen(true);
-  }, [hotPlatformFilter, hotPicks]);
+  }, [subTab, prefs]);
 
   const feedCards = (items: RecommendedFeedEntry[]) => {
     if (loading) {
@@ -199,7 +222,7 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
       return (
         <div className="rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center">
           <p className="text-sm font-medium text-foreground">这个分类暂时没有推荐</p>
-          <p className="mt-2 text-xs text-muted-foreground">换个分类看看，或者搜索添加你自己的博主。</p>
+          <p className="mt-2 text-xs text-muted-foreground">换个分类看看，或者点右上角加号订阅你自己的博主。</p>
         </div>
       );
     }
@@ -257,6 +280,7 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
         embedded
         initialHotTab={channel}
         platformFilter={subTab === 'hot' ? hotPlatformFilter : undefined}
+        categoryFilter={subTab === 'github' ? githubCategoryFilter : undefined}
         onNavUpdate={handleNavUpdate}
       />
     </Suspense>
@@ -284,6 +308,34 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
     );
   });
 
+  // 加号面板：按当前来源渲染可订阅项（勾选保存在插件本地库）
+  const pickerTitle =
+    subTab === 'hot'
+      ? '订阅热点平台'
+      : subTab === 'rss'
+        ? '订阅博主'
+        : subTab === 'github'
+          ? '订阅 GitHub 分类'
+          : subTab === 'dsh'
+            ? '订阅 DSH 插件'
+            : '订阅';
+  const pickerHint =
+    subTab === 'hot'
+      ? '勾选要看的平台；全部不勾 = 全部订阅。'
+      : subTab === 'rss'
+        ? '点选即订阅/退订，内容自动进入你的阅读流。'
+        : subTab === 'github'
+          ? '勾选关注的分类（如设计与素材）；全部不勾 = 全部分类。'
+          : '插件市场订阅即将开放。';
+
+  const toggleRssFeed = async (item: RecommendedFeedEntry) => {
+    if (subscribedUrls.has(item.url)) {
+      await unsubscribe(item);
+    } else {
+      await subscribe(item);
+    }
+  };
+
   return (
     <div className={subTab === 'rss' ? 'min-h-screen bg-background' : 'flex min-h-screen flex-col bg-background'}>
       {/* 通道视图（热点/GitHub/DSH）满幅贴边贴底；RSS 发现流保留窄容器网格 */}
@@ -301,17 +353,16 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
           className={subTab === 'rss' ? undefined : 'px-4 shrink-0'}
           actions={
             <>
-              {subTab === 'hot' ? (
-                <button
-                  type="button"
-                  onClick={openHotPicker}
-                  aria-label="选择订阅的平台"
-                  title="选择订阅哪些平台"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-primary/40 bg-primary/10 text-primary transition-colors duration-150 hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                >
-                  <Plus aria-hidden="true" className="h-4 w-4" />
-                </button>
-              ) : null}
+              {/* 订阅管理加号：所有来源统一入口，面板内容按来源类型展开 */}
+              <button
+                type="button"
+                onClick={openPicker}
+                aria-label="管理订阅"
+                title="管理订阅"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-primary/40 bg-primary/10 text-primary transition-colors duration-150 hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                <Plus aria-hidden="true" className="h-4 w-4" />
+              </button>
               {navExt.actions}
               {subTab === 'rss' ? (
                 <button
@@ -335,7 +386,7 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
         ) : null}
 
         {subTab === 'github' ? (
-          // GitHub：中台 GitHub 趋势仓库通道
+          // GitHub：中台 GitHub 趋势仓库通道（分类 pills 按订阅过滤）
           trendingView('github')
         ) : null}
 
@@ -357,7 +408,7 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
       {pickerOpen ? (
         <div
           role="dialog"
-          aria-label="选择订阅的子类"
+          aria-label={pickerTitle}
           className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 sm:items-center"
           onClick={() => setPickerOpen(false)}
         >
@@ -365,42 +416,83 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
             className="w-full max-w-md rounded-t-3xl border border-border bg-card p-5 shadow-xl sm:rounded-3xl"
             onClick={(event) => event.stopPropagation()}
           >
-            <p className="text-sm font-semibold text-foreground">订阅热点平台</p>
-            <p className="mt-1 text-[11px] text-muted-foreground">勾选要看的平台；全部不勾 = 全部订阅。</p>
+            <p className="text-sm font-semibold text-foreground">{pickerTitle}</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">{pickerHint}</p>
             <div className="mt-3 max-h-[50vh] space-y-1 overflow-y-auto">
-              {hotPicks.length === 0 ? (
-                <p className="py-6 text-center text-xs text-muted-foreground">数据加载中…</p>
-              ) : (
-                hotPicks.map((pick) => {
-                  const checked = draftKeys.includes(pick.key);
-                  return (
-                    <button
-                      key={pick.key}
-                      type="button"
-                      role="checkbox"
-                      aria-checked={checked}
-                      onClick={() =>
-                        setDraftKeys((prev) =>
-                          prev.includes(pick.key) ? prev.filter((k) => k !== pick.key) : [...prev, pick.key],
-                        )
-                      }
-                      className={cn(
-                        'flex w-full items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-left text-[13px] transition-colors duration-150',
-                        checked ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-foreground hover:bg-secondary/60',
-                      )}
-                    >
-                      <span
+              {subTab === 'rss' ? (
+                loading ? (
+                  <p className="py-6 text-center text-xs text-muted-foreground">加载中…</p>
+                ) : (
+                  recommended.map((item) => {
+                    const subscribed = subscribedUrls.has(item.url);
+                    const busy = subscribingUrl === item.url;
+                    return (
+                      <button
+                        key={item.url}
+                        type="button"
+                        role="checkbox"
+                        aria-checked={subscribed}
+                        disabled={busy}
+                        onClick={() => void toggleRssFeed(item)}
                         className={cn(
-                          'flex h-4 w-4 shrink-0 items-center justify-center rounded border',
-                          checked ? 'border-primary bg-primary text-primary-foreground' : 'border-border',
+                          'flex w-full items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-left text-[13px] transition-colors duration-150',
+                          subscribed ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-foreground hover:bg-secondary/60',
+                          busy && 'opacity-50',
                         )}
                       >
-                        {checked ? <Check aria-hidden="true" className="h-3 w-3" /> : null}
-                      </span>
-                      {pick.label}
-                    </button>
-                  );
-                })
+                        <span
+                          className={cn(
+                            'flex h-4 w-4 shrink-0 items-center justify-center rounded border',
+                            subscribed ? 'border-primary bg-primary text-primary-foreground' : 'border-border',
+                          )}
+                        >
+                          {subscribed ? <Check aria-hidden="true" className="h-3 w-3" /> : null}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate">{item.title}</span>
+                        {subscribed ? <span className="shrink-0 text-[10px] opacity-70">已订阅</span> : null}
+                      </button>
+                    );
+                  })
+                )
+              ) : subTab === 'dsh' ? (
+                <p className="py-6 text-center text-xs text-muted-foreground">插件市场订阅即将开放。</p>
+              ) : (
+                <>
+                  {navPicks.length === 0 ? (
+                    <p className="py-6 text-center text-xs text-muted-foreground">数据加载中…</p>
+                  ) : (
+                    navPicks.map((pick) => {
+                      const checked = draftKeys.includes(pick.key);
+                      return (
+                        <button
+                          key={pick.key}
+                          type="button"
+                          role="checkbox"
+                          aria-checked={checked}
+                          onClick={() =>
+                            setDraftKeys((prev) =>
+                              prev.includes(pick.key) ? prev.filter((k) => k !== pick.key) : [...prev, pick.key],
+                            )
+                          }
+                          className={cn(
+                            'flex w-full items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-left text-[13px] transition-colors duration-150',
+                            checked ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-foreground hover:bg-secondary/60',
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              'flex h-4 w-4 shrink-0 items-center justify-center rounded border',
+                              checked ? 'border-primary bg-primary text-primary-foreground' : 'border-border',
+                            )}
+                          >
+                            {checked ? <Check aria-hidden="true" className="h-3 w-3" /> : null}
+                          </span>
+                          {pick.label}
+                        </button>
+                      );
+                    })
+                  )}
+                </>
               )}
             </div>
             <div className="mt-4 flex justify-end gap-2">
@@ -409,16 +501,18 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
                 onClick={() => setPickerOpen(false)}
                 className="inline-flex h-9 items-center rounded-full border border-border px-4 text-xs text-muted-foreground transition-colors hover:text-foreground"
               >
-                取消
+                {subTab === 'rss' ? '完成' : '取消'}
               </button>
-              <button
-                type="button"
-                disabled={savingPrefs}
-                onClick={() => void savePrefs('hot', draftKeys)}
-                className="inline-flex h-9 items-center rounded-full bg-primary px-5 text-xs font-medium text-primary-foreground transition-all duration-150 hover:opacity-90 disabled:opacity-50"
-              >
-                {savingPrefs ? '保存中…' : '保存'}
-              </button>
+              {subTab !== 'rss' && subTab !== 'dsh' ? (
+                <button
+                  type="button"
+                  disabled={savingPrefs}
+                  onClick={() => void savePrefs(subTab === 'github' ? 'github' : 'hot', draftKeys)}
+                  className="inline-flex h-9 items-center rounded-full bg-primary px-5 text-xs font-medium text-primary-foreground transition-all duration-150 hover:opacity-90 disabled:opacity-50"
+                >
+                  {savingPrefs ? '保存中…' : '保存'}
+                </button>
+              ) : null}
             </div>
           </div>
         </div>
