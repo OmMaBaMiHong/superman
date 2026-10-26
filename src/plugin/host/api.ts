@@ -1558,6 +1558,40 @@ const ROUTES: RouteDef[] = [
     json(res, 200, { ok: true, data: { items: rows } })
   }),
 
+  // 用户订阅偏好：各来源下勾选的子类（空行 = 全订）。RSS 走 feeds 表，不入此表。
+  route('GET', '/subscribe/prefs', async ({ res, query, session, db }) => {
+    const source = query.get('source')?.trim() ?? ''
+    const { rows } = source
+      ? await db.query(
+          `SELECT pref_key AS "prefKey" FROM user_source_prefs WHERE user_id = $1 AND source_key = $2`,
+          [session.userId, source],
+        )
+      : await db.query(
+          `SELECT source_key AS "sourceKey", pref_key AS "prefKey" FROM user_source_prefs WHERE user_id = $1`,
+          [session.userId],
+        )
+    json(res, 200, { ok: true, data: { items: rows } })
+  }),
+  route('PUT', '/subscribe/prefs', async ({ req, res, session, db }) => {
+    const body = (await readJsonBody(req)) as { source?: unknown; keys?: unknown }
+    const source = typeof body.source === 'string' ? body.source.trim() : ''
+    const keys = Array.isArray(body.keys)
+      ? body.keys.filter((k): k is string => typeof k === 'string' && k.trim() !== '').map((k) => k.trim())
+      : null
+    if (!source || keys === null) {
+      json(res, 400, { ok: false, error: { code: 'bad_request', message: 'source 与 keys 必填' } })
+      return
+    }
+    await db.query('DELETE FROM user_source_prefs WHERE user_id = $1 AND source_key = $2', [session.userId, source])
+    for (const key of keys) {
+      await db.query(
+        'INSERT INTO user_source_prefs (user_id, source_key, pref_key) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
+        [session.userId, source, key],
+      )
+    }
+    json(res, 200, { ok: true, data: { source, keys } })
+  }),
+
   route('GET', '/feeds/recommended', async ({ res, db }) => {
     const { rows: rawBuiltinRows } = await db.query(
       `

@@ -6,7 +6,9 @@ import {
   createFeed,
   listRecommendedFeeds,
   listFeedItems,
+  listSubscribePrefs,
   listSubscribeSources,
+  saveSubscribePrefs,
   type RecommendedFeedEntry,
   type SubscribeSourceEntry,
 } from '@/lib/api/apiClient';
@@ -74,24 +76,51 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
   const [loading, setLoading] = useState(true);
   const [category, setCategory] = useState<Category>('全部');
   const [subscribingUrl, setSubscribingUrl] = useState<string | null>(null);
-  // 通道视图（热点控制台等）上报给统一导航的二级内容/统计/动作
-  const [navExt, setNavExt] = useState<{ secondary?: ReactNode; stats?: ReactNode; actions?: ReactNode }>({});
+  // 用户订阅偏好：sourceKey → 子类 key 列表（空 = 全订）
+  const [prefs, setPrefs] = useState<Record<string, string[]>>({});
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [draftKeys, setDraftKeys] = useState<string[]>([]);
+  const [savingPrefs, setSavingPrefs] = useState(false);
+  // 通道视图（热点控制台等）上报给统一导航的二级内容/统计/动作/可选项
+  const [navExt, setNavExt] = useState<{
+    secondary?: ReactNode;
+    stats?: ReactNode;
+    actions?: ReactNode;
+    picks?: Array<{ key: string; label: string }>;
+  }>({});
   const handleNavUpdate = useCallback(
-    (next: { secondary?: ReactNode; stats?: ReactNode; actions?: ReactNode }) => setNavExt(next),
+    (next: {
+      secondary?: ReactNode;
+      stats?: ReactNode;
+      actions?: ReactNode;
+      picks?: Array<{ key: string; label: string }>;
+    }) =>
+      setNavExt((prev) => ({
+        secondary: next.secondary,
+        stats: next.stats,
+        actions: next.actions,
+        picks: next.picks ?? prev.picks,
+      })),
     [],
   );
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [rec, feeds, src] = await Promise.all([
+      const [rec, feeds, src, prefRows] = await Promise.all([
         listRecommendedFeeds({ notifyOnError: false }),
         listFeedItems({ notifyOnError: false }),
         listSubscribeSources({ notifyOnError: false }).catch(() => DEFAULT_SOURCES),
+        listSubscribePrefs({ notifyOnError: false }).catch(() => []),
       ]);
       setRecommended(rec);
       setSubscribedUrls(new Set(feeds.items.map((f) => f.url)));
       if (src.length > 0) setSources(src);
+      const grouped: Record<string, string[]> = {};
+      for (const row of prefRows) {
+        (grouped[row.sourceKey] ??= []).push(row.prefKey);
+      }
+      setPrefs(grouped);
     } catch {
       // 静默：保持已有状态
     } finally {
@@ -120,6 +149,22 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
     }
   }, []);
 
+  const savePrefs = useCallback(
+    async (source: string, keys: string[]) => {
+      setSavingPrefs(true);
+      try {
+        await saveSubscribePrefs(source, keys);
+        setPrefs((prev) => ({ ...prev, [source]: keys }));
+        setPickerOpen(false);
+      } catch {
+        // apiClient 已统一 toast
+      } finally {
+        setSavingPrefs(false);
+      }
+    },
+    [],
+  );
+
   const filtered = useMemo(
     () => (category === '全部' ? recommended : recommended.filter((r) => categoryOf(r) === category)),
     [recommended, category],
@@ -133,6 +178,14 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
     }
     return map;
   }, [recommended]);
+
+  // 热点平台勾选（空 = 全订）
+  const hotPlatformFilter = prefs.hot?.length ? prefs.hot : undefined;
+  const hotPicks = navExt.picks ?? [];
+  const openHotPicker = useCallback(() => {
+    setDraftKeys(hotPlatformFilter ?? hotPicks.map((p) => p.key));
+    setPickerOpen(true);
+  }, [hotPlatformFilter, hotPicks]);
 
   const feedCards = (items: RecommendedFeedEntry[]) => {
     if (loading) {
@@ -200,7 +253,12 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
         </div>
       }
     >
-      <TrendingConsole embedded initialHotTab={channel} onNavUpdate={handleNavUpdate} />
+      <TrendingConsole
+        embedded
+        initialHotTab={channel}
+        platformFilter={subTab === 'hot' ? hotPlatformFilter : undefined}
+        onNavUpdate={handleNavUpdate}
+      />
     </Suspense>
   );
 
@@ -242,23 +300,37 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
           onChange={setSubTab}
           className={subTab === 'rss' ? undefined : 'px-4 shrink-0'}
           actions={
-            subTab !== 'hot' ? (
-              <button
-                type="button"
-                onClick={() => void load()}
-                aria-label="刷新"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              >
-                <RefreshCw aria-hidden="true" className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
-              </button>
-            ) : null
+            <>
+              {subTab === 'hot' ? (
+                <button
+                  type="button"
+                  onClick={openHotPicker}
+                  aria-label="选择订阅的平台"
+                  title="选择订阅哪些平台"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-primary/40 bg-primary/10 text-primary transition-colors duration-150 hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  <Plus aria-hidden="true" className="h-4 w-4" />
+                </button>
+              ) : null}
+              {navExt.actions}
+              {subTab === 'rss' ? (
+                <button
+                  type="button"
+                  onClick={() => void load()}
+                  aria-label="刷新"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors duration-150 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  <RefreshCw aria-hidden="true" className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
+                </button>
+              ) : null}
+            </>
           }
           secondary={subTab === 'rss' ? rssSecondary : navExt.secondary}
           stats={subTab === 'rss' ? null : navExt.stats}
         />
 
         {subTab === 'hot' ? (
-          // 热点新闻：平台榜单（插件自采 trend_radar_items + 中台补充渠道，30 分钟一轮）
+          // 热点新闻：平台榜单（插件自采 trend_radar_items + 中台补充渠道，30 分钟一轮；按订阅平台过滤）
           trendingView('news')
         ) : null}
 
@@ -281,6 +353,76 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
           </div>
         ) : null}
       </main>
+
+      {pickerOpen ? (
+        <div
+          role="dialog"
+          aria-label="选择订阅的子类"
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 sm:items-center"
+          onClick={() => setPickerOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-t-3xl border border-border bg-card p-5 shadow-xl sm:rounded-3xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="text-sm font-semibold text-foreground">订阅热点平台</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">勾选要看的平台；全部不勾 = 全部订阅。</p>
+            <div className="mt-3 max-h-[50vh] space-y-1 overflow-y-auto">
+              {hotPicks.length === 0 ? (
+                <p className="py-6 text-center text-xs text-muted-foreground">数据加载中…</p>
+              ) : (
+                hotPicks.map((pick) => {
+                  const checked = draftKeys.includes(pick.key);
+                  return (
+                    <button
+                      key={pick.key}
+                      type="button"
+                      role="checkbox"
+                      aria-checked={checked}
+                      onClick={() =>
+                        setDraftKeys((prev) =>
+                          prev.includes(pick.key) ? prev.filter((k) => k !== pick.key) : [...prev, pick.key],
+                        )
+                      }
+                      className={cn(
+                        'flex w-full items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-left text-[13px] transition-colors duration-150',
+                        checked ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-foreground hover:bg-secondary/60',
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          'flex h-4 w-4 shrink-0 items-center justify-center rounded border',
+                          checked ? 'border-primary bg-primary text-primary-foreground' : 'border-border',
+                        )}
+                      >
+                        {checked ? <Check aria-hidden="true" className="h-3 w-3" /> : null}
+                      </span>
+                      {pick.label}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPickerOpen(false)}
+                className="inline-flex h-9 items-center rounded-full border border-border px-4 text-xs text-muted-foreground transition-colors hover:text-foreground"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={savingPrefs}
+                onClick={() => void savePrefs('hot', draftKeys)}
+                className="inline-flex h-9 items-center rounded-full bg-primary px-5 text-xs font-medium text-primary-foreground transition-all duration-150 hover:opacity-90 disabled:opacity-50"
+              >
+                {savingPrefs ? '保存中…' : '保存'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -385,14 +385,26 @@ function TrendRadarDetailView({
 export interface TrendingConsoleProps {
   embedded?: boolean;
   initialHotTab?: 'news' | 'github' | 'dsh';
+  /** 用户订阅的平台 key 白名单（空/缺省 = 全部）；作用于 pills、轨道与统计 */
+  platformFilter?: string[];
   /**
    * 嵌入态导航上报：把二级 pills / 统计 / 动作交给订阅页统一导航（SubscribeTabs）
    * 渲染，本组件自身不再画导航。独立形态不传即用自带页头。
    */
-  onNavUpdate?: (state: { secondary?: ReactNode; stats?: string; actions?: ReactNode }) => void;
+  onNavUpdate?: (state: {
+    secondary?: ReactNode;
+    stats?: string;
+    actions?: ReactNode;
+    picks?: Array<{ key: string; label: string }>;
+  }) => void;
 }
 
-export default function TrendingConsole({ embedded = false, initialHotTab, onNavUpdate }: TrendingConsoleProps = {}) {
+export default function TrendingConsole({
+  embedded = false,
+  initialHotTab,
+  platformFilter,
+  onNavUpdate,
+}: TrendingConsoleProps = {}) {
   const [data, setData] = useState<TrendRadarToday | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -740,7 +752,11 @@ export default function TrendingConsole({ embedded = false, initialHotTab, onNav
     scrollToPlatform(nearestPlatformIndex(rail.scrollLeft));
   };
 
-  const platforms = useMemo(() => data?.platforms ?? [], [data]);
+  const platforms = useMemo(() => {
+    const all = data?.platforms ?? [];
+    if (!platformFilter || platformFilter.length === 0) return all;
+    return all.filter((group) => platformFilter.includes(group.platform));
+  }, [data, platformFilter]);
 
   // 处理器经 ref 供导航上报 effect 使用：函数本体逐渲染重建，进依赖会导致每次渲染重复上报
   const navHandlersRef = useRef({ scrollToPlatform, handleSyncNow, switchRepoCat, load, repoCat });
@@ -751,6 +767,7 @@ export default function TrendingConsole({ embedded = false, initialHotTab, onNav
     if (!embedded || !onNavUpdate) return;
     const handlers = navHandlersRef.current;
     onNavUpdate({
+      picks: platforms.map((group) => ({ key: group.platform, label: group.platformName })),
       secondary:
         hotTab === 'news' && platforms.length > 0 ? (
           <>
@@ -775,7 +792,10 @@ export default function TrendingConsole({ embedded = false, initialHotTab, onNav
             ))}
           </>
         ) : null,
-      stats: hotTab === 'news' && data ? `${data.date} · ${data.total} 条` : undefined,
+      stats:
+        hotTab === 'news' && data
+          ? `${data.date} · ${platforms.reduce((sum, group) => sum + group.items.length, 0)} 条`
+          : undefined,
       actions: (
         <>
           {hotTab === 'news' ? (

@@ -2670,6 +2670,32 @@ export async function listSubscribeSources(
   return requestApi('/api/subscribe/sources', undefined, options);
 }
 
+/** 用户订阅偏好行（来源下勾选的子类；空 = 全订）。 */
+export interface SubscribePrefEntry {
+  sourceKey: string;
+  prefKey: string;
+}
+
+export async function listSubscribePrefs(options?: RequestApiOptions): Promise<SubscribePrefEntry[]> {
+  return requestApi('/api/subscribe/prefs', undefined, options);
+}
+
+export async function saveSubscribePrefs(
+  source: string,
+  keys: string[],
+  options?: RequestApiOptions,
+): Promise<void> {
+  await requestApi(
+    '/api/subscribe/prefs',
+    {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ source, keys }),
+    },
+    options,
+  );
+}
+
 /** 送回审批台：archived → candidate（阅读器「送审批」）。 */
 export async function requeueGovernanceItem(
   id: string,
