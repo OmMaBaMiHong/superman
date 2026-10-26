@@ -2,7 +2,8 @@
  * Superman DSH 插件 · 调度器（K2 批次 3：接管 Next.js worker 的定时职责）。
  *
  * 复用既有 handler 逻辑（不改语义）：
- *   - trendradar.sync：每 30 分钟读 TrendRadar 当日 SQLite 全量 upsert（core/trendradar/sync）
+ *   - hotboard.sync：每 30 分钟按用户勾选的平台采集热榜（src/hotboard），
+ *     直接 upsert 进 trend_radar_items（订阅制：一个都没勾 = 不采集，面板同样不展示）
  *   - feed 抓取：每 60s 扫一轮到期订阅源，逐源 fetchAndIngestFeed（src/worker/index 导出，
  *     治理摄取在该 handler 内联执行；article filter 等后续 pg-boss 任务由 no-op boss 跳过，
  *     迁移期交由 Next.js worker 的队列侧继续消费）
@@ -10,15 +11,10 @@
  *   - pipeline.rewrite：每 15s 轮询 pipeline_jobs 里 queued 的 rewrite 任务，
  *     直接调 executeRewriteJob 执行（不经 pg-boss）
  *
- * 互斥（关键）：与 Next.js worker 同时跑会对同一数据库重复抓取/执行。
- * 本调度器默认关闭，需显式开启（cordis config.schedulerEnabled: true 或
- * 环境变量 SUPERMAN_SCHEDULER_ENABLED=true）。迁移期只开一边：
- *   - Next.js 版在跑 → 插件保持默认关闭
- *   - 切到插件调度 → 停 Next.js worker（pnpm worker:dev），再开本开关
+ * 开关：独立/内嵌共用本调度器；SUPERMAN_SCHEDULER_ENABLED=false 或设置页可关（热切换）。
  */
 import type { PgBoss } from 'pg-boss'
 import { listUsers } from '@/core/auth/usersRepo'
-import { runTrendRadarSync } from '@/core/trendradar/sync'
 import { executeRewriteJob } from '@/core/pipelines/services/rewriteService'
 import { notify, notifyOncePerWindow } from '@/core/notify/service'
 import { getGovernanceStats } from '@/core/governance/repository'
@@ -84,7 +80,9 @@ const noopBoss = { send: async () => null } as unknown as PgBoss
 
 export function isSchedulerEnabled(config: PluginSchedulerConfig): boolean {
   if (typeof config.schedulerEnabled === 'boolean') return config.schedulerEnabled
-  return process.env.SUPERMAN_SCHEDULER_ENABLED === 'true'
+  if (process.env.SUPERMAN_SCHEDULER_ENABLED === 'false') return false
+  // 默认开启（应用内嵌形态可用 SUPERMAN_SCHEDULER_ENABLED=false 关闭避免双跑）
+  return true
 }
 
 /**
@@ -151,14 +149,27 @@ export function startPluginScheduler(
     timers.push(timer)
   }
 
-  every('trendradar.sync', config.trendradarIntervalMs ?? TRENDRADAR_INTERVAL, async () => {
-    const users = await listUsers(pool as never)
-    for (const user of users.filter((u) => u.status === 'active')) {
-      const result = await runTrendRadarSync({ pool: pool as never, userId: user.id })
-      if (result.status === 'ok') {
-        logger.log(`trendradar.sync: user=${user.id} upserted=${result.upserted} platforms=${result.platforms}`)
-      }
+  // 热点同步（订阅制）：只采集用户勾选的平台（user_source_prefs source='hot'，
+  // 跨活跃用户取并集；一个都没勾 = 不采集，面板同样不展示）。
+  every('hotboard.sync', config.trendradarIntervalMs ?? TRENDRADAR_INTERVAL, async () => {
+    const { runHotboardSync } = await import('../../../hotboard/run.js')
+    const { rows: prefRows } = await pool.query(
+      `SELECT DISTINCT p.pref_key
+         FROM user_source_prefs p
+         JOIN users u ON u.id::text = p.user_id
+        WHERE p.source_key = 'hot' AND u.status = 'active'`,
+    )
+    const platforms = prefRows.map((row) => String(row.pref_key)).filter((key) => key !== '')
+    if (platforms.length === 0) {
+      logger.log('hotboard.sync: 未勾选平台，本轮跳过采集')
+      return
     }
+    const summary = await runHotboardSync({ db: pool, platforms })
+    const failed = summary.failedChannels.map((c) => `${c.id}: ${c.error}`).join('; ')
+    logger.log(
+      `hotboard.sync: platforms=[${platforms.join(',')}] upserted=${summary.upserted} ok=[${summary.okChannels.join(', ')}]` +
+        (failed ? ` failed={${failed}}` : ''),
+    )
   })
 
   // 服务 keeper（P2e-5，SAU 专用）：探活 SAU 执行器，不可用自动拉起。

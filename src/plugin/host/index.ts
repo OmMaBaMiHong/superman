@@ -20,7 +20,6 @@ import { BUSINESS_API_LIST } from './api.js'
 import { loadMigrations, runMigrations, startHeartbeat } from './scheduler.js'
 import { registerTools } from './tools.js'
 import { startPluginScheduler, fetchDueFeedsOnce, type PluginSchedulerConfig , type SchedulerHandle } from './jobs/scheduler.js'
-import { runTrendRadarScheduleTick } from './servicesKeeper.js'
 import { registerSkills } from './skills.js'
 import { registerHostIdentityBridge, getHostIdentity } from './hostIdentity.js'
 import { registerRelayHostBridge, relayBridgeApi, getRelayHostBridgeState } from './relayHostBridge.js'
@@ -144,7 +143,7 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
       const schedulerEnabled =
         typeof config.schedulerEnabled === 'boolean'
           ? config.schedulerEnabled
-          : (dbServices?.schedulerEnabled ?? process.env.SUPERMAN_SCHEDULER_ENABLED === 'true')
+          : (dbServices?.schedulerEnabled ?? process.env.SUPERMAN_SCHEDULER_ENABLED !== 'false')
       scheduler = startPluginScheduler(
         pool,
         { ...config, schedulerEnabled, projectRoot: PROJECT_ROOT },
@@ -178,24 +177,7 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
       warn(`[superman] 存储 ${storageMode} 初始化失败：${message}；路由与工具继续可用（dev 鉴权），心跳/调度关闭`)
     })
 
-  // TrendRadar 每日定时任务：独立于全局调度器开关（schedulerEnabled 只管采集/同步等
-  // 周期任务），由设置项 trendRadarRunMode/trendRadarRunTime 驱动：off=仅手动触发，
-  // daily=每天到点自动跑一次（跑完自动补结构化同步）。手动「立即运行」与定时共用
-  // 同一去重状态（service_config key=trendradar_run），一天至多一轮。
-  let trendRadarTimer: ReturnType<typeof setInterval> | null = null
-  let trendRadarTickBusy = false
-  trendRadarTimer = setInterval(() => {
-    if (!db || trendRadarTickBusy) return
-    trendRadarTickBusy = true
-    void runTrendRadarScheduleTick({ db: db as never })
-      .then((result) => {
-        if (result.action === 'ran') log(`trendradar.schedule: 已按设置拉起当日抓取（pid ${result.pid ?? '?'}）`)
-        if (result.action === 'synced') log('trendradar.schedule: 当日抓取结束，结构化同步完成')
-      })
-      .catch((error: unknown) => warn(`[superman] trendradar.schedule: ${error instanceof Error ? error.message : String(error)}`))
-      .finally(() => { trendRadarTickBusy = false })
-  }, 60_000)
-  if (typeof trendRadarTimer.unref === 'function') trendRadarTimer.unref()
+  // 独立/内嵌均无 Python TrendRadar 外采（热点由调度器 hotboard.sync tick 直采入库）。
 
   const dispose = () => {
     stopHostIdentity()
