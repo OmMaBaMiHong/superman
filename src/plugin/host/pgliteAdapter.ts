@@ -14,9 +14,9 @@
  * ③enforceUnicode 无关；类型解析差异（timestamptz 等）由调用方兼容（既有代码
  *   已按 Date|string 双形态处理）。
  */
-import { mkdirSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { PgPoolLike, Queryable } from './db.js'
 
 export function pgliteDataDir(): string {
@@ -140,6 +140,27 @@ export function resolveStorageMode(config: { storageMode?: string; databaseUrl?:
   return hasUrl ? 'pg' : 'pglite'
 }
 
+/** 启动时冷备份 PGlite 数据目录（滚动保留最近 BACKUP_KEEP 份）。
+ * 2026-10-27 事故教训：WASM 崩溃后目录损坏不可恢复；有备份即可整目录回滚。
+ * 备份失败不阻断启动。
+ */
+const BACKUP_KEEP = 5
+function backupPgliteDataDir(dir: string): void {
+  try {
+    if (!existsSync(dir)) return
+    const backupsRoot = join(dirname(dir), 'pgdata-backups')
+    mkdirSync(backupsRoot, { recursive: true })
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    cpSync(dir, join(backupsRoot, `pgdata-${stamp}`))
+    const entries = readdirSync(backupsRoot).filter((n) => n.startsWith('pgdata-')).sort()
+    while (entries.length > BACKUP_KEEP) {
+      rmSync(join(backupsRoot, entries.shift() as string), { recursive: true, force: true })
+    }
+  } catch {
+    // 备份失败不影响启动
+  }
+}
+
 /** 存储工厂：按模式给 pg 连接池或 PGlite 适配器（两者同为 PgPoolLike）。 */
 export async function createQueryableStorage(
   config: { storageMode?: string; databaseUrl?: string },
@@ -148,6 +169,8 @@ export async function createQueryableStorage(
   const mode = resolveStorageMode(config)
   if (mode === 'pglite') {
     const dir = pgliteDataDir()
+    // 启动冷备份（打开库之前目录无人持有，拷贝一致）：坏了可整目录回滚，零丢失
+    backupPgliteDataDir(dir)
     return { mode, db: await PglitePool.open(dir), detail: dir }
   }
   const url =

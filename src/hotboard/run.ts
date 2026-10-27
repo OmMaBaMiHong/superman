@@ -58,6 +58,14 @@ async function cliMain(): Promise<void> {
   } else {
     // PGlite 零配置：与插件运行时同一份本地库（~/.dsh/superman-plugin/pgdata），
     // 先补迁移再同步，DSH 装载后看板直接有数据。
+    // 防双开护栏：PGlite 单实例，DSH 宿主在跑时直连会崩库（2026-10-27 事故）
+    const { spawnSync } = await import('node:child_process');
+    const dshRunning = spawnSync('pgrep', ['-f', 'dsh-desktop-host'], { encoding: 'utf8' });
+    if ((dshRunning.status ?? 1) === 0) {
+      console.error('[hotboard] DSH 宿主正在运行（PGlite 单实例）。请先退出 DeepSeek Harness 再执行本命令。');
+      process.exitCode = 1;
+      return;
+    }
     const { createQueryableStorage } = await import('../plugin/host/pgliteAdapter.js');
     const { loadMigrations, runMigrations } = await import('../plugin/host/scheduler.js');
     const { dirname, join } = await import('node:path');
