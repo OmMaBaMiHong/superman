@@ -7,6 +7,7 @@ import {
   deleteFeed,
   listRecommendedFeeds,
   listFeedItems,
+  listSubscribeCatalog,
   listSubscribePrefs,
   listSubscribeSources,
   saveSubscribePrefs,
@@ -65,6 +66,8 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
   // 用户订阅偏好：sourceKey → 子类 key 列表。未勾选 = 不展示（订阅制：勾了才给看）。
   const [prefs, setPrefs] = useState<Record<string, string[]>>({});
   const [pickerOpen, setPickerOpen] = useState(false);
+  // 热点平台静态目录（服务端事实源，与已采集数据无关——空库也能列出全部可订阅平台）
+  const [hotCatalog, setHotCatalog] = useState<Array<{ key: string; label: string }>>([]);
   const [draftKeys, setDraftKeys] = useState<string[]>([]);
   const [savingPrefs, setSavingPrefs] = useState(false);
   // 通道视图（热点控制台等）上报给统一导航的数据
@@ -422,10 +425,10 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
                 <p className="py-6 text-center text-xs text-muted-foreground">插件市场订阅即将开放。</p>
               ) : (
                 <>
-                  {(navState.picks ?? []).length === 0 ? (
-                    <p className="py-6 text-center text-xs text-muted-foreground">数据加载中…</p>
+                  {(subTab === 'hot' ? hotCatalog : (navState.picks ?? [])).length === 0 ? (
+                    <p className="py-6 text-center text-xs text-muted-foreground">目录加载中…</p>
                   ) : (
-                    (navState.picks ?? []).map((pick) => {
+                    (subTab === 'hot' ? hotCatalog : (navState.picks ?? [])).map((pick) => {
                       const checked = draftKeys.includes(pick.key);
                       return (
                         <button

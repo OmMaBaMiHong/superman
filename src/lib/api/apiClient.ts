@@ -2664,6 +2664,14 @@ export interface SubscribeSourceEntry {
   sort: number;
 }
 
+/** 可订阅目录（静态事实源：热点内置平台等；与用户勾选/已采集数据无关）。 */
+export async function listSubscribeCatalog(
+  source: string,
+  options?: RequestApiOptions,
+): Promise<Array<{ key: string; label: string }>> {
+  return requestApi(`/api/subscribe/catalog?source=${encodeURIComponent(source)}`, undefined, options);
+}
+
 export async function listSubscribeSources(
   options?: RequestApiOptions,
 ): Promise<SubscribeSourceEntry[]> {

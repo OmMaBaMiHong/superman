@@ -1588,6 +1588,20 @@ const ROUTES: RouteDef[] = [
     }
   }),
 
+  // 可订阅目录（静态事实源，与已采集数据/用户勾选无关——面板加号勾选列表用）
+  route('GET', '/subscribe/catalog', async ({ res, query }) => {
+    const source = query.get('source')?.trim() ?? ''
+    if (source === 'hot') {
+      const { BUILTIN_CHANNELS } = await import('../../hotboard/channels.js')
+      json(res, 200, {
+        ok: true,
+        data: { items: BUILTIN_CHANNELS.map((c) => ({ key: c.id, label: c.name })) },
+      })
+      return
+    }
+    json(res, 200, { ok: true, data: { items: [] } })
+  }),
+
   // 订阅来源配置：订阅页一级导航数据驱动（subscribe_sources 表，新增来源插行即可）
   route('GET', '/subscribe/sources', async ({ res, db }) => {
     const { rows } = await db.query(
@@ -1626,6 +1640,22 @@ const ROUTES: RouteDef[] = [
         'INSERT INTO user_source_prefs (user_id, source_key, pref_key) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
         [session.userId, source, key],
       )
+    }
+    // 保存即生效：热点平台勾选后立即按勾选采集（不等 30 分钟调度轮）
+    if (source === 'hot' && keys.length > 0) {
+      void (async () => {
+        try {
+          const { rows: prefRows } = await db.query(
+            `SELECT DISTINCT p.pref_key FROM user_source_prefs p WHERE p.source_key = 'hot'`,
+          )
+          const platforms = prefRows.map((row) => String(row.pref_key)).filter((key) => key !== '')
+          if (platforms.length === 0) return
+          const { runHotboardSync } = await import('../../hotboard/run.js')
+          await runHotboardSync({ db, platforms })
+        } catch {
+          // 采集失败留给 30 分钟调度轮重试，不影响保存响应
+        }
+      })()
     }
     json(res, 200, { ok: true, data: { source, keys } })
   }),
