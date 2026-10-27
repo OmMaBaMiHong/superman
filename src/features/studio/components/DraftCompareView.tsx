@@ -1,9 +1,10 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { Check, Download, ExternalLink, TriangleAlert } from 'lucide-react';
+import { useCallback, useMemo, useState } from 'react';
+import { Check, Copy, Download, ExternalLink, Link2, TriangleAlert } from 'lucide-react';
 import type { DraftDetail } from '@/lib/api/apiClient';
 import PublishToWechatButton from './PublishToWechatButton';
+import PostRegisterSheet from './PostRegisterSheet';
 import { renderMarkdownToSafeHtml } from '@/lib/markdown/renderMarkdown';
 import { cn } from '@/lib/utils';
 import {
@@ -22,7 +23,16 @@ interface DraftCompareViewProps {
   exporting: boolean;
   onAccept: () => void;
   onExport: () => void;
+  /** 登记发布后回调（刷新草稿箱「已发布」态）。 */
+  onPublished?: () => void;
 }
+
+/** 各平台创作/发布后台地址（复制文案后直接去贴）。 */
+const PLATFORM_CREATOR_URL: Record<string, { url: string; label: string }> = {
+  wechat: { url: 'https://mp.weixin.qq.com/', label: '打开公众号后台' },
+  xhs: { url: 'https://creator.xiaohongshu.com/publish/publish?source=official', label: '打开小红书创作中心' },
+  douyin: { url: 'https://creator.douyin.com/creator-micro/content/upload', label: '打开抖音创作者中心' },
+};
 
 /**
  * 草稿对照视图：桌面左右分栏（左原文 / 右成稿），移动端上下分段 + 切换 tab。
@@ -34,8 +44,11 @@ export default function DraftCompareView({
   exporting,
   onAccept,
   onExport,
+  onPublished,
 }: DraftCompareViewProps) {
   const [pane, setPane] = useState<ComparePane>('draft');
+  const [registerOpen, setRegisterOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const flagMeta = ORIGINALITY_META[detail.originalityFlag];
   const accepted = detail.status !== 'draft';
 
@@ -123,6 +136,38 @@ export default function DraftCompareView({
       ) : null}
     </div>
   ) : null;
+
+  // 文案发布闭环（文案阶段）：复制格式化文案 → 去平台后台粘贴发布 → 回填链接登记（带 draftId）
+  const publishText = useMemo(() => {
+    const tags = (payload?.tags ?? []).join(' ');
+    if (detail.platform === 'xhs') {
+      return [detail.title, '', detail.body, '', tags].filter(Boolean).join('\n');
+    }
+    if (detail.platform === 'wechat') {
+      return [detail.title, '', payload?.summary ?? '', '', detail.body].filter(Boolean).join('\n');
+    }
+    return [detail.title, '', detail.body].filter(Boolean).join('\n');
+  }, [detail, payload]);
+
+  const creator = PLATFORM_CREATOR_URL[detail.platform];
+
+  const handleCopyPublishText = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(publishText);
+    } catch {
+      // 兜底：ExecCommand（Electron/无剪贴板权限时）
+      const textarea = document.createElement('textarea');
+      textarea.value = publishText;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
+  }, [publishText]);
 
   const draftPane = (
     <div data-testid="compare-draft" className="min-w-0">
@@ -227,6 +272,14 @@ export default function DraftCompareView({
         {pane === 'original' ? originalPane : draftPane}
       </div>
 
+      <PostRegisterSheet
+        open={registerOpen}
+        draftId={detail.id}
+        defaultTitle={detail.title}
+        onClose={() => setRegisterOpen(false)}
+        onRegistered={() => onPublished?.()}
+      />
+
       {/* 操作行 */}
       <div className="sticky bottom-0 -mx-1 mt-5 flex items-center justify-end gap-2 border-t border-border/60 px-1 pb-1 pt-3">
         <button
@@ -257,7 +310,45 @@ export default function DraftCompareView({
           <Check aria-hidden="true" className="h-4 w-4" />
           {accepted ? '已采用' : accepting ? '采用中…' : '采用'}
         </button>
-        {accepted ? <PublishToWechatButton draftId={detail.id} /> : null}
+        <button
+          type="button"
+          onClick={() => void handleCopyPublishText()}
+          className={cn(
+            'inline-flex h-11 items-center gap-1.5 rounded-full border border-border px-5',
+            'text-sm font-medium text-muted-foreground transition-all duration-150 hover:text-foreground active:scale-[0.97]',
+            'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+          )}
+        >
+          <Copy aria-hidden="true" className="h-4 w-4" />
+          {copied ? '已复制' : '复制文案'}
+        </button>
+        {creator ? (
+          <a
+            href={creator.url}
+            target="_blank"
+            rel="noreferrer noopener"
+            className={cn(
+              'inline-flex h-11 items-center gap-1.5 rounded-full border border-border px-5',
+              'text-sm font-medium text-muted-foreground transition-all duration-150 hover:text-foreground',
+            )}
+          >
+            <ExternalLink aria-hidden="true" className="h-4 w-4" />
+            {creator.label}
+          </a>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => setRegisterOpen(true)}
+          className={cn(
+            'inline-flex h-11 items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-5',
+            'text-sm font-medium text-primary transition-all duration-150 hover:bg-primary/20 active:scale-[0.97]',
+            'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+          )}
+        >
+          <Link2 aria-hidden="true" className="h-4 w-4" />
+          登记发布链接
+        </button>
+        {accepted ? <PublishToWechatButton draftId={detail.id} onPublished={onPublished} /> : null}
       </div>
     </div>
   );

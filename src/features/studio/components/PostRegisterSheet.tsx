@@ -13,13 +13,18 @@ interface PostRegisterSheetProps {
   open: boolean;
   onClose: () => void;
   onRegistered: () => void;
+  /** 从草稿详情发布时传入：登记会关联到该草稿，草稿箱据此显示「已发布」。 */
+  draftId?: string | null;
+  /** 预填标题（草稿标题），减少手输。 */
+  defaultTitle?: string;
 }
 
 /** 登记作品 sheet：贴链接必填（平台自动识别显示），账号名/关联选题可选。 */
-export default function PostRegisterSheet({ open, onClose, onRegistered }: PostRegisterSheetProps) {
+export default function PostRegisterSheet({ open, onClose, onRegistered, draftId = null, defaultTitle = '' }: PostRegisterSheetProps) {
   const [postUrl, setPostUrl] = useState('');
   const [accountName, setAccountName] = useState('');
   const [articleId, setArticleId] = useState('');
+  const [title, setTitle] = useState(defaultTitle);
   const [submitting, setSubmitting] = useState(false);
 
   const detectedPlatform: PublishPlatform = postUrl.trim() ? inferPlatformFromUrl(postUrl.trim()) : 'other';
@@ -34,6 +39,8 @@ export default function PostRegisterSheet({ open, onClose, onRegistered }: PostR
         postUrl: postUrl.trim(),
         accountName: accountName.trim() || undefined,
         articleId: articleId.trim() || null,
+        draftId: draftId ?? null,
+        title: title.trim() || undefined,
       })
         .then(() => {
           toast.success('作品已登记，表现追踪已开启');
@@ -46,7 +53,7 @@ export default function PostRegisterSheet({ open, onClose, onRegistered }: PostR
         .catch(() => {})
         .finally(() => setSubmitting(false));
     },
-    [postUrl, accountName, articleId, submitting, onClose, onRegistered],
+    [postUrl, accountName, articleId, title, draftId, submitting, onClose, onRegistered],
   );
 
   return (
@@ -59,6 +66,20 @@ export default function PostRegisterSheet({ open, onClose, onRegistered }: PostR
         <p className="text-[12px] text-muted-foreground">
           发布后贴个链接，就能追踪播放/点赞/评论的 7 天曲线。B站已支持真实数据，其他平台授权后可用。
         </p>
+
+        <div className="space-y-2">
+          <label htmlFor="post-title-input" className="text-xs font-medium text-muted-foreground">
+            作品标题
+          </label>
+          <input
+            id="post-title-input"
+            type="text"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="默认用草稿标题"
+            className="h-10 w-full rounded-xl border border-border bg-card px-3 text-sm text-foreground placeholder:text-muted-foreground/60 focus-visible:border-primary focus-visible:outline-none"
+          />
+        </div>
 
         <div className="space-y-2">
           <label htmlFor="post-url-input" className="text-xs font-medium text-muted-foreground">

@@ -843,6 +843,7 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
               exporting={exporting}
               onAccept={handleAccept}
               onExport={handleExport}
+              onPublished={() => void loadDrafts()}
             />
           )
         ) : null}
