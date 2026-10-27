@@ -3,6 +3,7 @@ import { NotFoundError, ValidationError } from '@/server/infra/http/errors';
 import { listArticleMediaAttachments } from '@/server/domains/articles/repositories/articlesRepo';
 import type { SubscriptionFeed, SubscriptionWork, SubscriptionWorkDetail, SubscriptionWorkFilter, SubscriptionWorkPage } from '@/types/subscriptionReader';
 import { extractSubscriptionVideoUrl } from './video';
+import { inferFeedCategory } from './feedCategory';
 
 type Db = Pool | PoolClient;
 
@@ -24,8 +25,10 @@ export async function listSubscriptionFeeds(db: Db, userId: string): Promise<Sub
     select f.id::text, f.title, f.url, f.site_url as "siteUrl", f.icon_url as "iconUrl", f.enabled,
       f.last_fetch_status as "lastFetchStatus", f.last_fetch_error as "lastFetchError", f.last_fetched_at as "lastFetchedAt",
       stats.total as "articleCount", stats.unread as "unreadCount", stats.newest::text as "newestId",
-      latest.title as "latestTitle", latest.published_at as "latestPublishedAt"
+      latest.title as "latestTitle", latest.published_at as "latestPublishedAt",
+      c.name as "categoryName"
     from feeds f
+    left join categories c on c.id = f.category_id and c.user_id = f.user_id
     left join lateral (
       select count(*)::int as total, count(*) filter(where not a.is_read)::int as unread, max(a.id) as newest
       from articles a where a.feed_id=f.id and a.user_id=f.user_id
@@ -38,7 +41,12 @@ export async function listSubscriptionFeeds(db: Db, userId: string): Promise<Sub
     where f.user_id=$1
     order by latest.published_at desc nulls last, f.id desc
   `, [userId]);
-  return rows;
+  // 手动分类优先；没设分类的源用本地关键词标签库兜底（中台暂不下发分类标签）
+  return rows.map((row) => ({
+    ...row,
+    categoryName: row.categoryName?.trim()
+      || inferFeedCategory({ title: row.title, url: row.url, siteUrl: row.siteUrl }),
+  }));
 }
 
 /** Cursor is the last displayed row, so equal timestamps cannot skip works. */

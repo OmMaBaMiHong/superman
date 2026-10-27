@@ -13,6 +13,8 @@ export interface SubscriptionFeed {
   unreadCount: number;
   latestTitle: string | null;
   latestPublishedAt: string | null;
+  /** 分类：手动分类名优先，为空时由本地关键词标签库推断（见 core/reader/feedCategory）。 */
+  categoryName: string;
   /** Highest ingested ID, used to notice arrivals without replacing the visible list. */
   newestId: string | null;
 }

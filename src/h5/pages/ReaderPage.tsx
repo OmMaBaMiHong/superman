@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowDownUp, ArrowLeft, BookOpen, Check, ExternalLink, Lightbulb, Play, Plus, RefreshCw, Rss } from 'lucide-react';
+import { ArrowLeft, Check, ExternalLink, Lightbulb, Play, Plus, Rss } from 'lucide-react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { addSubscriptionCandidate, generateProductPlanFromArticle, getSubscriptionVideoStreamUrl, getSubscriptionWork, listSubscriptionFeeds, listSubscriptionWorks, markSubscriptionWorkRead, refreshFeedsNow } from '@/lib/api/apiClient';
 import type { SubscriptionFeed, SubscriptionWork, SubscriptionWorkDetail, SubscriptionWorkFilter } from '@/types/subscriptionReader';
 import { toast } from '@/features/toast/toast';
 import ContentVideoDetail from '@/features/contents/components/ContentVideoDetail';
 import { HOST } from '../lib/host';
+import type { SubscribeNavState } from '../components/SubscribeTabs';
 import { cn } from '@/lib/utils';
 
 /** md 及以上启用三栏可拖拽分栏；以下保持移动端单栏下钻导航。 */
@@ -63,7 +64,14 @@ function Avatar({ feed }: { feed: SubscriptionFeed }) {
  * embedded：嵌进「订阅 → RSS 订阅」子 tab 时用——外层已经给了高度和导航，
  * 这里不再抢整屏高度（h-dvh 会把面板顶出视口），也不重复「添加」按钮。
  */
-export default function H5ReaderPage({ embedded = false }: { embedded?: boolean } = {}) {
+export default function H5ReaderPage({
+  embedded = false,
+  onNavUpdate,
+}: {
+  embedded?: boolean;
+  /** 嵌进「订阅 → RSS 订阅」时把分类 pills / 刷新 / 立即抓取上报给统一导航条。 */
+  onNavUpdate?: (state: SubscribeNavState) => void;
+} = {}) {
   const initialQuery = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
   const [feeds, setFeeds] = useState<SubscriptionFeed[]>([]);
   const [feedsLoading, setFeedsLoading] = useState(true);
@@ -81,6 +89,8 @@ export default function H5ReaderPage({ embedded = false }: { embedded?: boolean 
   const [detailError, setDetailError] = useState(false);
   const [readError, setReadError] = useState(false);
   const [fetchingNow, setFetchingNow] = useState(false);
+  /** 左栏分类筛选（全部 / AI / 财经 / 科技 / 开发 / 新闻 / 生活 / 其他）。 */
+  const [category, setCategory] = useState<string>('全部');
   const [adding, setAdding] = useState<Record<string, boolean>>({});
   const [converting, setConverting] = useState<Record<string, boolean>>({});
   const [arrivals, setArrivals] = useState<Record<string, number>>({});
@@ -238,6 +248,50 @@ export default function H5ReaderPage({ embedded = false }: { embedded?: boolean 
   function chooseFeed(id: string) { setSelectedId(null); setSelectedFeed(id); setType('all'); }
   const feed = feeds.find((entry) => entry.id === selectedFeed);
   const unread = feeds.reduce((sum, entry) => sum + entry.unreadCount, 0);
+
+  /** 分类 → 订阅源数量；顺序固定，避免每次刷新 pills 跳位。 */
+  const categoryOrder = ['AI', '财经', '科技', '开发', '新闻', '生活', '其他'];
+  const categoryCounts = (() => {
+    const counts = new Map<string, number>();
+    for (const entry of feeds) {
+      const name = entry.categoryName?.trim() || '其他';
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => {
+      const ai = categoryOrder.indexOf(a[0]);
+      const bi = categoryOrder.indexOf(b[0]);
+      return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+    });
+  })();
+  const visibleFeeds = category === '全部'
+    ? feeds
+    : feeds.filter((entry) => (entry.categoryName?.trim() || '其他') === category);
+
+  const handleFetchNow = useCallback(() => {
+    setFetchingNow(true);
+    void refreshFeedsNow({ notifyMessage: '抓取完成' })
+      .then((result) => { toast.success(`已抓取 ${result.feeds} 个源，新收录 ${result.inserted} 条`); })
+      .then(() => { void reloadFeeds(); if (selectedFeed && !selectedId) void loadWorks(); })
+      .catch(() => {})
+      .finally(() => setFetchingNow(false));
+  }, [reloadFeeds, loadWorks, selectedFeed, selectedId]);
+
+  // 分类 pills / 刷新 / 立即抓取 上报给订阅页的统一导航条（嵌在 RSS 子 tab 时才有）
+  useEffect(() => {
+    if (!onNavUpdate) return undefined;
+    onNavUpdate({
+      pillGroups: [[
+        { key: '全部', label: '全部', count: feeds.length, active: category === '全部' },
+        ...categoryCounts.map(([name, count]) => ({ key: name, label: name, count, active: category === name })),
+      ]],
+      onPill: (_groupIndex: number, key: string) => setCategory(key),
+      onRefresh: () => { void reloadFeeds(); if (selectedFeed && !selectedId) void loadWorks(); },
+      canSync: true,
+      syncing: fetchingNow,
+      onSync: handleFetchNow,
+    });
+    return () => onNavUpdate({});
+  }, [onNavUpdate, feeds, category, categoryCounts, fetchingNow, handleFetchNow, reloadFeeds, loadWorks, selectedFeed, selectedId]);
   const newCount = selectedFeed === 'all' ? Object.values(arrivals).reduce((sum, count) => sum + count, 0) : arrivals[selectedFeed ?? ''] ?? 0;
 
   const isWide = useIsWideViewport();
@@ -250,13 +304,19 @@ export default function H5ReaderPage({ embedded = false }: { embedded?: boolean 
       {feedsLoading && <p role="status" className="p-4 text-sm text-muted-foreground">正在加载订阅…</p>}
       {feedsError && <div role="alert" className="mb-3 rounded-xl bg-warning/10 p-3 text-xs">订阅加载失败 <button className="underline" onClick={() => void reloadFeeds()}>重试</button></div>}
       {!feedsLoading && !feedsError && feeds.length === 0 && <p className="p-4 text-sm text-muted-foreground">还没有订阅，点击右上角添加博主或 RSS。</p>}
-      <ul className="space-y-2">{feeds.map((entry) => {
+      {!feedsLoading && !feedsError && feeds.length > 0 && category !== '全部' && visibleFeeds.length === 0 && (
+        <p className="p-4 text-sm text-muted-foreground">这个分类下还没有订阅源。</p>
+      )}
+      <ul className="space-y-2">{visibleFeeds.map((entry) => {
         const failed = Boolean(entry.lastFetchError) || (entry.lastFetchStatus !== null && entry.lastFetchStatus >= 400);
         return <li key={entry.id}><button aria-label={`打开博主：${entry.title}`} onClick={() => chooseFeed(entry.id)} className={cn('flex w-full gap-3 rounded-2xl border p-3 text-left transition-colors hover:bg-secondary', selectedFeed === entry.id ? 'border-primary/40 bg-primary/5' : 'border-border/50 bg-card/60')}>
           <Avatar feed={entry} />
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1"><span className="truncate text-sm font-semibold">{entry.title}</span>{entry.unreadCount > 0 && <span className="ml-auto rounded-full bg-primary/10 px-1.5 font-mono text-[10px] text-primary">{entry.unreadCount}</span>}</span>
-            <span className="mt-0.5 block text-[10px] text-muted-foreground">{platform(entry)} · {entry.articleCount} 个作品</span>
+            <span className="mt-0.5 flex items-center gap-1 text-[10px] text-muted-foreground">
+              <span className="rounded-full border border-border/60 bg-secondary/60 px-1.5 py-px font-medium text-secondary-foreground">{entry.categoryName?.trim() || '其他'}</span>
+              <span className="truncate">{platform(entry)} · {entry.articleCount} 个作品</span>
+            </span>
             <span className="mt-1 block truncate text-xs text-muted-foreground">{entry.latestTitle ?? '暂无作品更新'}</span>
             {entry.latestPublishedAt && <span className="mt-1 block text-[10px] text-muted-foreground">{dateLabel(entry.latestPublishedAt)}</span>}
             {failed && <span className="mt-1 block line-clamp-2 text-[11px] text-warning">{entry.lastFetchError || `采集失败（${entry.lastFetchStatus}）`}</span>}
@@ -371,31 +431,6 @@ export default function H5ReaderPage({ embedded = false }: { embedded?: boolean 
     // DSH 宿主没有 Rail/TabBar，无需给它们预留边距（导航在面板内顶部标签条）。
     !embedded && HOST !== 'dsh' && 'pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-0 md:pl-20',
   )}>
-    <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/60 px-4">
-      <BookOpen className="h-4 w-4 text-primary" /><h1 className="text-sm font-semibold">阅读</h1>
-      <span className="text-xs text-muted-foreground">{feeds.length} 个订阅 · {unread} 条未读</span>
-      <button
-        className={cn(buttonClass, 'ml-auto px-2')}
-        aria-label="立即抓取订阅源"
-        title="立即抓取一轮到期订阅源（不等定时器）"
-        disabled={fetchingNow}
-        onClick={() => {
-          setFetchingNow(true);
-          void refreshFeedsNow({ notifyMessage: '抓取完成' })
-            .then((r) => { toast.success(`已抓取 ${r.feeds} 个源，新收录 ${r.inserted} 条`); })
-            .then(() => { void reloadFeeds(); if (selectedFeed && !selectedId) void loadWorks(); })
-            .catch(() => {})
-            .finally(() => setFetchingNow(false));
-        }}
-      ><RefreshCw className={cn('h-4 w-4', fetchingNow && 'animate-spin')} /></button>
-      <button className={cn(buttonClass, 'px-2')} aria-label="刷新阅读列表" title="从数据库刷新列表" onClick={() => { void reloadFeeds(); if (selectedFeed && !selectedId) void loadWorks(); }}><ArrowDownUp className="h-4 w-4" /></button>
-      {embedded ? null : (
-        <>
-          <span className="w-px self-stretch my-2 bg-border/60" aria-hidden="true" />
-          <button className={cn(buttonClass, 'px-2')} aria-label="添加订阅或收藏" onClick={() => window.dispatchEvent(new CustomEvent('superman:open-add'))}><Plus className="h-4 w-4" /><span className="hidden min-[400px]:inline">添加</span></button>
-        </>
-      )}
-    </header>
     {isWide ? (
       <PanelGroup direction="horizontal" autoSaveId="reader-columns" className="flex min-h-0 flex-1">
         <Panel id="reader-feeds" order={1} defaultSize={20} minSize={12} aria-label="订阅博主" className="min-h-0">

@@ -125,7 +125,7 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
   );
 
   // 统一导航数据：通道视图（热点/GitHub/DSH）来自控制台上报；RSS 是阅读器本体，不挂 pills
-  const activeNav: SubscribeNavState = subTab === 'rss' ? {} : navState;
+  const activeNav: SubscribeNavState = navState;
 
   return (
     <div
@@ -149,7 +149,7 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
           onPill={activeNav.onPill}
           stats={activeNav.stats}
           plus={plusButton}
-          sync={subTab === 'hot' && navState.canSync ? { syncing: !!navState.syncing, onSync: navState.onSync! } : null}
+          sync={(subTab === 'hot' || subTab === 'rss') && navState.canSync ? { syncing: !!navState.syncing, onSync: navState.onSync! } : null}
           onRefresh={activeNav.onRefresh}
           className="px-4 shrink-0"
         />
@@ -179,7 +179,7 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
               </div>
             }
           >
-            <H5ReaderPage embedded />
+            <H5ReaderPage embedded onNavUpdate={handleNavUpdate} />
           </Suspense>
         ) : null}
 
