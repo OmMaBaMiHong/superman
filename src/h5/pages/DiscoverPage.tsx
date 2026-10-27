@@ -433,7 +433,9 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
               ) : (
                 <>
                   {(subTab === 'rss' ? [] : pickerCatalog).length === 0 ? (
-                    <p className="py-6 text-center text-xs text-muted-foreground">目录加载中…</p>
+                    <p className="py-6 text-center text-xs text-muted-foreground">
+                      {subTab === 'dsh' ? '目录待同步：中台连接后自动拉取插件分类。' : '目录加载中…'}
+                    </p>
                   ) : (
                     (subTab === 'rss' ? [] : pickerCatalog).map((pick) => {
                       const checked = draftKeys.includes(pick.key);
