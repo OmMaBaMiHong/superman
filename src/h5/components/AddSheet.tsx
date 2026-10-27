@@ -29,12 +29,12 @@ export function notifyClipsChanged(): void {
 }
 
 /**
- * 「+」统一面板 = 订阅管理：四个来源 tab，各自一张候选列表。
- * 收藏（智能收藏 / 文本 / 图片 / 视频）已经搬进「收藏」页本体——那里才是收藏的家，
- * 面板里再放一份只会两套入口打架。
+ * 「+」统一面板：收藏 + 订阅页的四个来源，每个 tab 一张自己的列表。
+ * 收藏页的空态 / 加号也走这里（带 initialTab='clip'），全站只有这一个添加弹窗。
  */
-export type AddTab = 'hot' | 'rss' | 'github' | 'dsh';
+export type AddTab = 'clip' | 'hot' | 'rss' | 'github' | 'dsh';
 const ADD_TABS: ReadonlyArray<readonly [AddTab, string]> = [
+  ['clip', '🔖 收藏'],
   ['hot', '🔥 热点新闻'],
   ['rss', '📡 RSS 订阅'],
   ['github', '🐙 GitHub'],
@@ -55,7 +55,7 @@ interface AddSheetProps {
  * 已有订阅的管理（启停/删除/OPML）在「我的 → 订阅」。
  */
 export default function AddSheet({ open, onClose, initialTab }: AddSheetProps) {
-  const [tab, setTab] = useState<AddTab>('hot');
+  const [tab, setTab] = useState<AddTab>('clip');
 
   // 记住上次用的 tab：最高频动作少点一次；带 initialTab 时以调用方为准
   useEffect(() => {
@@ -79,7 +79,7 @@ export default function AddSheet({ open, onClose, initialTab }: AddSheetProps) {
           <Plus aria-hidden="true" className="h-4 w-4 text-primary" strokeWidth={2.5} />
           <h2 className="text-base font-semibold text-foreground">添加</h2>
         </div>
-        <p className="mt-1 text-xs text-muted-foreground">勾选要订阅的来源/分类；收藏内容去「收藏」页</p>
+        <p className="mt-1 text-xs text-muted-foreground">收藏内容、订阅平台，都从这里进</p>
 
         <div
           className="mt-3 flex gap-1 overflow-x-auto rounded-full border border-border bg-secondary/60 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
@@ -103,6 +103,7 @@ export default function AddSheet({ open, onClose, initialTab }: AddSheetProps) {
           ))}
         </div>
 
+        {tab === 'clip' ? <ClipPane /> : null}
         {tab === 'hot' ? <SourcePrefPane source="hot" hint="勾选要看的平台，只有勾选的平台会展示。" /> : null}
         {tab === 'github' ? <SourcePrefPane source="github" hint="勾选关注的分类，只有勾选的分类会展示。" /> : null}
         {tab === 'dsh' ? <SourcePrefPane source="dsh" hint="插件市场目录待同步：中台连接后自动拉取分类。" /> : null}
@@ -144,7 +145,7 @@ function pickImageFiles(data: DataTransfer | null): File[] {
   return out;
 }
 
-export function ClipPane() {
+function ClipPane() {
   // 智能框：文字 + 图片（粘贴/拖拽）共用一个入口
   const [smartText, setSmartText] = useState('');
   const [images, setImages] = useState<File[]>([]);

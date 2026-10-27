@@ -15,14 +15,13 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Bookmark, ChevronDown, Image as ImageIcon, Link2, Loader2, PencilLine, Play, Plus, RefreshCw, Trash2, Type,
+  Bookmark, Image as ImageIcon, Link2, Loader2, PencilLine, Play, Plus, RefreshCw, Trash2, Type,
 } from 'lucide-react';
 import GlassDetailSheet from '@/components/ui/glass-detail-sheet';
 import ContentDetailSheet from '@/features/contents/components/ContentDetailSheet';
 import { toast } from '@/features/toast/toast';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '../lib/auth';
-import { ClipPane } from '../components/AddSheet';
 
 interface FavoriteItem {
   id: string;
@@ -248,8 +247,6 @@ export default function FavoritesPage() {
   const [editNote, setEditNote] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  /** 顶部「智能收藏」折叠区：粘贴/截图/视频都在这里，不再去「+」面板绕一圈。 */
-  const [addOpen, setAddOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -285,6 +282,11 @@ export default function FavoritesPage() {
       window.removeEventListener('superman:feeds-changed', onChanged);
     };
   }, [load]);
+
+  // 唯一的添加入口：全站那个「+」弹窗，指定落在「收藏」tab
+  const openAddSheet = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('superman:open-add', { detail: { tab: 'clip' } }));
+  }, []);
 
   const openEdit = useCallback((item: FavoriteItem) => {
     setEditItem(item);
@@ -351,40 +353,28 @@ export default function FavoritesPage() {
         <Bookmark aria-hidden="true" className="h-4 w-4 text-primary" />
         <h1 className="text-sm font-semibold">收藏</h1>
         <span className="font-mono text-[11px] tabular-nums text-muted-foreground">{counts.all} 条</span>
-        <button
-          type="button"
-          aria-label="刷新收藏"
-          title="刷新"
-          onClick={() => { setRefreshing(true); void load(); }}
-          className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:text-primary"
-        >
-          <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} aria-hidden="true" />
-        </button>
+        <div className="ml-auto flex items-center gap-1.5">
+          <button
+            type="button"
+            aria-label="添加收藏"
+            title="添加收藏"
+            onClick={openAddSheet}
+            className="inline-flex h-8 items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-3 text-xs font-medium text-primary transition-colors hover:bg-primary/20"
+          >
+            <Plus aria-hidden="true" className="h-3.5 w-3.5" />
+            添加
+          </button>
+          <button
+            type="button"
+            aria-label="刷新收藏"
+            title="刷新"
+            onClick={() => { setRefreshing(true); void load(); }}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:text-primary"
+          >
+            <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} aria-hidden="true" />
+          </button>
+        </div>
       </header>
-
-      {/* 添加收藏：智能收藏（粘贴/截图/视频）——收藏页自己就是入口 */}
-      <div className="shrink-0 px-4 pb-1 pt-3">
-        <button
-          type="button"
-          aria-expanded={addOpen}
-          onClick={() => setAddOpen((value) => !value)}
-          className="flex w-full items-center gap-2.5 rounded-2xl border border-primary/25 bg-primary/5 px-3.5 py-2.5 text-left transition-colors hover:border-primary/40"
-        >
-          <span aria-hidden="true" className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
-            <Plus className="h-4 w-4" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-[13px] font-medium text-foreground">智能收藏</span>
-            <span className="block truncate text-[11px] text-muted-foreground">粘贴链接/文字、截图 ⌘V、拖入视频，自动识别并归类</span>
-          </span>
-          <ChevronDown aria-hidden="true" className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', addOpen && 'rotate-180')} />
-        </button>
-        {addOpen ? (
-          <div className="mt-2 rounded-2xl border border-border/60 bg-card/50 p-3">
-            <ClipPane />
-          </div>
-        ) : null}
-      </div>
 
       {/* 类型筛选（带计数）：图片 / 视频 / 文案 / 链接 */}
       <div className="flex shrink-0 gap-1.5 overflow-x-auto px-4 py-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -418,7 +408,7 @@ export default function FavoritesPage() {
         ) : visible.length === 0 ? (
           <button
             type="button"
-            onClick={() => setAddOpen(true)}
+            onClick={openAddSheet}
             className="mx-auto block w-full max-w-md rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center transition-colors hover:border-primary/40 hover:bg-primary/5"
           >
             <Bookmark aria-hidden="true" className="mx-auto h-6 w-6 text-muted-foreground/70" />
@@ -426,7 +416,7 @@ export default function FavoritesPage() {
               {counts.all === 0 ? '还没有收藏内容' : `没有${KIND_TABS.find(([key]) => key === kind)?.[1] ?? ''}类收藏`}
             </p>
             <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-              点这里展开「智能收藏」：粘贴链接 / 文字、截图 ⌘V、拖入视频，收进来的都会出现在这里。
+              点这里（或右上角「+」）打开收藏面板：粘贴链接 / 文字、截图 ⌘V、拖入视频，收进来的都会出现在这里。
             </p>
           </button>
         ) : (
