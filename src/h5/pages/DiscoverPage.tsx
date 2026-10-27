@@ -422,10 +422,10 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
                 <p className="py-6 text-center text-xs text-muted-foreground">插件市场订阅即将开放。</p>
               ) : (
                 <>
-                  {(navState.pillGroups?.[0] ?? []).length === 0 ? (
+                  {(navState.picks ?? []).length === 0 ? (
                     <p className="py-6 text-center text-xs text-muted-foreground">数据加载中…</p>
                   ) : (
-                    (navState.pillGroups?.[0] ?? []).map((pick) => {
+                    (navState.picks ?? []).map((pick) => {
                       const checked = draftKeys.includes(pick.key);
                       return (
                         <button
