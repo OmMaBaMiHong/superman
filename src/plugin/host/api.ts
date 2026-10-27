@@ -1592,6 +1592,49 @@ const ROUTES: RouteDef[] = [
   // 与用户勾选/已采集数据解耦；新增渠道 = 插行（中台推送后续直接写这张表）。
   route('GET', '/subscribe/catalog', async ({ res, query, db }) => {
     const source = query.get('source')?.trim() ?? ''
+    const refresh = query.get('refresh') === '1'
+    const { rows: existing } = await db.query(
+      `SELECT key FROM subscribe_catalog WHERE source = $1 AND enabled = 1 LIMIT 1`,
+      [source],
+    )
+    // 中台能力回源：github/dsh 目录首次访问（或 refresh=1）拉取并缓存进本地表；
+    // 真相在本地库，中台不可用时回落缓存。hot 为本地采集能力（0018 种子）。
+    if (refresh || existing.length === 0) {
+      try {
+        if (source === 'github') {
+          const result = await readChaosGithubRepos(db as never, { minStars: 0 })
+          if (result.data && result.data.length > 0) {
+            const byCat = new Map<string, string>()
+            for (const repo of result.data) byCat.set(repo.category, repo.categoryName)
+            let sort = 10
+            for (const [key, label] of byCat) {
+              await db.query(
+                `INSERT INTO subscribe_catalog (source, key, label, sort) VALUES ('github', $1, $2, $3)
+                 ON CONFLICT (source, key) DO UPDATE SET label = EXCLUDED.label`,
+                [key, label, sort],
+              )
+              sort += 10
+            }
+          }
+        } else if (source === 'dsh') {
+          const result = await readChaosDshCategories(db as never)
+          if (result.data && result.data.length > 0) {
+            let sort = 10
+            for (const cat of result.data) {
+              if (cat.pluginCount <= 0) continue
+              await db.query(
+                `INSERT INTO subscribe_catalog (source, key, label, sort) VALUES ('dsh', $1, $2, $3)
+                 ON CONFLICT (source, key) DO UPDATE SET label = EXCLUDED.label`,
+                [cat.slug, cat.name, sort],
+              )
+              sort += 10
+            }
+          }
+        }
+      } catch {
+        // 中台不可用：回落本地缓存
+      }
+    }
     const { rows } = await db.query(
       `SELECT key, label FROM subscribe_catalog WHERE source = $1 AND enabled = 1 ORDER BY sort ASC`,
       [source],

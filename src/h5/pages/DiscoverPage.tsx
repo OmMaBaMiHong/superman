@@ -67,7 +67,8 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
   const [prefs, setPrefs] = useState<Record<string, string[]>>({});
   const [pickerOpen, setPickerOpen] = useState(false);
   // 热点平台静态目录（服务端事实源，与已采集数据无关——空库也能列出全部可订阅平台）
-  const [hotCatalog, setHotCatalog] = useState<Array<{ key: string; label: string }>>([]);
+  // 可订阅目录（服务端 subscribe_catalog 表驱动：hot 内置 / github+dsh 中台回源缓存）
+  const [pickerCatalog, setPickerCatalog] = useState<Array<{ key: string; label: string }>>([]);
   const [draftKeys, setDraftKeys] = useState<string[]>([]);
   const [savingPrefs, setSavingPrefs] = useState(false);
   // 通道视图（热点控制台等）上报给统一导航的数据
@@ -190,6 +191,12 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
   const openPicker = useCallback(() => {
     const prefKey = subTab === 'github' || subTab === 'dsh' ? subTab : subTab === 'hot' ? 'hot' : '';
     setDraftKeys(prefKey ? prefs[prefKey] ?? [] : []);
+    // 目录全部读服务端表（真相在插件本地库；hot/github/dsh 统一）
+    if (subTab === 'hot' || subTab === 'github' || subTab === 'dsh') {
+      void listSubscribeCatalog(subTab, { notifyOnError: false })
+        .then((items) => setPickerCatalog(items))
+        .catch(() => setPickerCatalog([]));
+    }
     setPickerOpen(true);
   }, [subTab, prefs]);
 
@@ -425,10 +432,10 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
                 <p className="py-6 text-center text-xs text-muted-foreground">插件市场订阅即将开放。</p>
               ) : (
                 <>
-                  {(subTab === 'hot' ? hotCatalog : (navState.picks ?? [])).length === 0 ? (
+                  {(subTab === 'rss' ? [] : pickerCatalog).length === 0 ? (
                     <p className="py-6 text-center text-xs text-muted-foreground">目录加载中…</p>
                   ) : (
-                    (subTab === 'hot' ? hotCatalog : (navState.picks ?? [])).map((pick) => {
+                    (subTab === 'rss' ? [] : pickerCatalog).map((pick) => {
                       const checked = draftKeys.includes(pick.key);
                       return (
                         <button
