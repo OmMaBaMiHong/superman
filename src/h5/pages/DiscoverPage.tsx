@@ -191,8 +191,9 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
   const openPicker = useCallback(() => {
     const prefKey = subTab === 'github' || subTab === 'dsh' ? subTab : subTab === 'hot' ? 'hot' : '';
     setDraftKeys(prefKey ? prefs[prefKey] ?? [] : []);
-    // 目录全部读服务端表（真相在插件本地库；hot/github/dsh 统一）
+    // 目录读服务端表（真相在插件本地库）；先清空防跨 tab 显示上一个来源的旧目录
     if (subTab === 'hot' || subTab === 'github' || subTab === 'dsh') {
+      setPickerCatalog([]);
       void listSubscribeCatalog(subTab, { notifyOnError: false })
         .then((items) => setPickerCatalog(items))
         .catch(() => setPickerCatalog([]));
@@ -428,8 +429,6 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
                     );
                   })
                 )
-              ) : subTab === 'dsh' ? (
-                <p className="py-6 text-center text-xs text-muted-foreground">插件市场订阅即将开放。</p>
               ) : (
                 <>
                   {(subTab === 'rss' ? [] : pickerCatalog).length === 0 ? (
@@ -479,11 +478,11 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
               >
                 {subTab === 'rss' ? '完成' : '取消'}
               </button>
-              {subTab !== 'rss' ? (
+              {subTab !== 'rss' && subTab !== 'dsh' ? (
                 <button
                   type="button"
-                  disabled={savingPrefs}
-                  onClick={() => void savePrefs(subTab === 'github' ? 'github' : 'hot', draftKeys)}
+                  disabled={savingPrefs || loading}
+                  onClick={() => void savePrefs(subTab === 'hot' ? 'hot' : subTab, draftKeys)}
                   className="inline-flex h-9 items-center rounded-full bg-primary px-5 text-xs font-medium text-primary-foreground transition-all duration-150 hover:opacity-90 disabled:opacity-50"
                 >
                   {savingPrefs ? '保存中…' : '保存'}
