@@ -1588,18 +1588,15 @@ const ROUTES: RouteDef[] = [
     }
   }),
 
-  // 可订阅目录（静态事实源，与已采集数据/用户勾选无关——面板加号勾选列表用）
-  route('GET', '/subscribe/catalog', async ({ res, query }) => {
+  // 可订阅目录（配置化事实源，subscribe_catalog 表驱动）：面板加号勾选列表。
+  // 与用户勾选/已采集数据解耦；新增渠道 = 插行（中台推送后续直接写这张表）。
+  route('GET', '/subscribe/catalog', async ({ res, query, db }) => {
     const source = query.get('source')?.trim() ?? ''
-    if (source === 'hot') {
-      const { BUILTIN_CHANNELS } = await import('../../hotboard/channels.js')
-      json(res, 200, {
-        ok: true,
-        data: { items: BUILTIN_CHANNELS.map((c) => ({ key: c.id, label: c.name })) },
-      })
-      return
-    }
-    json(res, 200, { ok: true, data: { items: [] } })
+    const { rows } = await db.query(
+      `SELECT key, label FROM subscribe_catalog WHERE source = $1 AND enabled = 1 ORDER BY sort ASC`,
+      [source],
+    )
+    json(res, 200, { ok: true, data: { items: rows } })
   }),
 
   // 订阅来源配置：订阅页一级导航数据驱动（subscribe_sources 表，新增来源插行即可）
