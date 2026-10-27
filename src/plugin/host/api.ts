@@ -1691,7 +1691,8 @@ const ROUTES: RouteDef[] = [
           const platforms = prefRows.map((row) => String(row.pref_key)).filter((key) => key !== '')
           if (platforms.length === 0) return
           const { runHotboardSync } = await import('../../hotboard/run.js')
-          await runHotboardSync({ db, platforms })
+          // 写入归属当前用户：展示按会话用户读，采集与展示同一归属
+          await runHotboardSync({ db, platforms, userId: session.userId })
         } catch {
           // 采集失败留给 30 分钟调度轮重试，不影响保存响应
         }
