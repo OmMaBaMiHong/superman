@@ -123,14 +123,60 @@ export async function fetchDueFeedsOnce(
   return { feeds, inserted }
 }
 
+/**
+ * 扫一轮 queued 的洗稿任务。
+ * 事件驱动：POST /pipelines/rewrite 与重试路由创建任务后 kick 一次；
+ * 调度器开启时也会按 15s 周期兜底跑。
+ */
+async function sweepPipelineJobs(pool: PgPoolLike, logger: Logger): Promise<void> {
+  const { rows } = await pool.query(
+    `SELECT j.id, j.user_id AS "userId", j.platform, a.title AS "articleTitle"
+     FROM pipeline_jobs j
+     JOIN articles a ON a.id = j.article_id AND a.user_id = j.user_id
+     WHERE j.status = 'queued' AND j.kind = 'rewrite'
+     ORDER BY j.created_at ASC LIMIT $1`,
+    [PIPELINE_BATCH_LIMIT],
+  )
+  for (const row of rows as { id: string; userId: string | null; platform: string; articleTitle: string }[]) {
+    const result = await executeRewriteJob(pool as never, { jobId: row.id, userId: row.userId ?? undefined })
+    const succeeded = result.status !== 'failed'
+    if (!succeeded) {
+      logger.warn(`[superman] pipeline.rewrite: job=${row.id} failed: ${result.error}`)
+    } else {
+      logger.log(`[superman] pipeline.rewrite: job=${row.id} ${result.status}`)
+    }
+    // P2a 事件：洗稿任务完成/失败 → 消息中心（静默失败）
+    await notify(pool as never, {
+      userId: row.userId ?? undefined,
+      kind: 'pipeline_done',
+      title: succeeded ? `「${row.articleTitle}」改写完成` : `「${row.articleTitle}」改写失败`,
+      body: succeeded
+        ? `平台：${row.platform}，成稿已进草稿箱。`
+        : `平台：${row.platform}。${('error' in result && typeof result.error === 'string' ? result.error : '').slice(0, 300)}`,
+      link: succeeded ? '/studio?tab=drafts' : '/studio?tab=jobs',
+    }).catch(() => {})
+  }
+}
+
 export function startPluginScheduler(
   pool: PgPoolLike,
   config: PluginSchedulerConfig,
   logger: Logger,
 ): SchedulerHandle {
   if (!isSchedulerEnabled(config)) {
-    logger.log('调度器未开启（默认关闭以避免与 Next.js worker 双跑；schedulerEnabled=true 开启）')
-    return { stop: () => {}, kickPipeline: () => {} }
+    logger.log('调度器周期任务未开启（互斥开关）；洗稿仍按事件驱动：任务创建/重试时 kick 一轮')
+    let running = false
+    return {
+      stop: () => {},
+      // 周期任务不开，但「生成稿件」必须能跑：kick 一次扫掉 queued 任务
+      kickPipeline: () => {
+        if (running) return
+        running = true
+        void sweepPipelineJobs(pool, logger)
+          .catch((error) => logger.warn(`[superman] 调度 pipeline.rewrite 失败: ${error instanceof Error ? error.message : String(error)}`))
+          .finally(() => { running = false })
+      },
+    }
   }
 
   const timers: ReturnType<typeof setInterval>[] = []
@@ -208,35 +254,7 @@ export function startPluginScheduler(
     }
   })
 
-  const pipelineSweep = async (): Promise<void> => {
-    const { rows } = await pool.query(
-      `SELECT j.id, j.user_id AS "userId", j.platform, a.title AS "articleTitle"
-       FROM pipeline_jobs j
-       JOIN articles a ON a.id = j.article_id AND a.user_id = j.user_id
-       WHERE j.status = 'queued' AND j.kind = 'rewrite'
-       ORDER BY j.created_at ASC LIMIT $1`,
-      [PIPELINE_BATCH_LIMIT],
-    )
-    for (const row of rows as { id: string; userId: string | null; platform: string; articleTitle: string }[]) {
-      const result = await executeRewriteJob(pool as never, { jobId: row.id, userId: row.userId ?? undefined })
-      const succeeded = result.status !== 'failed'
-      if (!succeeded) {
-        logger.warn(`[superman] pipeline.rewrite: job=${row.id} failed: ${result.error}`)
-      } else {
-        logger.log(`[superman] pipeline.rewrite: job=${row.id} ${result.status}`)
-      }
-      // P2a 事件：洗稿任务完成/失败 → 消息中心（静默失败）
-      await notify(pool as never, {
-        userId: row.userId ?? undefined,
-        kind: 'pipeline_done',
-        title: succeeded ? `「${row.articleTitle}」改写完成` : `「${row.articleTitle}」改写失败`,
-        body: succeeded
-          ? `平台：${row.platform}，成稿已进草稿箱。`
-          : `平台：${row.platform}。${('error' in result && typeof result.error === 'string' ? result.error : '').slice(0, 300)}`,
-        link: succeeded ? '/studio?tab=drafts' : '/studio?tab=jobs',
-      }).catch(() => {})
-    }
-  }
+  const pipelineSweep = (): Promise<void> => sweepPipelineJobs(pool, logger)
 
   // 不做任何周期轮询：洗稿执行由状态变化触发——任务创建/重试（状态→queued）时
   // 路由直接 kickPipeline() 执行；此处仅保留函数体供句柄调用。

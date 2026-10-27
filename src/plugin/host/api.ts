@@ -128,6 +128,7 @@ import { listTrendRadarItemsByDate, type TrendRadarItemRow } from '@/core/trendr
 import { getTrendRadarItem } from '@/server/domains/trendradar/repository'
 import { promoteTrendRadarItem } from '@/core/trendradar/promote'
 import { isRewritePlatform, type RewritePlatform } from '@/core/pipelines/rewriteProfiles'
+import { isDshLlmAvailable } from '@/server/integrations/ai/dshLlmBridge'
 import { createRewriteJobs, retryPipelineJob } from '@/core/pipelines/services/pipelineService'
 import {
   acceptDraft,
@@ -852,8 +853,12 @@ const ROUTES: RouteDef[] = [
 
   // —— 洗稿流水线 ——
   route('POST', '/pipelines/rewrite', async ({ req, res, session, db, pipelineKick }) => {
-    // 权益示范点（P2e-6）：洗稿是会员权益；未订阅时 403 membership_required 引导授权
-    await requireEntitled(db as never, session.userId, 'rewrite.execute')
+    // 权益示范点（P2e-6）：洗稿是会员权益；未订阅时 403 membership_required 引导授权。
+    // DSH 宿主例外：插件复用宿主自带模型（ctx.llm），AI 成本由宿主账号承担，
+    // 本地/自托管形态再拦会员门只会让「生成稿件」永远 403——此处直接放行。
+    if (!isDshLlmAvailable()) {
+      await requireEntitled(db as never, session.userId, 'rewrite.execute')
+    }
     const body = await readJsonBody(req)
     const articleId = typeof body.articleId === 'string' || typeof body.articleId === 'number'
       ? String(body.articleId)
