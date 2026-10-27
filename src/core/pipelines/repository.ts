@@ -287,6 +287,20 @@ export async function requeuePipelineJob(
 // drafts
 // ============================================================
 
+/** 平台化产物：公众号（摘要/备选标题）、小红书（标签/封面文案）、小说化（章节名），以及两段式策划案。 */
+export interface DraftPayload {
+  summary?: string | null;
+  titleCandidates?: string[];
+  tags?: string[];
+  coverText?: string | null;
+  chapterTitle?: string | null;
+  outline?: {
+    angle: string;
+    titleCandidates: string[];
+    sections: Array<{ heading: string; points: string[] }>;
+  } | null;
+}
+
 export interface DraftRow {
   id: string;
   userId: string;
@@ -300,6 +314,8 @@ export interface DraftRow {
   status: DraftStatus;
   createdAt: string;
   updatedAt: string;
+  /** 平台化产物（老数据为 {}）。 */
+  payload: DraftPayload | null;
 }
 
 const draftSelectSql = `
@@ -314,7 +330,8 @@ const draftSelectSql = `
   originality_flag as "originalityFlag",
   status,
   created_at as "createdAt",
-  updated_at as "updatedAt"
+  updated_at as "updatedAt",
+  payload_json as "payload"
 `;
 
 export async function insertDraft(
@@ -327,15 +344,16 @@ export async function insertDraft(
     body: string;
     similarityScore: number | null;
     originalityFlag: 'ok' | 'rewritten' | 'needs_review';
+    payload?: DraftPayload | null;
     userId?: string;
   },
 ): Promise<DraftRow> {
   const { rows } = await db.query<DraftRow>(
     `
       insert into drafts(
-        user_id, article_id, job_id, platform, title, body, similarity_score, originality_flag
+        user_id, article_id, job_id, platform, title, body, similarity_score, originality_flag, payload_json
       )
-      values ($1, $2, $3, $4, $5, $6, $7, $8)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
       returning ${draftSelectSql}
     `,
     [
@@ -347,6 +365,7 @@ export async function insertDraft(
       input.body,
       input.similarityScore,
       input.originalityFlag,
+      JSON.stringify(input.payload ?? {}),
     ],
   );
   return rows[0];
@@ -402,6 +421,7 @@ export async function listDrafts(
         d.status,
         d.created_at as "createdAt",
         d.updated_at as "updatedAt",
+        d.payload_json as "payload",
         a.title as "articleTitle"
       from drafts d
       join articles a on a.id = d.article_id and a.user_id = d.user_id
@@ -441,6 +461,7 @@ export async function getDraftDetail(
         d.status,
         d.created_at as "createdAt",
         d.updated_at as "updatedAt",
+        d.payload_json as "payload",
         a.title as "articleTitle",
         a.summary as "articleSummary",
         a.link as "articleLink"

@@ -68,12 +68,69 @@ export default function DraftCompareView({
     </div>
   );
 
+  // 平台化产物：公众号（摘要/备选标题）、小红书（标签/封面文案）、小说化（章节名）+ 两段式策划案
+  const payload = detail.payload ?? null;
+  const tags = payload?.tags ?? [];
+  const titleCandidates = payload?.titleCandidates ?? [];
+  const outline = payload?.outline ?? null;
+  const hasPlatformMeta = Boolean(payload?.summary || payload?.coverText || tags.length || titleCandidates.length || payload?.chapterTitle || outline);
+
+  const platformMeta = hasPlatformMeta ? (
+    <div className="mt-3 space-y-2 rounded-xl border border-border/60 bg-card/40 p-3">
+      {payload?.chapterTitle ? (
+        <p className="text-[12px] text-secondary-foreground">章节名：{payload.chapterTitle}</p>
+      ) : null}
+      {payload?.summary ? (
+        <p className="text-[12px] leading-relaxed text-secondary-foreground">
+          <span className="text-muted-foreground">摘要：</span>{payload.summary}
+        </p>
+      ) : null}
+      {payload?.coverText ? (
+        <p className="text-[12px] text-secondary-foreground">
+          <span className="text-muted-foreground">封面文案：</span>{payload.coverText}
+        </p>
+      ) : null}
+      {tags.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-[11px] text-muted-foreground">话题：</span>
+          {tags.map((tag) => (
+            <span key={tag} className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] text-primary">{tag}</span>
+          ))}
+        </div>
+      ) : null}
+      {titleCandidates.length > 0 ? (
+        <details className="text-[11px] text-muted-foreground">
+          <summary className="cursor-pointer select-none">备选标题（{titleCandidates.length}）</summary>
+          <ul className="mt-1 space-y-0.5 pl-4 text-secondary-foreground">
+            {titleCandidates.map((item, index) => (
+              <li key={`${item}-${index}`} className="list-disc">{item}</li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+      {outline ? (
+        <details className="text-[11px] text-muted-foreground">
+          <summary className="cursor-pointer select-none">创作大纲 · {outline.angle}</summary>
+          <ol className="mt-1 space-y-0.5 pl-4 text-secondary-foreground">
+            {outline.sections.map((section, index) => (
+              <li key={`${section.heading}-${index}`} className="list-decimal">
+                {section.heading}
+                {section.points.length > 0 ? <span className="text-muted-foreground">：{section.points.join('；')}</span> : null}
+              </li>
+            ))}
+          </ol>
+        </details>
+      ) : null}
+    </div>
+  ) : null;
+
   const draftPane = (
     <div data-testid="compare-draft" className="min-w-0">
       <p className="gov-label">成稿 · {platformName(detail.platform)}</p>
       <h3 className="mt-1.5 text-[15px] font-semibold leading-snug text-foreground">
         {detail.title}
       </h3>
+      {platformMeta}
       <div
         data-testid="draft-body"
         className="prose mt-3 max-w-none text-[14px] prose-headings:text-foreground prose-p:leading-relaxed prose-p:text-foreground/85 prose-a:text-primary dark:prose-invert"

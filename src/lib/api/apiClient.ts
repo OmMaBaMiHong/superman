@@ -2550,6 +2550,20 @@ export async function retryPipelineJob(
 export type OriginalityFlag = 'ok' | 'rewritten' | 'needs_review';
 export type DraftStatus = 'draft' | 'accepted' | 'exported';
 
+/** 草稿的平台化产物（服务端 drafts.payload_json）。 */
+export interface DraftPayload {
+  summary?: string | null;
+  titleCandidates?: string[];
+  tags?: string[];
+  coverText?: string | null;
+  chapterTitle?: string | null;
+  outline?: {
+    angle: string;
+    titleCandidates: string[];
+    sections: Array<{ heading: string; points: string[] }>;
+  } | null;
+}
+
 export interface DraftItem {
   id: string;
   articleId: string;
@@ -2562,6 +2576,7 @@ export interface DraftItem {
   createdAt: string;
   updatedAt: string;
   articleTitle: string;
+  payload?: DraftPayload | null;
 }
 
 export interface DraftDetail extends DraftItem {

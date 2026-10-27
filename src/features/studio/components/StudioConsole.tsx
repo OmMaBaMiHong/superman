@@ -746,6 +746,20 @@ export default function StudioConsole({ initialSection }: { initialSection?: Stu
                           <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
                             原：{draft.articleTitle}
                           </span>
+                          {draft.payload?.coverText || (draft.payload?.tags?.length ?? 0) > 0 ? (
+                            <span className="mt-1 flex items-center gap-1 overflow-hidden">
+                              {draft.payload?.coverText ? (
+                                <span className="shrink-0 truncate rounded-full border border-border/60 bg-secondary/60 px-1.5 text-[10px] text-secondary-foreground">
+                                  封面：{draft.payload.coverText}
+                                </span>
+                              ) : null}
+                              {(draft.payload?.tags ?? []).slice(0, 3).map((tag) => (
+                                <span key={tag} className="shrink-0 rounded-full border border-primary/30 bg-primary/10 px-1.5 text-[10px] text-primary">
+                                  {tag}
+                                </span>
+                              ))}
+                            </span>
+                          ) : null}
                         </span>
                         <span
                           className={cn(

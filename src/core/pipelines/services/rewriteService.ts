@@ -20,9 +20,12 @@ import { stripHtmlToText } from '@/lib/reader/articleSummary';
 import { normalizeTitle, titleSimilarity } from '@/core/governance/dedup';
 import {
   REWRITE_PROFILES,
+  buildOutlinePrompt,
   buildRewritePrompt,
   isRewritePlatform,
+  parseOutline,
   parseRewriteOutput,
+  type RewriteOutline,
 } from '@/core/pipelines/rewriteProfiles';
 import {
   classifyOriginality,
@@ -144,8 +147,20 @@ export async function executeRewriteJob(
       userNote: article.userNote,
     };
 
-    // 第一轮改写。
-    const firstText = await complete({ prompt: buildRewritePrompt(profile, promptInput), config: aiConfig });
+    // 第一段：策划案（角度 / 标题候选 / 分节大纲）。
+    // 失败就降级为单段直出——大纲是提质量的手段，不该让整条任务失败。
+    let outline: RewriteOutline | null = null;
+    try {
+      outline = parseOutline(await complete({ prompt: buildOutlinePrompt(profile, promptInput), config: aiConfig }));
+    } catch {
+      outline = null;
+    }
+
+    // 第二段：按大纲写正文。
+    const firstText = await complete({
+      prompt: buildRewritePrompt(profile, { ...promptInput, outline }),
+      config: aiConfig,
+    });
     let output = parseRewriteOutput(firstText);
     let similarity = bodySimilarity(similarityFn, originalText, output.body);
 
@@ -154,7 +169,7 @@ export async function executeRewriteJob(
     if (needsReduceSimilarityPass(similarity)) {
       rewrittenOnce = true;
       const secondText = await complete({
-        prompt: buildRewritePrompt(profile, { ...promptInput, reduceSimilarity: true }),
+        prompt: buildRewritePrompt(profile, { ...promptInput, outline, reduceSimilarity: true }),
         config: aiConfig,
       });
       output = parseRewriteOutput(secondText);
@@ -172,6 +187,15 @@ export async function executeRewriteJob(
       body: output.body,
       similarityScore,
       originalityFlag,
+      // 平台化产物：公众号（摘要/备选标题）、小红书（标签/封面文案）、小说化（章节名）+ 策划案
+      payload: {
+        summary: output.summary,
+        titleCandidates: output.titleCandidates.length > 0 ? output.titleCandidates : (outline?.titleCandidates ?? []),
+        tags: output.tags,
+        coverText: output.coverText,
+        chapterTitle: output.chapterTitle,
+        outline,
+      },
     });
 
     await markPipelineJobSucceeded(db, job.id, {
