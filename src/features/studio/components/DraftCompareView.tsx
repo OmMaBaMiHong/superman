@@ -28,10 +28,10 @@ interface DraftCompareViewProps {
 }
 
 /** 各平台创作/发布后台地址（复制文案后直接去贴）。 */
-const PLATFORM_CREATOR_URL: Record<string, { url: string; label: string }> = {
-  wechat: { url: 'https://mp.weixin.qq.com/', label: '打开公众号后台' },
-  xhs: { url: 'https://creator.xiaohongshu.com/publish/publish?source=official', label: '打开小红书创作中心' },
-  douyin: { url: 'https://creator.douyin.com/creator-micro/content/upload', label: '打开抖音创作者中心' },
+const PLATFORM_CREATOR_URL: Record<string, { url: string; shortLabel: string }> = {
+  wechat: { url: 'https://mp.weixin.qq.com/', shortLabel: '公众号后台' },
+  xhs: { url: 'https://creator.xiaohongshu.com/publish/publish?source=official', shortLabel: '小红书后台' },
+  douyin: { url: 'https://creator.douyin.com/creator-micro/content/upload', shortLabel: '抖音后台' },
 };
 
 /**
@@ -281,13 +281,13 @@ export default function DraftCompareView({
       />
 
       {/* 操作行 */}
-      <div className="sticky bottom-0 -mx-1 mt-5 flex items-center justify-end gap-2 border-t border-border/60 px-1 pb-1 pt-3">
+      <div className="sticky bottom-0 -mx-1 mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-border/60 px-1 pb-1 pt-3">
         <button
           type="button"
           disabled={exporting}
           onClick={onExport}
           className={cn(
-            'inline-flex h-11 items-center gap-1.5 rounded-full border border-border px-5',
+            'inline-flex h-11 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border px-5',
             'text-sm font-medium text-muted-foreground transition-all duration-150 hover:text-foreground active:scale-[0.97]',
             'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
             'disabled:pointer-events-none disabled:opacity-50',
@@ -301,7 +301,7 @@ export default function DraftCompareView({
           disabled={accepted || accepting}
           onClick={onAccept}
           className={cn(
-            'inline-flex h-11 items-center gap-1.5 rounded-full border border-success/40 bg-success/10 px-5',
+            'inline-flex h-11 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-success/40 bg-success/10 px-5',
             'text-sm font-medium text-success transition-all duration-150 hover:bg-success/20 active:scale-[0.97]',
             'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-success',
             'disabled:pointer-events-none disabled:opacity-60',
@@ -314,7 +314,7 @@ export default function DraftCompareView({
           type="button"
           onClick={() => void handleCopyPublishText()}
           className={cn(
-            'inline-flex h-11 items-center gap-1.5 rounded-full border border-border px-5',
+            'inline-flex h-11 shrink-0 items-center whitespace-nowrap gap-1.5 rounded-full border border-border px-5',
             'text-sm font-medium text-muted-foreground transition-all duration-150 hover:text-foreground active:scale-[0.97]',
             'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
           )}
@@ -328,19 +328,19 @@ export default function DraftCompareView({
             target="_blank"
             rel="noreferrer noopener"
             className={cn(
-              'inline-flex h-11 items-center gap-1.5 rounded-full border border-border px-5',
+              'inline-flex h-11 shrink-0 items-center whitespace-nowrap gap-1.5 rounded-full border border-border px-5',
               'text-sm font-medium text-muted-foreground transition-all duration-150 hover:text-foreground',
             )}
           >
             <ExternalLink aria-hidden="true" className="h-4 w-4" />
-            {creator.label}
+            {creator.shortLabel}
           </a>
         ) : null}
         <button
           type="button"
           onClick={() => setRegisterOpen(true)}
           className={cn(
-            'inline-flex h-11 items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-5',
+            'inline-flex h-11 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-primary/40 bg-primary/10 px-5',
             'text-sm font-medium text-primary transition-all duration-150 hover:bg-primary/20 active:scale-[0.97]',
             'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
           )}
