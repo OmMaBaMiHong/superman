@@ -9,23 +9,24 @@
     <link rel="manifest" href="/s/manifest.webmanifest" />
     <link rel="icon" href="/s/app/brand/favicon-64.png" type="image/png" />
     <link rel="apple-touch-icon" href="/s/app/brand/pwa-icon-192.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
+    <!--
+      不引 Google Fonts：桌面端/内网常把 fonts.googleapis.com 挂死，这个 render-blocking
+      stylesheet 会把首屏拖到 17s+（2026-10-28 实测 17363ms）。CSS 里 font-family 已是
+      var(--font-inter), "Inter", "PingFang SC", sans-serif 这种带系统回退的栈，
+      去掉网络字体只影响字形细节，不影响可用性。
+    -->
     <style>
-      /* next/font 在 H5 的等价物：变量指向网络字体，加载失败时回退系统字体栈 */
+      /* next/font 在 H5 的等价物：只留变量名，字体本体走系统栈（无网络依赖） */
       :root {
         --font-inter: 'Inter';
         --font-jetbrains-mono: 'JetBrains Mono';
       }
     </style>
-    <script type="module" crossorigin src="/s/app/assets/index-7TII1Bsu.js"></script>
+    <script type="module" crossorigin src="/s/app/assets/index-BmhezwOm.js"></script>
     <link rel="modulepreload" crossorigin href="/s/app/assets/jsx-runtime-k-awuBEX.js">
     <link rel="modulepreload" crossorigin href="/s/app/assets/sessionToken-DrFPudo4.js">
-    <link rel="stylesheet" crossorigin href="/s/app/assets/index-DfEfrx-T.css">
+    <link rel="modulepreload" crossorigin href="/s/app/assets/createLucideIcon-C_G5HZOT.js">
+    <link rel="stylesheet" crossorigin href="/s/app/assets/index-Cn9NxXkq.css">
   </head>
   <body>
     <div id="root"></div>

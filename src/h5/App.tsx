@@ -9,11 +9,12 @@ import { ToastHost } from '@/features/toast/components/ToastHost';
 import H5DesktopRail from './components/DesktopRail';
 import H5TabBar from './components/H5TabBar';
 import PanelTabStrip from './components/PanelTabStrip';
-import AddSheet from './components/AddSheet';
+import AddSheet, { type AddTab } from './components/AddSheet';
 import H5LoginPage from './pages/LoginPage';
 
 const StudioConsole = lazy(() => import('@/features/studio/components/StudioConsole'));
 const H5ReaderPage = lazy(() => import('./pages/ReaderPage'));
+const H5FavoritesPage = lazy(() => import('./pages/FavoritesPage'));
 const H5DiscoverPage = lazy(() => import('./pages/DiscoverPage'));
 const H5NotificationsPage = lazy(() => import('./pages/NotificationsPage'));
 const H5ProfilePage = lazy(() => import('./pages/ProfilePage'));
@@ -45,6 +46,8 @@ function App() {
   const route = path.split('?')[0] || '/discover';
   const [session, setSession] = useState<H5Session | null>(null);
   const [pasteOpen, setPasteOpen] = useState(false);
+  // 统一「+」面板落在哪个 tab（订阅页的加号会带过来，如 detail.tab='rss'）
+  const [addTab, setAddTab] = useState<AddTab | undefined>(undefined);
   // Chaos 数据中台授权提示（DSH 宿主）：未绑定则每次冷进入提示一次，可跳过（本会话不再打扰）
   const [chaosPrompt, setChaosPrompt] = useState(false);
   const dismissChaosPrompt = useCallback(() => {
@@ -121,9 +124,14 @@ function App() {
     setPasteOpen(true);
   }, []);
 
-  // 任意页面（如阅读页头部「添加」按钮）都可唤起统一添加弹窗
+  // 任意页面（如阅读页头部「添加」按钮）都可唤起统一添加弹窗；
+  // 订阅页的「+」会带 detail.tab，直接落到对应来源 tab。
   useEffect(() => {
-    const open = () => setPasteOpen(true);
+    const open = (event: Event) => {
+      const tab = (event as CustomEvent<{ tab?: AddTab }>).detail?.tab;
+      if (tab) setAddTab(tab);
+      setPasteOpen(true);
+    };
     window.addEventListener('superman:open-add', open);
     return () => window.removeEventListener('superman:open-add', open);
   }, []);
@@ -185,6 +193,9 @@ function App() {
     // 订阅页子 tab：hot=热点新闻 / github=GitHub / dsh=DSH 插件（缺省落在 RSS 发现流）
     const subTab = tabParam === 'hot' || tabParam === 'github' || tabParam === 'dsh' ? tabParam : undefined;
     view = <H5DiscoverPage initialTab={subTab} />;
+  } else if (route === '/reader' || route === '/') {
+    // 收藏 = 收藏夹（图片/视频/文案/链接，按媒介分类的瀑布流）；阅读器本体已并入「订阅 → RSS 订阅」
+    view = <H5FavoritesPage />;
   } else {
     view = <H5ReaderPage />;
   }
@@ -231,7 +242,7 @@ function App() {
           </button>
         </div>
       ) : null}
-      <AddSheet open={pasteOpen} onClose={() => setPasteOpen(false)} />
+      <AddSheet open={pasteOpen} onClose={() => setPasteOpen(false)} initialTab={addTab} />
       <ToastHost />
     </>
   );

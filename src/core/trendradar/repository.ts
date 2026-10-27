@@ -10,6 +10,7 @@
  */
 import crypto from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
+import { todayLocalDateString } from '@/core/services/serviceConfig';
 import { normalizeUserId } from '@/server/domains/users/userScope';
 import {
   inferTrendContentType,
@@ -93,12 +94,16 @@ export async function upsertTrendRadarItems(
     const platform = item.platform.trim();
     if (!title || !platform) continue;
 
-    const sourceDate = item.sourceDate ?? new Date().toISOString().slice(0, 10);
+    // 缺省日期由数据库 current_date 决定（与读取端 listTrendRadarItemsByDate 同口径）。
+    // 曾用 new Date().toISOString().slice(0,10)——那是 UTC 日期：在 UTC+9 的 00:00–09:00，
+    // 写入落到"昨天"，而看板按 current_date 读"今天"，勾选平台后整块空白（2026-10-28 事故）。
+    const sourceDate = item.sourceDate?.trim() || null;
+    const hashDate = sourceDate ?? todayLocalDateString();
     const url = resolveTrendRadarItemUrl({
       platform,
       title,
       url: item.url,
-      sourceDate,
+      sourceDate: hashDate,
     });
     const payload = item.payload ?? {};
 
@@ -112,7 +117,7 @@ export async function upsertTrendRadarItems(
           $1, $2, $3, $4, $5, $6, $7,
           coalesce($8::timestamptz, now()),
           coalesce($9::timestamptz, now()),
-          $10::jsonb, $11::date
+          $10::jsonb, coalesce($11::date, current_date)
         )
         on conflict (user_id, platform, url, source_date) do update set
           title = excluded.title,

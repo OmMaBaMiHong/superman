@@ -57,8 +57,13 @@ function Avatar({ feed }: { feed: SubscriptionFeed }) {
   </span>;
 }
 
-/** Same reader in the narrow DSH panel and the full-width Web app. */
-export default function H5ReaderPage() {
+/**
+ * Same reader in the narrow DSH panel and the full-width Web app.
+ *
+ * embedded：嵌进「订阅 → RSS 订阅」子 tab 时用——外层已经给了高度和导航，
+ * 这里不再抢整屏高度（h-dvh 会把面板顶出视口），也不重复「添加」按钮。
+ */
+export default function H5ReaderPage({ embedded = false }: { embedded?: boolean } = {}) {
   const initialQuery = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
   const [feeds, setFeeds] = useState<SubscriptionFeed[]>([]);
   const [feedsLoading, setFeedsLoading] = useState(true);
@@ -361,9 +366,10 @@ export default function H5ReaderPage() {
   );
 
   return <div className={cn(
-    'flex h-dvh min-h-0 flex-col overflow-hidden bg-background text-foreground',
+    'flex min-h-0 flex-col overflow-hidden bg-background text-foreground',
+    embedded ? 'min-h-0 flex-1' : 'h-dvh',
     // DSH 宿主没有 Rail/TabBar，无需给它们预留边距（导航在面板内顶部标签条）。
-    HOST !== 'dsh' && 'pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-0 md:pl-20',
+    !embedded && HOST !== 'dsh' && 'pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-0 md:pl-20',
   )}>
     <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/60 px-4">
       <BookOpen className="h-4 w-4 text-primary" /><h1 className="text-sm font-semibold">阅读</h1>
@@ -383,8 +389,12 @@ export default function H5ReaderPage() {
         }}
       ><RefreshCw className={cn('h-4 w-4', fetchingNow && 'animate-spin')} /></button>
       <button className={cn(buttonClass, 'px-2')} aria-label="刷新阅读列表" title="从数据库刷新列表" onClick={() => { void reloadFeeds(); if (selectedFeed && !selectedId) void loadWorks(); }}><ArrowDownUp className="h-4 w-4" /></button>
-      <span className="w-px self-stretch my-2 bg-border/60" aria-hidden="true" />
-      <button className={cn(buttonClass, 'px-2')} aria-label="添加订阅或收藏" onClick={() => window.dispatchEvent(new CustomEvent('superman:open-add'))}><Plus className="h-4 w-4" /><span className="hidden min-[400px]:inline">添加</span></button>
+      {embedded ? null : (
+        <>
+          <span className="w-px self-stretch my-2 bg-border/60" aria-hidden="true" />
+          <button className={cn(buttonClass, 'px-2')} aria-label="添加订阅或收藏" onClick={() => window.dispatchEvent(new CustomEvent('superman:open-add'))}><Plus className="h-4 w-4" /><span className="hidden min-[400px]:inline">添加</span></button>
+        </>
+      )}
     </header>
     {isWide ? (
       <PanelGroup direction="horizontal" autoSaveId="reader-columns" className="flex min-h-0 flex-1">

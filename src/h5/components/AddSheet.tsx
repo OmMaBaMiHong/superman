@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   createFeed, createProductPlan, generateProductPlanFromArticle,
   listFeedItems, listRecommendedFeeds,
+  listSubscribeCatalog, listSubscribePrefs, saveSubscribePrefs,
   type FeedListItem, type RecommendedFeedEntry,
 } from '@/lib/api/apiClient';
 import GlassDetailSheet from '@/components/ui/glass-detail-sheet';
@@ -22,12 +23,31 @@ export function notifyFeedsChanged(): void {
   window.dispatchEvent(new CustomEvent('superman:feeds-changed'));
 }
 
-type AddTab = 'clip' | 'subscribe';
+/** 收藏内容变化的全局信号：收藏页（收藏夹）监听后刷新列表。 */
+export function notifyClipsChanged(): void {
+  window.dispatchEvent(new CustomEvent('superman:clips-changed'));
+}
+
+/**
+ * 「+」统一面板的 tab = 收藏 + 订阅页的四个来源。
+ * 之前是「收藏 / 订阅博主」两 tab，和订阅页自己的来源 tab 各说各话，勾选入口也有两套；
+ * 现在合成一套：每个来源 tab 里放它自己的候选列表。
+ */
+export type AddTab = 'clip' | 'hot' | 'rss' | 'github' | 'dsh';
+const ADD_TABS: ReadonlyArray<readonly [AddTab, string]> = [
+  ['clip', '🔖 收藏'],
+  ['hot', '🔥 热点新闻'],
+  ['rss', '📡 RSS 订阅'],
+  ['github', '🐙 GitHub'],
+  ['dsh', '🧩 DSH 插件'],
+];
 const TAB_STORAGE_KEY = 'superman.addsheet.tab';
 
 interface AddSheetProps {
   open: boolean;
   onClose: () => void;
+  /** 从订阅页「+」打开时指定的来源 tab（缺省读上次使用记录）。 */
+  initialTab?: AddTab;
 }
 
 /**
@@ -35,17 +55,18 @@ interface AddSheetProps {
  * 取代旧 PastePanel（收藏弹层）与 FeedsManagerSheet（订阅管理）的新增职责；
  * 已有订阅的管理（启停/删除/OPML）在「我的 → 订阅」。
  */
-export default function AddSheet({ open, onClose }: AddSheetProps) {
+export default function AddSheet({ open, onClose, initialTab }: AddSheetProps) {
   const [tab, setTab] = useState<AddTab>('clip');
 
-  // 记住上次用的 tab：最高频动作少点一次
+  // 记住上次用的 tab：最高频动作少点一次；带 initialTab 时以调用方为准
   useEffect(() => {
     if (!open) return;
+    if (initialTab) { setTab(initialTab); return; }
     try {
       const saved = window.localStorage.getItem(TAB_STORAGE_KEY);
-      if (saved === 'subscribe' || saved === 'clip') setTab(saved);
+      if (saved && ADD_TABS.some(([key]) => key === saved)) setTab(saved as AddTab);
     } catch { /* 隐私模式忽略 */ }
-  }, [open]);
+  }, [open, initialTab]);
 
   const switchTab = useCallback((next: AddTab) => {
     setTab(next);
@@ -59,15 +80,13 @@ export default function AddSheet({ open, onClose }: AddSheetProps) {
           <Plus aria-hidden="true" className="h-4 w-4 text-primary" strokeWidth={2.5} />
           <h2 className="text-base font-semibold text-foreground">添加</h2>
         </div>
-        <p className="mt-1 text-xs text-muted-foreground">收藏内容、订阅博主，都从这里进</p>
+        <p className="mt-1 text-xs text-muted-foreground">收藏内容、订阅平台，都从这里进</p>
 
-        <div className="mt-3 flex gap-1 rounded-full border border-border bg-secondary/60 p-1" role="tablist">
-          {(
-            [
-              ['clip', '🔖 收藏'],
-              ['subscribe', '📡 订阅博主'],
-            ] as Array<[AddTab, string]>
-          ).map(([id, name]) => (
+        <div
+          className="mt-3 flex gap-1 overflow-x-auto rounded-full border border-border bg-secondary/60 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          role="tablist"
+        >
+          {ADD_TABS.map(([id, name]) => (
             <button
               key={id}
               type="button"
@@ -75,7 +94,7 @@ export default function AddSheet({ open, onClose }: AddSheetProps) {
               aria-selected={tab === id}
               onClick={() => switchTab(id)}
               className={cn(
-                'flex h-9 flex-1 items-center justify-center rounded-full text-xs font-medium transition-colors duration-150',
+                'flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-full px-3 text-[11.5px] font-medium transition-colors duration-150',
                 'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
                 tab === id ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground',
               )}
@@ -85,7 +104,11 @@ export default function AddSheet({ open, onClose }: AddSheetProps) {
           ))}
         </div>
 
-        {tab === 'clip' ? <ClipPane /> : <SubscribePane />}
+        {tab === 'clip' ? <ClipPane /> : null}
+        {tab === 'hot' ? <SourcePrefPane source="hot" hint="勾选要看的平台，只有勾选的平台会展示。" /> : null}
+        {tab === 'github' ? <SourcePrefPane source="github" hint="勾选关注的分类，只有勾选的分类会展示。" /> : null}
+        {tab === 'dsh' ? <SourcePrefPane source="dsh" hint="插件市场目录待同步：中台连接后自动拉取分类。" /> : null}
+        {tab === 'rss' ? <SubscribePane /> : null}
       </div>
     </GlassDetailSheet>
   );
@@ -214,6 +237,7 @@ function ClipPane() {
         const data = await res.json();
         if (!data.ok) throw new Error(data.error?.message || '识别失败');
         setSmartResult(data.data as SmartResult);
+        notifyClipsChanged();
         toast.success(
           data.data?.kind === 'creator'
             ? '已识别博主'
@@ -286,6 +310,7 @@ function ClipPane() {
       const data = await res.json();
       if (!data.ok) throw new Error(data.error?.message || '保存失败');
       toast.success(data.data?.alreadyExists ? '已在收藏中（复用已有记录）' : '已收入收藏夹');
+      notifyClipsChanged();
       setTextBody('');
       setSourceUrl('');
       setExpanded(null);
@@ -320,6 +345,7 @@ function ClipPane() {
       const data = await res.json();
       if (!data.ok) throw new Error(data.error?.message || '上传失败');
       toast.success('视频已收藏');
+      notifyClipsChanged();
       setVideo(null);
       setSourceUrl('');
       setExpanded(null);
@@ -635,9 +661,6 @@ function ClipPane() {
           </div>
         ))}
       </div>
-      <p className="mt-4 border-t border-border/60 pt-3 text-center text-[11px] text-muted-foreground">
-        已收藏的内容在 <b className="font-medium text-foreground">收藏</b> 页查看与整理
-      </p>
     </div>
   );
 }
@@ -724,11 +747,11 @@ function SubscribePane() {
             <div key={index} className="h-14 animate-pulse rounded-2xl bg-muted" aria-hidden="true" />
           ))}
         </div>
-      ) : recommended.length === 0 ? (
-        <p className="py-6 text-center text-xs text-muted-foreground">暂无推荐数据</p>
+      ) : recommended.filter((entry) => !subscribedUrls.has(entry.url)).length === 0 ? (
+        <p className="py-6 text-center text-xs text-muted-foreground">全部推荐博主都已订阅；管理已订阅去「我的 → 订阅」</p>
       ) : (
         <div>
-          {recommended.map((entry) => {
+          {recommended.filter((entry) => !subscribedUrls.has(entry.url)).map((entry) => {
             const subscribed = subscribedUrls.has(entry.url);
             return (
               <div
@@ -821,10 +844,114 @@ function SubscribePane() {
           </button>
         </form>
       )}
+    </div>
+  );
+}
 
-      <p className="mt-4 border-t border-border/60 pt-3 text-center text-[11px] text-muted-foreground">
-        管理已有订阅（暂停 / 删除 / OPML）→ <b className="font-medium text-foreground">我的 → 订阅</b>
-      </p>
+/* ═══════════════════════ 来源勾选 pane（热点 / GitHub / DSH） ═══════════════════════ */
+
+/**
+ * 一个来源一张勾选列表：行样式与「推荐博主」同一套（有底色的卡片行 + 勾选框），
+ * 保存后立刻通知订阅页刷新，热点由宿主「保存即采集」补数据。
+ */
+function SourcePrefPane({ source, hint }: { source: 'hot' | 'github' | 'dsh'; hint: string }) {
+  const [catalog, setCatalog] = useState<Array<{ key: string; label: string }>>([]);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    void Promise.all([
+      listSubscribeCatalog(source, { notifyOnError: false }).catch(() => []),
+      listSubscribePrefs({ notifyOnError: false }).catch(() => []),
+    ])
+      .then(([items, prefRows]) => {
+        if (cancelled) return;
+        setCatalog(items);
+        setPicked(prefRows.filter((row) => row.sourceKey === source).map((row) => row.prefKey));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [source]);
+
+  const toggle = (key: string) =>
+    setPicked((prev) => (prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]));
+
+  const save = useCallback(async () => {
+    setSaving(true);
+    try {
+      await saveSubscribePrefs(source, picked);
+      toast.success('已保存，正在按新的勾选采集…');
+      window.dispatchEvent(new CustomEvent('superman:prefs-changed', { detail: { source } }));
+    } catch {
+      // apiClient 已统一 toast
+    } finally {
+      setSaving(false);
+    }
+  }, [source, picked]);
+
+  return (
+    <div>
+      <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">{hint}</p>
+      {loading ? (
+        <div className="mt-3 space-y-2">
+          {Array.from({ length: 5 }, (_, index) => (
+            <div key={index} className="h-11 animate-pulse rounded-2xl bg-muted" aria-hidden="true" />
+          ))}
+        </div>
+      ) : catalog.length === 0 ? (
+        <p className="mt-6 py-6 text-center text-xs text-muted-foreground">目录暂无内容</p>
+      ) : (
+        <div className="mt-3 space-y-2">
+          {catalog.map((item) => {
+            const checked = picked.includes(item.key);
+            return (
+              <button
+                key={item.key}
+                type="button"
+                role="checkbox"
+                aria-checked={checked}
+                onClick={() => toggle(item.key)}
+                className={cn(
+                  'flex w-full items-center gap-3 rounded-2xl border px-3.5 py-2.5 text-left transition-colors duration-150',
+                  'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                  checked
+                    ? 'border-primary/40 bg-primary/10'
+                    : 'border-border/60 bg-secondary/40 hover:bg-secondary/70',
+                )}
+              >
+                <span
+                  className={cn(
+                    'flex h-5 w-5 shrink-0 items-center justify-center rounded-md border',
+                    checked ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card',
+                  )}
+                >
+                  {checked ? <Check className="h-3.5 w-3.5" aria-hidden="true" /> : null}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {source === 'dsh' ? null : (
+        <div className="mt-4 flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => void save()}
+            disabled={saving || loading}
+            className="inline-flex h-9 items-center rounded-full border border-primary/40 bg-primary/10 px-5 text-xs font-medium text-primary transition-colors duration-150 hover:bg-primary/20 disabled:opacity-50"
+          >
+            {saving ? '保存中…' : '保存'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

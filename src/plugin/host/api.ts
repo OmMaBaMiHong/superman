@@ -692,6 +692,14 @@ const ROUTES: RouteDef[] = [
     const minStarsRaw = query.get('minStars')?.trim() ?? ''
     const minStarsParsed = minStarsRaw === '' ? Number.NaN : Number(minStarsRaw)
     const minStars = Number.isFinite(minStarsParsed) && minStarsParsed >= 0 ? Math.floor(minStarsParsed) : GITHUB_DEFAULT_MIN_STARS
+    // 订阅制：只展示/拉取用户勾选的 GitHub 标签（user_source_prefs source='github'）。
+    // 未勾选 = 不从中台拉取、不展示（空列表由面板出订阅引导）。
+    // 必须在 cacheKey 之前取：缓存 key 里带了标签集合（此前声明在下面，命中即 TDZ ReferenceError）。
+    const prefRows = await db.query(
+      `SELECT pref_key FROM user_source_prefs WHERE user_id = $1 AND source_key = 'github'`,
+      [session.userId],
+    )
+    const subscribedTags = prefRows.rows.map((row) => String(row.pref_key)).filter((key) => key !== '')
     const cacheKey = `chaos_github_repos:${minStars}:${subscribedTags.slice().sort().join(',')}`
     const TTL_MS = 10 * 60_000
     let repos: ChaosGithubRepo[] | null = null
@@ -716,13 +724,8 @@ const ROUTES: RouteDef[] = [
       fetchedAt = new Date().toISOString()
       writeBoardSlices({ [cacheKey]: { items: repos, fetchedAt } })
     }
-    // 订阅制：只展示/拉取用户勾选的 GitHub 标签（user_source_prefs source='github'）。
-    // 未勾选 = 不从中台拉取、不展示（空列表由面板出订阅引导）。
-    const prefRows = await db.query(
-      `SELECT pref_key FROM user_source_prefs WHERE user_id = $1 AND source_key = 'github'`,
-      [session.userId],
-    )
-    const subscribedTags = prefRows.rows.map((row) => String(row.pref_key)).filter((key) => key !== '')
+    // 未勾选任何标签 / 中台不可用时 repos 为 null：按空集合出引导，别让 for...of 抛 null。
+    repos ??= []
     // 功能类目统计（治理菜单）基于全量，分页过滤只作用于 items
     const counter = new Map<string, { key: string; name: string; count: number }>()
     for (const repo of repos) {
@@ -802,7 +805,7 @@ const ROUTES: RouteDef[] = [
     json(res, 200, {
       ok: true,
       data: {
-        date: dateParam || items[0]?.sourceDate || new Date().toISOString().slice(0, 10),
+        date: dateParam || items[0]?.sourceDate || todayLocalDateString(),
         total: items.length,
         platforms: groups,
       },
@@ -2079,6 +2082,26 @@ const ROUTES: RouteDef[] = [
       [session.userId],
     );
     json(res, 200, { ok: true, data: { items: rows, total: totalRes.rows[0]?.count ?? 0 } });
+  }),
+
+  // —— 删除收藏 ——
+  // 剪贴板收藏（origin='clipboard'）：删整条内容（clips / video_materials 等级联清理）；
+  // 订阅流里的 ⭐ 收藏：只取消标记，不动原始文章。
+  route('DELETE', '/favorites/:id', async ({ res, params, session, db }) => {
+    const id = requireId(params.id, '收藏 ID')
+    const { rows } = await db.query(
+      'select origin from articles where id = $1 and user_id = $2',
+      [id, session.userId],
+    )
+    const target = rows[0] as { origin: string | null } | undefined
+    if (!target) throw new NotFoundError('收藏不存在或不属于当前用户')
+    if (target.origin === 'clipboard') {
+      await db.query('delete from articles where id = $1 and user_id = $2', [id, session.userId])
+      json(res, 200, { ok: true, data: { deleted: true, mode: 'clip' } })
+      return
+    }
+    await db.query('update articles set is_favorited = false where id = $1 and user_id = $2', [id, session.userId])
+    json(res, 200, { ok: true, data: { deleted: true, mode: 'unfavorited' } })
   }),
 
   // —— 收藏备注 / 想法（可编辑；参与「生成稿件」提示词）——

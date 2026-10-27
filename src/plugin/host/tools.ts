@@ -13,6 +13,7 @@
  * 规范值；只有基础设施故障（数据库断连等）才抛异常（注册表转为 isError）。
  */
 import { AppError } from '@/server/infra/http/errors'
+import { todayLocalDateString } from '@/core/services/serviceConfig'
 import { isGovernanceStatus, type GovernanceStatus } from '@/core/governance/stateMachine'
 import { getGovernanceItemDetail, getGovernanceStats, listGovernanceQueue } from '@/core/governance/repository'
 import {
@@ -293,7 +294,7 @@ export function buildSupermanTools(deps: ToolsDeps): ToolDef[] {
           }
           return {
             ok: true,
-            date: date || items[0]?.sourceDate || new Date().toISOString().slice(0, 10),
+            date: date || items[0]?.sourceDate || todayLocalDateString(),
             platforms: [...byPlatform.entries()].map(([platform, list]) => ({
               platform,
               platformName: list[0]?.platformName || platform,

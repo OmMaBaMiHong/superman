@@ -186,7 +186,6 @@ export function apply(ctx: PluginContext, config: SupermanConfig = {}): void {
     stopHostIdentity()
     scheduler?.stop()
     heartbeat?.stop()
-    if (trendRadarTimer) clearInterval(trendRadarTimer)
     void dbReady.finally(() => db?.end().catch(() => {}))
   }
   if (typeof ctx.effect === 'function') ctx.effect(() => dispose, 'superman: db + heartbeat + scheduler + trendradar 定时')

@@ -231,6 +231,18 @@ async function requestApi<T>(
   );
 }
 
+/**
+ * 列表接口取数组：宿主（插件 api.ts）统一回信封 `data: { items: [...] }`，
+ * 与 `listFeedItems` / `listPlatformAccounts` 等一致；调用侧却按数组用（直接 map），
+ * 少一层解包就会拿到对象 → `.map is not a function` 把整棵 React 树打崩（黑屏）。
+ * 同时兼容直接回数组的后端（老 Next.js 路由），两种形状都吃。
+ */
+async function requestItems<T>(path: string, options?: RequestApiOptions): Promise<T[]> {
+  const data = await requestApi<{ items?: T[] } | T[]>(path, undefined, options);
+  if (Array.isArray(data)) return data as T[];
+  return (data as { items?: T[] } | null)?.items ?? [];
+}
+
 export interface OpmlImportResult {
   importedCount: number;
   duplicateCount: number;
@@ -1921,7 +1933,7 @@ export async function askKnowledge(
 
 // 知识库搜索（非流式）
 export async function searchKnowledge(q: string, options?: RequestApiOptions): Promise<KnowledgeSearchResult[]> {
-  return requestApi(`/api/knowledge/search?q=${encodeURIComponent(q)}`, undefined, options);
+  return requestItems<KnowledgeSearchResult>(`/api/knowledge/search?q=${encodeURIComponent(q)}`, options);
 }
 
 export function mapArticleDto(dto: ArticleDto): Article {
@@ -2669,13 +2681,16 @@ export async function listSubscribeCatalog(
   source: string,
   options?: RequestApiOptions,
 ): Promise<Array<{ key: string; label: string }>> {
-  return requestApi(`/api/subscribe/catalog?source=${encodeURIComponent(source)}`, undefined, options);
+  return requestItems<{ key: string; label: string }>(
+    `/api/subscribe/catalog?source=${encodeURIComponent(source)}`,
+    options,
+  );
 }
 
 export async function listSubscribeSources(
   options?: RequestApiOptions,
 ): Promise<SubscribeSourceEntry[]> {
-  return requestApi('/api/subscribe/sources', undefined, options);
+  return requestItems<SubscribeSourceEntry>('/api/subscribe/sources', options);
 }
 
 /** 用户订阅偏好行（来源下勾选的子类；空 = 全订）。 */
@@ -2685,7 +2700,7 @@ export interface SubscribePrefEntry {
 }
 
 export async function listSubscribePrefs(options?: RequestApiOptions): Promise<SubscribePrefEntry[]> {
-  return requestApi('/api/subscribe/prefs', undefined, options);
+  return requestItems<SubscribePrefEntry>('/api/subscribe/prefs', options);
 }
 
 export async function saveSubscribePrefs(

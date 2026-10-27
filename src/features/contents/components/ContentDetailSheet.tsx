@@ -80,7 +80,20 @@ export default function ContentDetailSheet({ articleId, onClose, onGenerate }: C
               />
             ) : (
               <>
-                {detail.previewImageUrl ? (
+                {detail.clip?.imageUrls?.length ? (
+                  // 图片收藏：多图网格（收藏时可能是 1~10 张）
+                  <div className="grid grid-cols-2 gap-2">
+                    {detail.clip.imageUrls.map((url) => (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        key={url}
+                        src={url}
+                        alt=""
+                        className="w-full rounded-xl border border-border/60 object-cover"
+                      />
+                    ))}
+                  </div>
+                ) : detail.previewImageUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={detail.previewImageUrl}
