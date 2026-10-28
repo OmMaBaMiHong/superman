@@ -6,6 +6,7 @@ import { getContentDetail, type ContentDetail } from '@/lib/api/apiClient';
 import { toast } from '@/features/toast/toast';
 import GlassDetailSheet from '@/components/ui/glass-detail-sheet';
 import { cn } from '@/lib/utils';
+import { mediaUrl, normalizeMediaHtml } from '@/lib/mediaUrl';
 import ContentVideoDetail from './ContentVideoDetail';
 
 interface ContentDetailSheetProps {
@@ -87,7 +88,7 @@ export default function ContentDetailSheet({ articleId, onClose, onGenerate }: C
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
                         key={url}
-                        src={url}
+                        src={mediaUrl(url)}
                         alt=""
                         className="w-full rounded-xl border border-border/60 object-cover"
                       />
@@ -96,7 +97,7 @@ export default function ContentDetailSheet({ articleId, onClose, onGenerate }: C
                 ) : detail.previewImageUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={detail.previewImageUrl}
+                    src={mediaUrl(detail.previewImageUrl)}
                     alt=""
                     className="max-h-72 w-full rounded-2xl border border-border/60 object-cover"
                   />
@@ -141,7 +142,7 @@ export default function ContentDetailSheet({ articleId, onClose, onGenerate }: C
                     <div
                       className="prose prose-sm mt-2 max-h-80 overflow-y-auto text-[13px] leading-relaxed text-secondary-foreground [&_img]:rounded-lg"
                       // 收藏正文来自可信来源（article-extractor / 文案），此处仅作展示
-                      dangerouslySetInnerHTML={{ __html: detail.contentHtml || `<p>${detail.summary ?? ''}</p>` }}
+                      dangerouslySetInnerHTML={{ __html: normalizeMediaHtml(detail.contentHtml || `<p>${detail.summary ?? ''}</p>`) }}
                     />
                   </section>
                 ) : null}

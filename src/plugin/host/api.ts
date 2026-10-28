@@ -226,6 +226,8 @@ function route(method: RouteDef['method'], pattern: string, handler: RouteHandle
 const MEDIA_TOKEN_ROUTES = new Set<string>([
   '/reader/items/:id/video',
   '/video/serve/:articleId',
+  // 收藏的图片/视频：<img>/<video> 直接拉 /s/api/media/*，同样带不了 Authorization 头
+  '/media/*',
 ])
 
 function parsePositiveInt(value: string | null): number | null {

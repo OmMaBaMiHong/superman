@@ -22,6 +22,7 @@ import ContentDetailSheet from '@/features/contents/components/ContentDetailShee
 import { toast } from '@/features/toast/toast';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '../lib/auth';
+import { mediaUrl } from '@/lib/mediaUrl';
 import { navigateTo } from '../lib/router';
 
 interface FavoriteItem {
@@ -163,7 +164,7 @@ function Card({ entry, onOpen, onEdit, onDelete, deleting }: CardProps) {
         <button type="button" onClick={onOpen} className={shell}>
           <span className="relative block bg-muted">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={images[0]} alt="" loading="lazy" className="block w-full object-cover" />
+            <img src={mediaUrl(images[0])} alt="" loading="lazy" className="block w-full object-cover" />
             {images.length > 1 ? (
               <span className="absolute left-2 top-2 rounded-full bg-black/60 px-2 py-0.5 font-mono text-[10px] text-white">
                 {images.length} 张
@@ -184,7 +185,7 @@ function Card({ entry, onOpen, onEdit, onDelete, deleting }: CardProps) {
           <span className="relative flex aspect-video items-center justify-center bg-gradient-to-br from-secondary/80 to-muted">
             {item.previewImageUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={item.previewImageUrl} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" />
+              <img src={mediaUrl(item.previewImageUrl)} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" />
             ) : null}
             <span className="relative flex h-11 w-11 items-center justify-center rounded-full bg-black/55 text-white backdrop-blur-sm">
               <Play aria-hidden="true" className="h-5 w-5" />
@@ -419,16 +420,18 @@ export default function FavoritesPage() {
       </div>
 
       <main className="min-h-0 flex-1 overflow-y-auto px-4 pb-6">
-        {saveDir === '' ? (
+        {saveDir !== null ? (
           <div className="mb-3 flex items-center gap-2 rounded-xl border border-border/60 bg-card/60 px-3.5 py-2.5 text-[12px] text-muted-foreground">
             <FolderSymlink aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
-            <span className="min-w-0 flex-1 truncate">未设置本地保存目录，收藏仅存插件数据库</span>
+            <span className="min-w-0 flex-1 truncate" title={saveDir || undefined}>
+              {saveDir ? <>存到：<span className="text-foreground">{saveDir}</span></> : '未设置本地保存目录，收藏仅存插件数据库'}
+            </span>
             <button
               type="button"
               onClick={() => navigateTo('/settings')}
               className="shrink-0 text-xs font-medium text-primary hover:underline"
             >
-              去设置
+              {saveDir ? '改目录' : '去设置'}
             </button>
           </div>
         ) : null}

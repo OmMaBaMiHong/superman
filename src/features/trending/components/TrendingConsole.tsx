@@ -407,7 +407,8 @@ export default function TrendingConsole({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [promoting, setPromoting] = useState<Record<string, boolean>>({});
-  const [activePlatform, setActivePlatform] = useState(0);
+  /** 当前锁定平台列；-1 = 全部（默认，轨道停在最左，不自动跳到第一个平台）。 */
+  const [activePlatform, setActivePlatform] = useState(-1);
   const [draggingRail, setDraggingRail] = useState(false);
 
   const [detailItem, setDetailItem] = useState<TrendRadarItem | null>(null);
@@ -706,12 +707,24 @@ export default function TrendingConsole({
     [getColumnOffsets],
   );
 
-  // 拖轨道 → pill 高亮同步（scroll 事件算最近列）
+  /** 回到「全部」：轨道滚到最左，高亮切回全部 pill。 */
+  const scrollToAll = useCallback(() => {
+    const rail = railRef.current;
+    if (!rail) return;
+    suppressScrollSyncRef.current = true;
+    setActivePlatform(-1);
+    rail.scrollTo({ left: 0, behavior: 'smooth' });
+    window.setTimeout(() => {
+      suppressScrollSyncRef.current = false;
+    }, 500);
+  }, []);
+
+  // 拖轨道 → pill 高亮同步（scroll 事件算最近列；停在最左 = 全部）
   const onRailScroll = useCallback(() => {
     if (suppressScrollSyncRef.current) return;
     const rail = railRef.current;
     if (!rail) return;
-    const index = nearestPlatformIndex(rail.scrollLeft);
+    const index = rail.scrollLeft <= 2 ? -1 : nearestPlatformIndex(rail.scrollLeft);
     setActivePlatform((current) => (current === index ? current : index));
   }, [nearestPlatformIndex]);
 
@@ -769,6 +782,7 @@ export default function TrendingConsole({
 
   // 处理器经 ref 供导航上报 effect 使用：函数本体逐渲染重建，进依赖会导致每次渲染重复上报
   const navHandlersRef = useRef({
+    scrollToAll,
     scrollToPlatform,
     handleSyncNow,
     switchRepoCat,
@@ -781,6 +795,7 @@ export default function TrendingConsole({
     repoState,
   });
   navHandlersRef.current = {
+    scrollToAll,
     scrollToPlatform,
     handleSyncNow,
     switchRepoCat,
@@ -803,12 +818,20 @@ export default function TrendingConsole({
     let canSync = false;
     let onRefresh: () => void = () => h.load();
     if (hotTab === 'news') {
-      pills = platforms.map((group, index) => ({
-        key: group.platform,
-        label: group.platformName,
-        count: group.items.length,
-        active: activePlatform === index,
-      }));
+      pills = [
+        {
+          key: 'all',
+          label: '全部',
+          count: platforms.reduce((sum, group) => sum + group.items.length, 0),
+          active: activePlatform === -1,
+        },
+        ...platforms.map((group, index) => ({
+          key: group.platform,
+          label: group.platformName,
+          count: group.items.length,
+          active: activePlatform === index,
+        })),
+      ];
       stats = data
         ? `${data.date} · ${platforms.reduce((sum, group) => sum + group.items.length, 0)} 条`
         : undefined;
@@ -859,6 +882,10 @@ export default function TrendingConsole({
       picks: allPlatforms.map((group) => ({ key: group.platform, label: group.platformName })),
       onPill: (_groupIndex: number, key: string) => {
         if (hotTab === 'news') {
+          if (key === 'all') {
+            h.scrollToAll();
+            return;
+          }
           const idx = h.platforms.findIndex((group) => group.platform === key);
           if (idx >= 0) h.scrollToPlatform(idx);
         } else if (hotTab === 'github') h.switchRepoCat(key);
@@ -969,6 +996,25 @@ export default function TrendingConsole({
               aria-label="平台切换"
               className="flex gap-1.5 overflow-x-auto px-4 pb-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:px-6"
             >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activePlatform === -1}
+                aria-current={activePlatform === -1 ? 'true' : undefined}
+                onClick={scrollToAll}
+                className={cn(
+                  'flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-xs font-medium transition-colors duration-150',
+                  'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                  activePlatform === -1
+                    ? 'border-primary/40 bg-primary/10 text-primary'
+                    : 'border-border text-muted-foreground hover:text-foreground',
+                )}
+              >
+                全部
+                <span className="font-mono text-[10px] tabular-nums opacity-60">
+                  {platforms.reduce((sum, group) => sum + group.items.length, 0)}
+                </span>
+              </button>
               {platforms.map((group, index) => (
                 <button
                   key={group.platform}
