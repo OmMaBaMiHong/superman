@@ -15,6 +15,7 @@ import {
   type AiRuntimeConfig,
 } from '@/server/integrations/ai/runtimeConfig';
 import { createOpenAIClient } from '@/server/integrations/ai/openaiClient';
+import { dshComplete, isDshLlmAvailable } from '@/server/integrations/ai/dshLlmBridge';
 import { extractAssistantText } from '@/server/integrations/ai/providerCompatibility';
 import { stripHtmlToText } from '@/lib/reader/articleSummary';
 import { normalizeTitle, titleSimilarity } from '@/core/governance/dedup';
@@ -125,7 +126,9 @@ export async function executeRewriteJob(
     const article = await getPipelineArticle(db, job.articleId, scopedUserId);
     if (!article) return await fail('选题文章不存在或已被删除');
 
-    const originalText = stripHtmlToText(article.contentFullHtml ?? article.contentHtml ?? '');
+    // 热点转选题的条目只有标题+摘要（无正文）：回退用标题+摘要作为生成输入
+    const originalText = stripHtmlToText(article.contentFullHtml ?? article.contentHtml ?? '')
+      || [article.title, article.summary].filter(Boolean).join('\n\n');
     if (!originalText) return await fail('原文内容为空，无法洗稿');
 
     const uiSettings = normalizePersistedSettings(await getUiSettings(db, scopedUserId));
@@ -134,8 +137,20 @@ export async function executeRewriteJob(
       settings: { ai: uiSettings.ai },
       aiApiKey,
     });
-    const complete = deps?.complete ?? defaultComplete;
-    if (!deps?.complete && !isAiRuntimeConfigComplete(aiConfig)) {
+    // AI 调用优先走 DSH 宿主模型（插件形态：DeepSeek 账号承担成本，零本地配置）；
+    // 宿主桥不可用（独立 worker 等形态）才回落本地配置的 OpenAI 兼容通道。
+    const useDshLlm = !deps?.complete && isDshLlmAvailable();
+    const complete = deps?.complete
+      ?? (useDshLlm
+        ? async (input: { prompt: string; config: unknown }) =>
+            dshComplete({
+              system: '你是资深新媒体编辑，严格按用户要求的格式输出。',
+              messages: [{ role: 'user', content: input.prompt }],
+              temperature: 0.7,
+              maxTokens: 4000,
+            })
+        : defaultComplete);
+    if (!deps?.complete && !useDshLlm && !isAiRuntimeConfigComplete(aiConfig)) {
       return await fail('未配置 AI（模型/接口地址/API Key），无法执行洗稿');
     }
 
