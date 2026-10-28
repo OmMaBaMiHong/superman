@@ -15,13 +15,14 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Bookmark, Image as ImageIcon, Link2, Loader2, PencilLine, Play, Plus, RefreshCw, Trash2, Type,
+  Bookmark, FolderSymlink, Image as ImageIcon, Link2, Loader2, PencilLine, Play, Plus, RefreshCw, Trash2, Type,
 } from 'lucide-react';
 import GlassDetailSheet from '@/components/ui/glass-detail-sheet';
 import ContentDetailSheet from '@/features/contents/components/ContentDetailSheet';
 import { toast } from '@/features/toast/toast';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '../lib/auth';
+import { navigateTo } from '../lib/router';
 
 interface FavoriteItem {
   id: string;
@@ -247,6 +248,8 @@ export default function FavoritesPage() {
   const [editNote, setEditNote] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // 保存目录：null=未知，''=未设置（提示去关联 Obsidian vault）
+  const [saveDir, setSaveDir] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -271,6 +274,21 @@ export default function FavoritesPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    apiFetch('/s/api/me/favorites/dir')
+      .then((res) => res.json())
+      .then((json) => { if (json.ok) setSaveDir(typeof json.data.dir === 'string' ? json.data.dir : ''); })
+      .catch(() => setSaveDir(''));
+    const onDirChanged = () => {
+      apiFetch('/s/api/me/favorites/dir')
+        .then((res) => res.json())
+        .then((json) => { if (json.ok) setSaveDir(typeof json.data.dir === 'string' ? json.data.dir : ''); })
+        .catch(() => {});
+    };
+    window.addEventListener('superman:favorites-dir-changed', onDirChanged);
+    return () => window.removeEventListener('superman:favorites-dir-changed', onDirChanged);
+  }, []);
 
   // 「+ → 收藏」保存后刷新
   useEffect(() => {
@@ -401,6 +419,19 @@ export default function FavoritesPage() {
       </div>
 
       <main className="min-h-0 flex-1 overflow-y-auto px-4 pb-6">
+        {saveDir === '' ? (
+          <div className="mb-3 flex items-center gap-2 rounded-xl border border-border/60 bg-card/60 px-3.5 py-2.5 text-[12px] text-muted-foreground">
+            <FolderSymlink aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 flex-1 truncate">未设置本地保存目录，收藏仅存插件数据库</span>
+            <button
+              type="button"
+              onClick={() => navigateTo('/settings')}
+              className="shrink-0 text-xs font-medium text-primary hover:underline"
+            >
+              去设置
+            </button>
+          </div>
+        ) : null}
         {loading ? (
           <div className="flex items-center justify-center py-20 text-muted-foreground">
             <Loader2 aria-hidden="true" className="h-5 w-5 animate-spin" />

@@ -108,6 +108,8 @@ export async function enrichArticleWithTranscript(
     );
 
     await setStatus(db, input, 'done', null);
+    const { syncArticleToVault } = await import('@/server/infra/storage/vaultExport');
+    void syncArticleToVault(db as never, input.articleId);
     return { ok: true, source: result.source, textLength: text.length };
   } catch (err) {
     const message = friendlyError(err);

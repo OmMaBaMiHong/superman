@@ -6,6 +6,7 @@ import { navigateTo } from '../lib/router';
 import MobileTabBar from '@/features/mobile/components/MobileTabBar';
 import PlatformAccountsPanel from '../components/PlatformAccountsPanel';
 import FreeModelsPanel from '../components/FreeModelsPanel';
+import FavoriteDirPanel from '../components/FavoriteDirPanel';
 
 /** H5 设置页（分区式）：①发布平台授权 ②账号。 */
 export default function H5SettingsPage({ username }: { username: string | null }) {
@@ -17,6 +18,7 @@ export default function H5SettingsPage({ username }: { username: string | null }
           <p className="mt-1 text-[12px] text-muted-foreground">AI 模型、发布授权与账号管理</p>
         </div>
 
+        <FavoriteDirPanel />
         <FreeModelsPanel />
         <PlatformAccountsPanel />
 

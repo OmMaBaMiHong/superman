@@ -1909,6 +1909,8 @@ const ROUTES: RouteDef[] = [
       imageUrls: Array.isArray(body.imageUrls) ? body.imageUrls : undefined,
       note: typeof body.note === 'string' ? body.note : null,
     });
+    const { syncArticleToVault } = await import('@/server/infra/storage/vaultExport');
+    if (!result.alreadyExists) void syncArticleToVault(db as never, result.articleId);
     json(res, 200, { ok: true, data: result });
   }),
   route('GET', '/clips', async ({ res, query, session, db }) => {
@@ -2101,12 +2103,32 @@ const ROUTES: RouteDef[] = [
     const target = rows[0] as { origin: string | null } | undefined
     if (!target) throw new NotFoundError('收藏不存在或不属于当前用户')
     if (target.origin === 'clipboard') {
+      const { deleteFavoriteFiles } = await import('@/server/infra/storage/vaultExport');
+      await deleteFavoriteFiles(db as never, session.userId, id);
       await db.query('delete from articles where id = $1 and user_id = $2', [id, session.userId])
       json(res, 200, { ok: true, data: { deleted: true, mode: 'clip' } })
       return
     }
     await db.query('update articles set is_favorited = false where id = $1 and user_id = $2', [id, session.userId])
     json(res, 200, { ok: true, data: { deleted: true, mode: 'unfavorited' } })
+  }),
+
+  // —— 收藏保存目录（Obsidian vault 关联）：源文件（md/图/视频）直接落该目录，库里只存链接 ——
+  route('GET', '/me/favorites/dir', async ({ res, session, db }) => {
+    const { getFavoriteDir, probeFavoriteDir } = await import('@/server/infra/storage/vaultExport');
+    const dir = await getFavoriteDir(db as never, session.userId);
+    json(res, 200, { ok: true, data: { dir, ...(await probeFavoriteDir(dir)) } });
+  }),
+
+  route('PUT', '/me/favorites/dir', async ({ req, res, session, db }) => {
+    const body = await readJsonBody(req);
+    const dir = typeof body.dir === 'string' ? body.dir.trim() : '';
+    if (dir && !dir.startsWith('/')) throw new ValidationError('请填写绝对路径', { dir: '需要 / 开头的本机绝对路径' });
+    const { setFavoriteDir, probeFavoriteDir } = await import('@/server/infra/storage/vaultExport');
+    if (!(await setFavoriteDir(db as never, session.userId, dir))) {
+      throw new ValidationError('目录不可用', { dir: '目录无法创建或不可写' });
+    }
+    json(res, 200, { ok: true, data: { dir, ...(await probeFavoriteDir(dir)) } });
   }),
 
   // —— 收藏备注 / 想法（可编辑；参与「生成稿件」提示词）——
@@ -2124,6 +2146,8 @@ const ROUTES: RouteDef[] = [
       title,
     })
     if (!updated) throw new NotFoundError('收藏不存在或不属于当前用户')
+    const { syncArticleToVault } = await import('@/server/infra/storage/vaultExport');
+    void syncArticleToVault(db as never, requireId(params.id, '收藏 ID'));
     json(res, 200, { ok: true, data: { updated: true } })
   }),
 
@@ -2157,7 +2181,9 @@ const ROUTES: RouteDef[] = [
 
     if (files.length === 0) throw new ValidationError('请选择图片', { images: '至少选择一张图片' });
 
-    const savedFiles = await saveUploads(files);
+    const { getFavoriteDir, attachmentsRoot, syncArticleToVault } = await import('@/server/infra/storage/vaultExport');
+    const favDir = await getFavoriteDir(db as never, session.userId);
+    const savedFiles = await saveUploads(files, favDir ? attachmentsRoot(favDir) : undefined);
     const imageUrls = savedFiles.map((f) => f.url);
 
     const result = await createClip(db as never, {
@@ -2170,6 +2196,7 @@ const ROUTES: RouteDef[] = [
       imageUrls,
     });
 
+    if (!result.alreadyExists) void syncArticleToVault(db as never, result.articleId);
     json(res, 200, { ok: true, data: { articleId: result.articleId, imageUrls, alreadyExists: result.alreadyExists } });
   }),
 
@@ -2202,7 +2229,9 @@ const ROUTES: RouteDef[] = [
     const videoFile = holder.videoFile as File | null;
     if (!videoFile) throw new ValidationError('请选择视频', { video: '请选择一个视频文件' });
 
-    const saved = await saveUpload(videoFile);
+    const { getFavoriteDir, attachmentsRoot, syncArticleToVault } = await import('@/server/infra/storage/vaultExport');
+    const favDir = await getFavoriteDir(db as never, session.userId);
+    const saved = await saveUpload(videoFile, favDir ? attachmentsRoot(favDir) : undefined);
 
     // 存 video_materials 表
     const videoResult = await db.query(
@@ -2224,6 +2253,7 @@ const ROUTES: RouteDef[] = [
     if (videoMaterialId) {
       await db.query('update video_materials set article_id = $1 where id = $2', [result.articleId, videoMaterialId]);
     }
+    if (!result.alreadyExists) void syncArticleToVault(db as never, result.articleId);
 
     json(res, 200, { ok: true, data: { articleId: result.articleId, videoUrl: saved.url, fileName: saved.fileName, alreadyExists: result.alreadyExists } });
   }),
@@ -2248,6 +2278,8 @@ const ROUTES: RouteDef[] = [
       sourceTitle: article.title || null,
     });
 
+    const { syncArticleToVault } = await import('@/server/infra/storage/vaultExport');
+    if (!result.alreadyExists) void syncArticleToVault(db as never, result.articleId);
     json(res, 200, { ok: true, data: { articleId: result.articleId, title: (article.title || '').slice(0, 80), summary: result.summary, alreadyExists: result.alreadyExists } });
   }),
 
@@ -2280,6 +2312,9 @@ const ROUTES: RouteDef[] = [
           sourceTitle: title,
           imageUrls: info.cover ? [info.cover] : [],
         });
+
+        const { syncArticleToVault: syncVault } = await import('@/server/infra/storage/vaultExport');
+        if (!clip.alreadyExists) void syncVault(db as never, clip.articleId);
 
         // 后台提取视频文案 → 回填文章内容（供二创流水线使用），不阻塞响应
         if (!clip.alreadyExists) {
@@ -2342,6 +2377,8 @@ const ROUTES: RouteDef[] = [
         sourceUrl: url,
         sourceTitle: article.title || null,
       });
+      const { syncArticleToVault } = await import('@/server/infra/storage/vaultExport');
+      if (!clip.alreadyExists) void syncArticleToVault(db as never, clip.articleId);
       json(res, 200, { ok: true, data: { articleId: clip.articleId, title, kind: 'article', alreadyExists: clip.alreadyExists, creator } });
       return;
     }
@@ -2364,6 +2401,8 @@ const ROUTES: RouteDef[] = [
       sourceUrl: url,
       sourceTitle: resolved.title || null,
     });
+    const { syncArticleToVault } = await import('@/server/infra/storage/vaultExport');
+    if (!clip.alreadyExists) void syncArticleToVault(db as never, clip.articleId);
     json(res, 200, { ok: true, data: { articleId: clip.articleId, title: fallbackTitle, kind: 'link', alreadyExists: clip.alreadyExists, creator } });
   }),
 
@@ -2545,7 +2584,7 @@ const ROUTES: RouteDef[] = [
   }),
 
   // —— 媒体文件服务（上传的图片/视频）——
-  route('GET', '/media/*', async ({ res, params }) => {
+  route('GET', '/media/*', async ({ res, params, session, db }) => {
     const { resolveMediaPath } = await import('@/server/infra/storage/localFileStore');
     const { createReadStream, stat } = await import('node:fs');
     const { promisify } = await import('node:util');
@@ -2557,7 +2596,9 @@ const ROUTES: RouteDef[] = [
       return;
     }
 
-    const filePath = resolveMediaPath(`/s/app/media/${relPath}`);
+    const { getFavoriteDir, attachmentsRoot } = await import('@/server/infra/storage/vaultExport');
+    const favDir = await getFavoriteDir(db as never, session.userId);
+    const filePath = resolveMediaPath(`/s/app/media/${relPath}`, favDir ? [attachmentsRoot(favDir)] : []);
     if (!filePath) {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: false, error: { code: 'not_found', message: '文件不存在' } }));
