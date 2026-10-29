@@ -2268,6 +2268,51 @@ const ROUTES: RouteDef[] = [
     json(res, 200, { ok: true, data: { dir, ...(await probeFavoriteDir(dir)) } });
   }),
 
+  // 整理已有收藏：把老收藏（还在默认 uploads 目录里的图/视频）写进 vault 目录，并补视频首帧封面
+  route('POST', '/me/favorites/maintenance', async ({ res, session, db }) => {
+    const { getFavoriteDir, syncArticleToVault } = await import('@/server/infra/storage/vaultExport');
+    const { ensureVideoPoster, posterUrlFor } = await import('@/server/infra/media/videoPoster');
+    const dir = await getFavoriteDir(db as never, session.userId);
+
+    // 1) 视频封面补全（不依赖目录配置）
+    const { rows: videoRows } = await db.query(
+      `select a.id::text as "articleId", v.video_file_path as "videoPath", v.video_url as "videoUrl"
+       from video_materials v
+       join articles a on a.id = v.article_id and a.user_id = $1
+       where a.origin = 'clipboard'
+         and (a.preview_image_url is null or a.preview_image_url = '')
+       limit 100`,
+      [session.userId],
+    );
+    let posters = 0;
+    for (const row of videoRows as Array<{ articleId: string; videoPath: string | null; videoUrl: string | null }>) {
+      if (!row.videoPath) continue;
+      const posterPath = await ensureVideoPoster(row.videoPath);
+      const posterUrl = posterPath && row.videoUrl ? posterUrlFor(row.videoUrl) : null;
+      if (posterUrl) {
+        await db.query('update articles set preview_image_url = $1 where id = $2', [posterUrl, row.articleId]);
+        posters += 1;
+      }
+    }
+
+    // 2) 落盘到收藏目录（未配置目录就只做封面）
+    let notes = 0;
+    if (dir) {
+      const { rows } = await db.query(
+        `select id::text from articles
+         where user_id = $1 and origin = 'clipboard'
+         order by fetched_at desc, id desc limit 500`,
+        [session.userId],
+      );
+      for (const row of rows as Array<{ id: string }>) {
+        await syncArticleToVault(db as never, row.id);
+        notes += 1;
+      }
+    }
+
+    json(res, 200, { ok: true, data: { dir, notes, posters, hasDir: Boolean(dir) } });
+  }),
+
   route('PUT', '/me/favorites/dir', async ({ req, res, session, db }) => {
     const body = await readJsonBody(req);
     const dir = typeof body.dir === 'string' ? body.dir.trim() : '';
@@ -2406,6 +2451,19 @@ const ROUTES: RouteDef[] = [
     if (videoMaterialId) {
       await db.query('update video_materials set article_id = $1 where id = $2', [result.articleId, videoMaterialId]);
     }
+
+    // 抽首帧当封面（本机 ffmpeg 缺失时跳过，不阻断收藏）
+    try {
+      const { ensureVideoPoster, posterUrlFor } = await import('@/server/infra/media/videoPoster');
+      const posterPath = await ensureVideoPoster(saved.filePath);
+      const posterUrl = posterPath ? posterUrlFor(saved.url) : null;
+      if (posterUrl) {
+        await db.query('update articles set preview_image_url = $1 where id = $2', [posterUrl, result.articleId]);
+      }
+    } catch {
+      // 封面失败不影响收藏结果
+    }
+
     if (!result.alreadyExists) void syncArticleToVault(db as never, result.articleId);
 
     json(res, 200, { ok: true, data: { articleId: result.articleId, videoUrl: saved.url, fileName: saved.fileName, alreadyExists: result.alreadyExists } });

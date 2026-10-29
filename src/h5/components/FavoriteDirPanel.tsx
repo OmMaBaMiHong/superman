@@ -6,7 +6,7 @@
  * webview 没有原生目录选择器，直接填本机绝对路径，服务端校验可写并探测 .obsidian。
  */
 import { useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, FolderSymlink, Loader2 } from 'lucide-react';
+import { CheckCircle2, FolderSymlink, Loader2, Sparkles } from 'lucide-react';
 import { toast } from '@/features/toast/toast';
 import { apiFetch } from '../lib/auth';
 
@@ -21,6 +21,7 @@ export default function FavoriteDirPanel() {
   const [status, setStatus] = useState<DirStatus | null>(null);
   const [value, setValue] = useState('');
   const [saving, setSaving] = useState(false);
+  const [maintaining, setMaintaining] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -59,6 +60,27 @@ export default function FavoriteDirPanel() {
     }
   }, [value]);
 
+  // 整理已有收藏：老收藏的图/视频复制进目录 + 给视频补首帧封面
+  const maintenance = useCallback(async () => {
+    setMaintaining(true);
+    try {
+      const res = await apiFetch('/s/api/me/favorites/maintenance', { method: 'POST' });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error?.message ?? '整理失败');
+      const { notes, posters, hasDir } = json.data as { notes: number; posters: number; hasDir: boolean };
+      toast.success(
+        hasDir
+          ? `已整理：${notes} 条收藏写入目录、${posters} 个视频封面`
+          : `已生成 ${posters} 个视频封面（未配置目录，只做了封面）`,
+      );
+      window.dispatchEvent(new CustomEvent('superman:clips-changed'));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '整理失败');
+    } finally {
+      setMaintaining(false);
+    }
+  }, []);
+
   const hint = !status?.dir
     ? '未设置：收藏仅存插件数据库'
     : !status.exists
@@ -89,6 +111,17 @@ export default function FavoriteDirPanel() {
         spellCheck={false}
         className="mt-3 h-10 w-full rounded-xl border border-border bg-card px-3.5 font-mono text-[12px] text-foreground placeholder:text-muted-foreground/60 focus-visible:border-primary focus-visible:outline-none"
       />
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => void maintenance()}
+          disabled={maintaining}
+          className="inline-flex h-9 items-center gap-1.5 rounded-full border border-border px-4 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+        >
+          {maintaining ? <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" /> : <Sparkles aria-hidden="true" className="h-3.5 w-3.5" />}
+          {maintaining ? '整理中…' : '整理已有收藏（写入目录 + 视频封面）'}
+        </button>
+      </div>
       <div className="mt-2.5 flex items-center justify-between gap-3">
         <span
           className={

@@ -283,6 +283,29 @@ export default function FavoritesPage() {
     }
   }, []);
 
+  const [maintaining, setMaintaining] = useState(false);
+
+  /** 整理已有收藏：老图/视频复制进保存目录 + 给视频补首帧封面。 */
+  const maintainFavorites = useCallback(async () => {
+    setMaintaining(true);
+    try {
+      const res = await apiFetch('/s/api/me/favorites/maintenance', { method: 'POST' });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error?.message ?? '整理失败');
+      const { notes, posters, hasDir } = json.data as { notes: number; posters: number; hasDir: boolean };
+      toast.success(
+        hasDir
+          ? `已整理：${notes} 条写入目录、${posters} 个视频封面`
+          : `已生成 ${posters} 个视频封面（未配置目录）`,
+      );
+      void load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '整理失败');
+    } finally {
+      setMaintaining(false);
+    }
+  }, [load]);
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -461,6 +484,14 @@ export default function FavoritesPage() {
             <span className="min-w-0 flex-1 truncate" title={saveDir || undefined}>
               {saveDir ? <>存到：<span className="text-foreground">{saveDir}</span></> : '未设置本地保存目录，收藏仅存插件数据库'}
             </span>
+            <button
+              type="button"
+              onClick={() => { void maintainFavorites(); }}
+              disabled={maintaining}
+              className="shrink-0 text-xs font-medium text-primary hover:underline disabled:opacity-50"
+            >
+              {maintaining ? '整理中…' : '整理'}
+            </button>
             <button
               type="button"
               onClick={() => navigateTo('/settings')}

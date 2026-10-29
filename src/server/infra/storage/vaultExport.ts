@@ -1,4 +1,4 @@
-import { mkdir, writeFile, unlink, access, constants } from 'node:fs/promises';
+import { mkdir, writeFile, unlink, access, constants, copyFile } from 'node:fs/promises';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import TurndownService from 'turndown';
@@ -30,6 +30,26 @@ export function mediaUrlToVaultRef(url: string): string | null {
   const rel = url.slice(prefix.length);
   if (!rel || rel.includes('..')) return null;
   return `attachments/${rel}`;
+}
+
+/** 把一条媒体 URL 对应的文件复制进 vault 的 attachments/（已存在则跳过）。返回是否复制成功。 */
+export async function ensureMediaInVault(db: QueryRunner, dir: string, mediaUrl: string): Promise<boolean> {
+  try {
+    const prefix = ['/s/api/media/', '/s/app/media/'].find((p) => mediaUrl.startsWith(p));
+    if (!prefix) return false;
+    const rel = mediaUrl.slice(prefix.length);
+    if (!rel || rel.includes('..')) return false;
+    const target = path.join(attachmentsRoot(dir), rel);
+    if (existsSync(target)) return true;
+    const { resolveMediaPath } = await import('./localFileStore');
+    const source = resolveMediaPath(mediaUrl, [attachmentsRoot(dir)]);
+    if (!source || !existsSync(source)) return false;
+    await mkdir(path.dirname(target), { recursive: true });
+    await copyFile(source, target);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function getFavoriteDir(db: QueryRunner, userId: number | string): Promise<string> {
@@ -249,6 +269,16 @@ export async function syncArticleToVault(db: QueryRunner, articleId: number | st
       transcriptText: video?.transcript_text ?? null,
       collectedAt: article.fetched_at ? new Date(article.fetched_at) : new Date(),
     });
+
+    // 旧收藏的媒体还在默认目录（~/.superman/uploads），一并复制进 vault，笔记里的 ![[attachments/…]] 才有效
+    const mediaUrls = [
+      ...imageUrls,
+      ...(video?.video_url ? [video.video_url] : []),
+      ...(video?.video_url ? [video.video_url.replace(/\.[^./\\]+$/, '.poster.jpg')] : []),
+    ];
+    for (const mediaUrl of mediaUrls) {
+      await ensureMediaInVault(db, dir, mediaUrl);
+    }
 
     const fileName = article.vault_note_path || `${slugify(title)}-${stampOf(new Date())}.md`;
     const notePath = fileName.endsWith('.md') ? fileName : `${fileName}.md`;
