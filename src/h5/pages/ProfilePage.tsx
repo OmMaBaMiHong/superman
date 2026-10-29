@@ -1,6 +1,6 @@
 'use client';
 
-import { Bell, ChevronRight, FileText, Heart, Lightbulb, Loader2, LogOut, PenLine, Pencil, Rss, Settings, TrendingUp } from 'lucide-react';
+import { Bell, ChevronRight, FileText, Heart, Lightbulb, Loader2, LogOut, PenLine, Pencil, Rss, TrendingUp } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import {
   createRewriteJobs,
@@ -20,6 +20,8 @@ import SubscriptionsPanel from '../components/SubscriptionsPanel';
 import ServicesPanel from '../components/ServicesPanel';
 import RelayPanel from '../components/RelayPanel';
 import MembershipCard from '../components/MembershipCard';
+import FavoriteDirPanel from '../components/FavoriteDirPanel';
+import MyDataPanel from '../components/MyDataPanel';
 
 /**
  * 「我的」页面 — 个人数据中心。
@@ -27,8 +29,8 @@ import MembershipCard from '../components/MembershipCard';
  * 设置入口在右上角齿轮按钮。
  */
 export default function H5ProfilePage({ username }: { username: string | null }) {
-  const [subTab, setSubTab] = useState<'works' | 'favorites' | 'subscriptions' | 'stats'>('works');
-  const [showSettings, setShowSettings] = useState(false);
+  // 「我的数据」是本页核心，默认落在数据 Tab
+  const [subTab, setSubTab] = useState<'works' | 'favorites' | 'subscriptions' | 'stats'>('stats');
 
   // 统计数据
   const [stats, setStats] = useState({ works: 0, favorites: 0, published: 0 });
@@ -121,19 +123,13 @@ export default function H5ProfilePage({ username }: { username: string | null })
               <p className="text-[11px] text-muted-foreground">DSH 插件伺服</p>
             </div>
           </div>
-          <button
-            type="button"
-            aria-label="设置"
-            onClick={() => setShowSettings(true)}
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-border text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            <Settings className="h-4 w-4" />
-          </button>
         </div>
 
         {/* 中转站会员卡：授权入口 + 订阅列表（授权管理在设置抽屉同一张卡） */}
         <div className="mt-4">
-          <MembershipCard onOpenSettings={() => setShowSettings(true)} />
+          <MembershipCard
+            onOpenSettings={() => document.getElementById('profile-settings')?.scrollIntoView({ behavior: 'smooth' })}
+          />
         </div>
 
         {/* 数据中台账号（Chaos）：绑定后推荐/素材行为带中台用户身份 */}
@@ -217,36 +213,33 @@ export default function H5ProfilePage({ username }: { username: string | null })
           {subTab === 'works' && <WorksList />}
           {subTab === 'favorites' && <FavoritesList />}
           {subTab === 'subscriptions' && <SubscriptionsPanel />}
-          {subTab === 'stats' && <StatsPanel />}
+          {subTab === 'stats' && <MyDataPanel />}
+        </div>
+
+        {/* 设置平摊（原抽屉改平铺）：中转站 / 服务与同步 / AI 模型 / 收藏目录 / 平台授权 */}
+        <div id="profile-settings" className="mt-8 space-y-5 border-t border-border/60 pt-6">
+          <h2 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">设置</h2>
+          <RelayPanel />
+          <ServicesPanel />
+          <FreeModelsPanel />
+          <FavoriteDirPanel />
+          <div className="space-y-3">
+            <h3 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              授权与凭证
+            </h3>
+            <PlatformAccountsPanel />
+            <PlatformCollectCookies />
+          </div>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-full border border-error/30 text-sm font-medium text-error transition-colors hover:bg-error/10"
+          >
+            <LogOut className="h-4 w-4" />
+            退出登录
+          </button>
         </div>
       </main>
-
-      {/* 设置抽屉（标准壳：≥768 居中 modal / <768 底部 sheet，与添加弹窗同款） */}
-      <GlassDetailSheet open={showSettings} onClose={() => setShowSettings(false)} ariaLabel="设置">
-        <div className="px-5 pb-8 pt-1 sm:px-7">
-          <h2 className="text-base font-semibold text-foreground">设置</h2>
-          <div className="mt-4 space-y-5">
-            <RelayPanel />
-            <ServicesPanel />
-            <FreeModelsPanel />
-            <div className="space-y-3">
-              <h3 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                授权与凭证
-              </h3>
-              <PlatformAccountsPanel />
-              <PlatformCollectCookies />
-            </div>
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-full border border-error/30 text-sm font-medium text-error transition-colors hover:bg-error/10"
-            >
-              <LogOut className="h-4 w-4" />
-              退出登录
-            </button>
-          </div>
-        </div>
-      </GlassDetailSheet>
     </div>
   );
 }
@@ -595,43 +588,6 @@ function formatDate(value: string): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value.slice(0, 10);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-/** 数据统计面板 */
-function StatsPanel() {
-  return (
-    <div className="space-y-3">
-      <div className="glass-surface rounded-2xl p-4">
-        <h3 className="text-sm font-medium">近 7 天活动</h3>
-        <div className="mt-3 grid grid-cols-7 gap-1">
-          {['一', '二', '三', '四', '五', '六', '日'].map((day, i) => (
-            <div key={day} className="flex flex-col items-center gap-1">
-              <span className="text-[9px] text-muted-foreground">{day}</span>
-              <div className={`h-8 w-5 rounded-sm ${i < 5 ? 'bg-primary/30' : 'bg-muted'}`} />
-            </div>
-          ))}
-        </div>
-      </div>
-      <div className="glass-surface rounded-2xl p-4">
-        <h3 className="text-sm font-medium">内容分布</h3>
-        <div className="mt-3 space-y-2">
-          {[
-            { label: '学习', count: 45, pct: 56 },
-            { label: '搞钱', count: 22, pct: 27 },
-            { label: '选题', count: 13, pct: 16 },
-          ].map((item) => (
-            <div key={item.label} className="flex items-center gap-2">
-              <span className="w-10 text-xs text-muted-foreground">{item.label}</span>
-              <div className="flex-1 h-2 rounded-full bg-muted">
-                <div className="h-2 rounded-full bg-primary" style={{ width: `${item.pct}%` }} />
-              </div>
-              <span className="w-8 text-right text-[11px] tabular-nums text-muted-foreground">{item.count}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function EmptyState({ message }: { message: string }) {

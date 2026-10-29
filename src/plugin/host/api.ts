@@ -2063,6 +2063,27 @@ const ROUTES: RouteDef[] = [
     });
   }),
 
+  // —— 我的数据：作品流量/受众聚合 + DSH AI 运营建议 ——
+  route('GET', '/me/data/overview', async ({ res, session, db }) => {
+    const { getMyDataOverview } = await import('@/core/mydata/service');
+    const overview = await getMyDataOverview(db as never, session.userId);
+    json(res, 200, { ok: true, data: overview });
+  }),
+
+  route('POST', '/me/data/advice', async ({ res, session, db }) => {
+    const { generateMyDataAdvice } = await import('@/core/mydata/service');
+    try {
+      const advice = await generateMyDataAdvice(db as never, session.userId);
+      json(res, 200, { ok: true, data: { advice } });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/还没有已登记的作品|DSH AI 不可用/.test(message)) {
+        throw new ValidationError(message, { advice: message });
+      }
+      throw err;
+    }
+  }),
+
   // —— 我的页 · 收藏列表（⭐标记 或 剪贴板收藏）——
   route('GET', '/me/favorites', async ({ res, query, session, db }) => {
     const limit = Math.min(parsePositiveInt(query.get('limit')) ?? 50, 100);
