@@ -15,7 +15,6 @@ import { apiFetch, logoutH5 } from '../lib/auth';
 import { navigateTo } from '../lib/router';
 import SubscriptionsPanel from '../components/SubscriptionsPanel';
 import ServicesPanel from '../components/ServicesPanel';
-import MembershipCard from '../components/MembershipCard';
 import FavoriteDirPanel from '../components/FavoriteDirPanel';
 import MyDataPanel from '../components/MyDataPanel';
 import PlatformTabs from '../components/PlatformTabs';
@@ -59,53 +58,6 @@ export default function H5ProfilePage({ username }: { username: string | null })
     });
   }, []);
 
-  // ── Chaos 数据中台账号绑定（双身份：本地登录 + 中台授权；订阅等行为的规范身份链）──
-  const [chaosLinked, setChaosLinked] = useState<boolean | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await apiFetch('/s/api/chaos/auth/me');
-        const json = (await res.json()) as { ok?: boolean; data?: { linked?: boolean } };
-        if (!cancelled) setChaosLinked(Boolean(json.ok && json.data?.linked));
-      } catch {
-        if (!cancelled) setChaosLinked(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // 授权回来（hash 带 chaos=linked）刷新绑定状态
-  useEffect(() => {
-    if (!window.location.hash.includes('chaos=linked')) return undefined;
-    void (async () => {
-      try {
-        const res = await apiFetch('/s/api/chaos/auth/me');
-        const json = (await res.json()) as { ok?: boolean; data?: { linked?: boolean } };
-        setChaosLinked(Boolean(json.ok && json.data?.linked));
-      } catch {
-        setChaosLinked(false);
-      }
-    })();
-    return undefined;
-  }, []);
-
-  const connectChaos = useCallback(() => {
-    void (async () => {
-      try {
-        const res = await apiFetch('/s/api/chaos/auth/start');
-        const json = (await res.json()) as { ok?: boolean; data?: { authorizationUrl?: string } };
-        if (json.ok && json.data?.authorizationUrl) {
-          window.location.href = json.data.authorizationUrl;
-        }
-      } catch {
-        // 静默：按钮保持可点
-      }
-    })();
-  }, []);
-
   return (
     <div className="min-h-screen bg-background text-foreground">
       <main className="mx-auto max-w-6xl px-4 pb-28 pt-6 sm:px-6 md:pb-10">
@@ -120,34 +72,6 @@ export default function H5ProfilePage({ username }: { username: string | null })
               <p className="text-[11px] text-muted-foreground">DSH 插件伺服</p>
             </div>
           </div>
-        </div>
-
-        {/* 中转站会员卡：授权入口 + 订阅列表（授权管理在设置抽屉同一张卡） */}
-        <div className="mt-4">
-          <MembershipCard
-            onOpenSettings={() => document.getElementById('profile-settings')?.scrollIntoView({ behavior: 'smooth' })}
-          />
-        </div>
-
-        {/* 数据中台账号（Chaos）：绑定后推荐/素材行为带中台用户身份 */}
-        <div className="mt-3 flex items-center gap-3 rounded-2xl border border-border/60 bg-card/60 px-4 py-3">
-          <div className="min-w-0 flex-1">
-            <p className="text-[13px] font-medium text-foreground">数据中台账号</p>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">
-              {chaosLinked === null
-                ? '检查绑定状态…'
-                : chaosLinked
-                  ? '已绑定中台账号，推荐与素材按你的授权提供'
-                  : '绑定后推荐与素材行为带中台用户身份'}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={connectChaos}
-            className="inline-flex h-9 shrink-0 items-center rounded-full border border-primary/40 bg-primary/10 px-4 text-xs font-medium text-primary transition-all duration-150 hover:bg-primary/20 active:scale-[0.97]"
-          >
-            {chaosLinked ? '重新授权' : '去授权'}
-          </button>
         </div>
 
         {/* 统计卡片 */}

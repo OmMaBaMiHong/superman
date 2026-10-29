@@ -26,7 +26,7 @@ import { ProviderCard, PROVIDERS } from './PlatformCollectCookies';
 import RelayPanel from './RelayPanel';
 import { apiFetch } from '../lib/auth';
 
-type TabKey = 'relay' | AccountPlatform;
+type TabKey = 'relay' | 'chaos' | AccountPlatform;
 
 const PLATFORM_ORDER: AccountPlatform[] = ['wechat', 'douyin', 'xhs', 'channels', 'kuaishou', 'bilibili', 'weibo'];
 
@@ -128,14 +128,43 @@ export default function PlatformTabs() {
 
   const tabs: Array<{ key: TabKey; label: string }> = [
     { key: 'relay', label: '中转站' },
+    { key: 'chaos', label: '数据中台' },
     ...PLATFORM_ORDER.map((p) => ({ key: p as TabKey, label: ACCOUNT_PLATFORM_META[p].name })),
   ];
-  const meta = tab !== 'relay' ? ACCOUNT_PLATFORM_META[tab] : null;
-  const tabAccounts = tab !== 'relay' ? accounts.filter((a) => a.platform === tab) : [];
-  const cookieProvider = tab !== 'relay'
+
+  // ── Chaos 数据中台（与中转站/内容平台平级的一个 Tab）──
+  const [chaosLinked, setChaosLinked] = useState<boolean | null>(null);
+  const loadChaos = useCallback(async () => {
+    try {
+      const json = await apiFetch('/s/api/chaos/auth/me').then((r) => r.json());
+      setChaosLinked(Boolean(json.ok && json.data?.linked));
+    } catch {
+      setChaosLinked(false);
+    }
+  }, []);
+  useEffect(() => {
+    void loadChaos();
+    if (!window.location.hash.includes('chaos=linked')) return undefined;
+    void loadChaos();
+    return undefined;
+  }, [loadChaos]);
+  const connectChaos = useCallback(() => {
+    void (async () => {
+      try {
+        const json = await apiFetch('/s/api/chaos/auth/start').then((r) => r.json());
+        if (json.ok && json.data?.authorizationUrl) window.location.href = json.data.authorizationUrl;
+      } catch {
+        // 静默：按钮保持可点
+      }
+    })();
+  }, []);
+  const isPlatform = (t: TabKey): t is AccountPlatform => t !== 'relay' && t !== 'chaos';
+  const meta = isPlatform(tab) ? ACCOUNT_PLATFORM_META[tab] : null;
+  const tabAccounts = isPlatform(tab) ? accounts.filter((a) => a.platform === tab) : [];
+  const cookieProvider = isPlatform(tab)
     ? PROVIDERS.find((x) => x.id === (COOKIE_PROVIDER_KEY[tab] ?? tab))
     : undefined;
-  const stats = tab !== 'relay' ? platformData.get(OVERVIEW_PLATFORM_KEY[tab] ?? tab) : undefined;
+  const stats = isPlatform(tab) ? platformData.get(OVERVIEW_PLATFORM_KEY[tab] ?? tab) : undefined;
 
   return (
     <section aria-label="平台与账号" className="glass-surface p-5">
@@ -174,6 +203,26 @@ export default function PlatformTabs() {
               <RelayPanel />
             </div>
           </>
+        ) : tab === 'chaos' ? (
+          <div className="flex items-center gap-3 rounded-2xl border border-border/60 bg-secondary/40 px-4 py-3.5">
+            <div className="min-w-0 flex-1">
+              <p className="text-[13px] font-medium text-foreground">数据中台账号</p>
+              <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+                {chaosLinked === null
+                  ? '检查绑定状态…'
+                  : chaosLinked
+                    ? '已绑定，推荐与素材行为带中台用户身份'
+                    : '绑定后推荐与素材行为带中台用户身份'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={connectChaos}
+              className="inline-flex h-9 shrink-0 items-center rounded-full border border-primary/40 bg-primary/10 px-4 text-xs font-medium text-primary transition-colors hover:bg-primary/20"
+            >
+              {chaosLinked ? '重新授权' : '去授权'}
+            </button>
+          </div>
         ) : loading ? (
           <div className="flex items-center justify-center py-10 text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
