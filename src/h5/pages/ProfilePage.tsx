@@ -1,6 +1,6 @@
 'use client';
 
-import { Bell, ChevronRight, FileText, Heart, Lightbulb, Loader2, LogOut, PenLine, Pencil, Rss, TrendingUp } from 'lucide-react';
+import { Bell, ChevronRight, FileText, FolderSymlink, Heart, Lightbulb, Loader2, LogOut, PenLine, Pencil, Rss, Settings, TrendingUp } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import {
   createRewriteJobs,
@@ -9,6 +9,7 @@ import {
   type RewritePlatform,
 } from '@/lib/api/apiClient';
 import GlassDetailSheet from '@/components/ui/glass-detail-sheet';
+import { cn } from '@/lib/utils';
 import ContentDetailSheet from '@/features/contents/components/ContentDetailSheet';
 import { toast } from '@/features/toast/toast';
 import { apiFetch, logoutH5 } from '../lib/auth';
@@ -27,6 +28,9 @@ import PlatformTabs from '../components/PlatformTabs';
 export default function H5ProfilePage({ username }: { username: string | null }) {
   // 「我的数据」是本页核心，默认落在数据 Tab
   const [subTab, setSubTab] = useState<'works' | 'favorites' | 'subscriptions' | 'stats'>('stats');
+  /** 右上角齿轮：一个小设置菜单（收藏目录 / 服务与同步 / 更多设置 / 退出登录）。 */
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [sheet, setSheet] = useState<'dir' | 'services' | null>(null);
 
   // 统计数据
   const [stats, setStats] = useState({ works: 0, favorites: 0, published: 0 });
@@ -72,10 +76,84 @@ export default function H5ProfilePage({ username }: { username: string | null })
               <p className="text-[11px] text-muted-foreground">DSH 插件伺服</p>
             </div>
           </div>
+          <div className="relative">
+            <button
+              type="button"
+              aria-label="设置"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((open) => !open)}
+              className={cn(
+                'flex h-9 w-9 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors',
+                menuOpen ? 'border-primary/40 bg-primary/10 text-primary' : 'hover:text-foreground',
+              )}
+            >
+              <Settings className="h-4 w-4" />
+            </button>
+            {menuOpen ? (
+              <>
+                <button
+                  type="button"
+                  aria-label="关闭设置菜单"
+                  className="fixed inset-0 z-40 cursor-default"
+                  onClick={() => setMenuOpen(false)}
+                />
+                <div
+                  role="menu"
+                  className="absolute right-0 top-11 z-50 w-52 overflow-hidden rounded-2xl border border-border bg-card p-1 shadow-xl"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-medium text-foreground hover:bg-accent"
+                    onClick={() => { setMenuOpen(false); setSheet('dir'); }}
+                  >
+                    <FolderSymlink className="h-3.5 w-3.5 text-primary" />
+                    收藏保存目录
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-medium text-foreground hover:bg-accent"
+                    onClick={() => { setMenuOpen(false); setSheet('services'); }}
+                  >
+                    <Settings className="h-3.5 w-3.5 text-primary" />
+                    服务与同步
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-medium text-foreground hover:bg-accent"
+                    onClick={() => { setMenuOpen(false); navigateTo('/settings'); }}
+                  >
+                    <Bell className="h-3.5 w-3.5 text-primary" />
+                    更多设置
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="mt-1 flex w-full items-center gap-2 rounded-xl border-t border-border/60 px-3 py-2 text-left text-xs font-medium text-error hover:bg-error/10"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      if (window.confirm('退出登录？退出后需要重新输入账号密码。')) handleLogout();
+                    }}
+                  >
+                    <LogOut className="h-3.5 w-3.5" />
+                    退出登录
+                  </button>
+                </div>
+              </>
+            ) : null}
+          </div>
         </div>
 
-        {/* 统计卡片 */}
-        <div className="mt-5 grid grid-cols-3 gap-2">
+        {/* 平台与账号设置放最上面（用户要求：平台设置在前，我的数据在后） */}
+        <div className="mt-5">
+          <PlatformTabs />
+        </div>
+
+        {/* 我的数据（平台设置之下） */}
+        <h2 className="mt-6 px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">我的数据</h2>
+        <div className="mt-2 grid grid-cols-3 gap-2">
           <button
             type="button"
             onClick={() => setSubTab('favorites')}
@@ -137,21 +215,17 @@ export default function H5ProfilePage({ username }: { username: string | null })
           {subTab === 'stats' && <MyDataPanel />}
         </div>
 
-        {/* 设置平摊：平台与账号（最顶部 Tab，中转站与各平台平级）/ 服务与同步 / 收藏目录 */}
-        <div id="profile-settings" className="mt-8 space-y-5 border-t border-border/60 pt-6">
-          <h2 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">设置</h2>
-          <PlatformTabs />
-          <ServicesPanel />
-          <FavoriteDirPanel />
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-full border border-error/30 text-sm font-medium text-error transition-colors hover:bg-error/10"
-          >
-            <LogOut className="h-4 w-4" />
-            退出登录
-          </button>
-        </div>
+        {/* 设置从菜单开弹层：收藏保存目录 / 服务与同步 */}
+        <GlassDetailSheet open={sheet === 'dir'} onClose={() => setSheet(null)} ariaLabel="收藏保存目录">
+          <div className="px-4 pb-6 pt-1">
+            <FavoriteDirPanel />
+          </div>
+        </GlassDetailSheet>
+        <GlassDetailSheet open={sheet === 'services'} onClose={() => setSheet(null)} ariaLabel="服务与同步">
+          <div className="px-4 pb-6 pt-1">
+            <ServicesPanel />
+          </div>
+        </GlassDetailSheet>
       </main>
     </div>
   );
