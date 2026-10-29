@@ -49,14 +49,14 @@ export default function H5TabBar({ onOpenPaste }: H5TabBarProps) {
       <div className="glass-surface-strong flex h-14 items-stretch overflow-hidden rounded-[24px]">
         <button
           type="button"
-          aria-label="收藏"
+          aria-label="随记"
           aria-current={route === '/reader' || route === '/' ? 'page' : undefined}
           onClick={() => navigateTo('/reader')}
           className={tabClass(route === '/reader' || route === '/')}
         >
           {indicator(route === '/reader' || route === '/')}
           <BookOpen aria-hidden="true" className="h-5 w-5" />
-          <span>收藏</span>
+          <span>随记</span>
         </button>
 
         <button

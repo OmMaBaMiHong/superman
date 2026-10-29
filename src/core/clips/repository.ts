@@ -15,6 +15,7 @@ export interface ClipRow {
   sourceTitle: string | null;
   imageUrls: unknown;
   note: string | null;
+  tags: unknown;
   createdAt: string;
   updatedAt: string;
 }
@@ -28,16 +29,17 @@ export interface InsertClipInput {
   sourceTitle?: string | null;
   imageUrls?: string[];
   note?: string | null;
+  tags?: string[];
 }
 
 const clipRowColumns =
-  'id::text as "id", article_id::text as "articleId", user_id::text as "userId", raw_content as "rawContent", raw_html as "rawHtml", source_url as "sourceUrl", source_title as "sourceTitle", image_urls as "imageUrls", note, created_at as "createdAt", updated_at as "updatedAt"';
+  'id::text as "id", article_id::text as "articleId", user_id::text as "userId", raw_content as "rawContent", raw_html as "rawHtml", source_url as "sourceUrl", source_title as "sourceTitle", image_urls as "imageUrls", note, tags, created_at as "createdAt", updated_at as "updatedAt"';
 
 export async function insertClip(db: DbClient, input: InsertClipInput): Promise<ClipRow> {
   const { rows } = await db.query<ClipRow>(
     `
-    insert into clips (article_id, user_id, raw_content, raw_html, source_url, source_title, image_urls, note)
-    values ($1, $2, $3, $4, $5, $6, $7, $8)
+    insert into clips (article_id, user_id, raw_content, raw_html, source_url, source_title, image_urls, note, tags)
+    values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     returning ${clipRowColumns}
     `,
     [
@@ -49,6 +51,7 @@ export async function insertClip(db: DbClient, input: InsertClipInput): Promise<
       input.sourceTitle ?? null,
       JSON.stringify(input.imageUrls ?? []),
       input.note ?? null,
+      input.tags ?? [],
     ],
   );
   return rows[0];
@@ -105,13 +108,14 @@ export async function upsertClipByArticleId(
 ): Promise<void> {
   await db.query(
     `
-    insert into clips (article_id, user_id, raw_content, raw_html, source_url, source_title, image_urls, note)
-    values ($1, $2, $3, $4, $5, $6, $7, $8)
+    insert into clips (article_id, user_id, raw_content, raw_html, source_url, source_title, image_urls, note, tags)
+    values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     on conflict (article_id) do update set
       raw_content = excluded.raw_content,
       raw_html = excluded.raw_html,
       image_urls = excluded.image_urls,
       note = coalesce(excluded.note, clips.note),
+      tags = case when excluded.tags <> '{}' then excluded.tags else clips.tags end,
       updated_at = now()
     `,
     [
@@ -123,6 +127,7 @@ export async function upsertClipByArticleId(
       input.sourceTitle ?? null,
       JSON.stringify(input.imageUrls ?? []),
       input.note ?? null,
+      input.tags ?? [],
     ],
   );
 }

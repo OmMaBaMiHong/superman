@@ -123,6 +123,7 @@ interface BuildInput {
   rawContent: string;
   rawHtml: string;
   summary: string;
+  tags: string[];
   imageUrls: string[];
   videoUrl: string | null;
   videoFilePath: string | null;
@@ -151,6 +152,7 @@ function buildMarkdown(input: BuildInput): string {
   ];
   if (input.sourceUrl) lines.push(`source: ${yamlValue(input.sourceUrl)}`);
   if (input.sourceTitle && input.sourceTitle !== input.title) lines.push(`source_title: ${yamlValue(input.sourceTitle)}`);
+  for (const tag of input.tags) lines.push(`  - ${yamlValue(tag)}`);
   lines.push('---', '');
 
   lines.push(`# ${input.title}`, '');
@@ -218,11 +220,11 @@ export async function syncArticleToVault(db: QueryRunner, articleId: number | st
     if (!dir) return;
 
     const clipRes = await db.query(
-      'select raw_content, raw_html, source_title, image_urls from clips where article_id = $1 order by id desc limit 1',
+      'select raw_content, raw_html, source_title, image_urls, tags from clips where article_id = $1 order by id desc limit 1',
       [articleId],
     );
     const clip = clipRes.rows[0] as
-      | { raw_content: string | null; raw_html: string | null; source_title: string | null; image_urls: unknown }
+      | { raw_content: string | null; raw_html: string | null; source_title: string | null; image_urls: unknown; tags: unknown }
       | undefined;
     const videoRes = await db.query(
       'select video_url, video_file_path, transcript_text from video_materials where article_id = $1 order by id desc limit 1',
@@ -240,6 +242,7 @@ export async function syncArticleToVault(db: QueryRunner, articleId: number | st
       rawContent: clip?.raw_content ?? '',
       rawHtml: clip?.raw_html ?? article.content_html ?? '',
       summary: article.summary ?? '',
+      tags: Array.isArray(clip?.tags) ? (clip.tags as unknown[]).filter((t): t is string => typeof t === 'string') : [],
       imageUrls,
       videoUrl: video?.video_url ?? null,
       videoFilePath: video?.video_file_path ?? null,

@@ -37,6 +37,7 @@ export interface CreateClipInput {
   sourceTitle?: string | null;
   imageUrls?: string[];
   note?: string | null;
+  tags?: string[];
 }
 
 export interface CreateClipResult {
@@ -75,6 +76,7 @@ export async function createClip(
         sourceTitle: input.sourceTitle ?? null,
         imageUrls: input.imageUrls ?? [],
         note: input.note ?? null,
+        tags: input.tags,
       });
       return {
         articleId: existing.id,
@@ -176,6 +178,7 @@ export async function createClip(
     sourceTitle: input.sourceTitle ?? null,
     imageUrls: input.imageUrls ?? [],
     note: input.note ?? null,
+    tags: input.tags,
   });
 
   return {

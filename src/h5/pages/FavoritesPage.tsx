@@ -24,6 +24,8 @@ import { cn } from '@/lib/utils';
 import { apiFetch } from '../lib/auth';
 import { mediaUrl } from '@/lib/mediaUrl';
 import { navigateTo } from '../lib/router';
+import MemoTimeline from '../components/MemoTimeline';
+import MemoCalendar from '../components/MemoCalendar';
 
 interface FavoriteItem {
   id: string;
@@ -63,6 +65,13 @@ const KIND_TABS: ReadonlyArray<readonly [KindFilter, string]> = [
   ['video', '视频'],
   ['text', '文案'],
   ['link', '链接'],
+];
+
+type MemoView = 'timeline' | 'calendar' | 'fav';
+const VIEW_TABS: ReadonlyArray<readonly [MemoView, string]> = [
+  ['timeline', '时间线'],
+  ['calendar', '日历'],
+  ['fav', '收藏'],
 ];
 
 const KIND_META: Record<Kind, { label: string; Icon: typeof ImageIcon; className: string }> = {
@@ -251,6 +260,8 @@ export default function FavoritesPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   // 保存目录：null=未知，''=未设置（提示去关联 Obsidian vault）
   const [saveDir, setSaveDir] = useState<string | null>(null);
+  // 随记页三视图：时间线（快速记+流）/ 日历（规划）/ 收藏（素材瀑布流）
+  const [view, setView] = useState<MemoView>('timeline');
 
   const load = useCallback(async () => {
     try {
@@ -370,9 +381,25 @@ export default function FavoritesPage() {
     <div className="flex h-[calc(100dvh-3rem)] min-h-0 flex-col overflow-hidden bg-background text-foreground">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border/60 px-4">
         <Bookmark aria-hidden="true" className="h-4 w-4 text-primary" />
-        <h1 className="text-sm font-semibold">收藏</h1>
-        <span className="font-mono text-[11px] tabular-nums text-muted-foreground">{counts.all} 条</span>
+        <h1 className="text-sm font-semibold">随记</h1>
+        {view === 'fav' ? <span className="font-mono text-[11px] tabular-nums text-muted-foreground">{counts.all} 条</span> : null}
         <div className="ml-auto flex items-center gap-1.5">
+          <div className="flex gap-0.5 rounded-full bg-muted/50 p-0.5">
+            {VIEW_TABS.map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={view === key}
+                onClick={() => setView(key)}
+                className={cn(
+                  'rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors',
+                  view === key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             aria-label="添加收藏"
@@ -383,20 +410,22 @@ export default function FavoritesPage() {
             <Plus aria-hidden="true" className="h-3.5 w-3.5" />
             添加
           </button>
-          <button
-            type="button"
-            aria-label="刷新收藏"
-            title="刷新"
-            onClick={() => { setRefreshing(true); void load(); }}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:text-primary"
-          >
-            <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} aria-hidden="true" />
-          </button>
+          {view === 'fav' ? (
+            <button
+              type="button"
+              aria-label="刷新收藏"
+              title="刷新"
+              onClick={() => { setRefreshing(true); void load(); }}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:text-primary"
+            >
+              <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} aria-hidden="true" />
+            </button>
+          ) : null}
         </div>
       </header>
 
-      {/* 类型筛选（带计数）：图片 / 视频 / 文案 / 链接 */}
-      <div className="flex shrink-0 gap-1.5 overflow-x-auto px-4 py-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      {/* 类型筛选（带计数）：图片 / 视频 / 文案 / 链接（仅收藏视图） */}
+      <div className={cn('flex shrink-0 gap-1.5 overflow-x-auto px-4 py-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden', view !== 'fav' && 'hidden')}>
         {KIND_TABS.map(([key, label]) => {
           const active = kind === key;
           const count = counts[key];
@@ -420,6 +449,12 @@ export default function FavoritesPage() {
       </div>
 
       <main className="min-h-0 flex-1 overflow-y-auto px-4 pb-6">
+        {view === 'timeline' ? (
+          <MemoTimeline />
+        ) : view === 'calendar' ? (
+          <MemoCalendar />
+        ) : (
+          <>
         {saveDir !== null ? (
           <div className="mb-3 flex items-center gap-2 rounded-xl border border-border/60 bg-card/60 px-3.5 py-2.5 text-[12px] text-muted-foreground">
             <FolderSymlink aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
@@ -450,7 +485,7 @@ export default function FavoritesPage() {
               {counts.all === 0 ? '还没有收藏内容' : `没有${KIND_TABS.find(([key]) => key === kind)?.[1] ?? ''}类收藏`}
             </p>
             <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-              点这里（或右上角「+」）打开收藏面板：粘贴链接 / 文字、截图 ⌘V、拖入视频，收进来的都会出现在这里。
+              点这里（或右上角「+」）打开收藏面板：粘贴链接 / 文字、截图 ⌘V、拖入视频，收进来的都会出现在这里；随手想记的去「时间线」。
             </p>
           </button>
         ) : (
@@ -466,6 +501,8 @@ export default function FavoritesPage() {
               />
             ))}
           </div>
+        )}
+          </>
         )}
       </main>
 

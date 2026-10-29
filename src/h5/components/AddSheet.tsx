@@ -162,6 +162,8 @@ function ClipPane() {
   const [ideaText, setIdeaText] = useState('');
   const [ideaNote, setIdeaNote] = useState('');
   const [video, setVideo] = useState<File | null>(null);
+  // 收藏标签（可选）：逗号分隔，随本次收藏写入 clips.tags
+  const [clipTags, setClipTags] = useState('');
 
   const reset = useCallback(() => {
     setSmartText('');
@@ -172,8 +174,15 @@ function ClipPane() {
     setIdeaText('');
     setIdeaNote('');
     setVideo(null);
+    setClipTags('');
     setExpanded(null);
   }, []);
+
+  // 标签解析：逗号分隔、去 #，最多 10 个；空返回 undefined（不带字段）
+  const tagsPayload = useCallback((): string[] | undefined => {
+    const tags = clipTags.split(/[,，]/).map((t) => t.trim().replace(/^#/, '')).filter(Boolean).slice(0, 10);
+    return tags.length > 0 ? tags : undefined;
+  }, [clipTags]);
 
   // 截图粘贴：⌘/Ctrl+V 直接进智能框（面板打开 + 收藏 tab 时生效）
   useEffect(() => {
@@ -207,13 +216,15 @@ function ClipPane() {
     const formData = new FormData();
     images.forEach((f) => formData.append('images', f));
     if (sourceUrlValue) formData.append('sourceUrl', sourceUrlValue);
+    const tags = tagsPayload();
+    if (tags) formData.append('tags', JSON.stringify(tags));
     const res = await apiFetch('/s/api/clipboard/image', { method: 'POST', body: formData });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error?.message || '上传失败');
     toast.success('图片已收藏');
     setImages([]);
     setSourceUrl('');
-  }, [images]);
+  }, [images, tagsPayload]);
 
   /** 智能收藏：图片优先；文字含链接走智能识别；纯文本直接归档。 */
   const handleSmartSave = useCallback(async () => {
@@ -231,7 +242,7 @@ function ClipPane() {
         const res = await apiFetch('/s/api/clipboard/smart', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text }),
+          body: JSON.stringify({ text, tags: tagsPayload() }),
         });
         const data = await res.json();
         if (!data.ok) throw new Error(data.error?.message || '识别失败');
@@ -250,7 +261,7 @@ function ClipPane() {
       const res = await apiFetch('/s/api/clips', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contentText: text }),
+        body: JSON.stringify({ contentText: text, tags: tagsPayload() }),
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error?.message || '保存失败');
@@ -261,7 +272,7 @@ function ClipPane() {
     } finally {
       setSaving(false);
     }
-  }, [images, smartText, uploadImages, reset]);
+  }, [images, smartText, uploadImages, reset, tagsPayload]);
 
   const handleFollow = useCallback(async () => {
     const creator = smartResult?.creator;
@@ -304,7 +315,7 @@ function ClipPane() {
       const res = await apiFetch('/s/api/clips', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contentText: textBody.trim(), sourceUrl: sourceUrl.trim() || undefined }),
+        body: JSON.stringify({ contentText: textBody.trim(), sourceUrl: sourceUrl.trim() || undefined, tags: tagsPayload() }),
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error?.message || '保存失败');
@@ -340,6 +351,8 @@ function ClipPane() {
       const formData = new FormData();
       formData.append('video', video);
       if (sourceUrl.trim()) formData.append('sourceUrl', sourceUrl.trim());
+      const tags = tagsPayload();
+      if (tags) formData.append('tags', JSON.stringify(tags));
       const res = await apiFetch('/s/api/clipboard/video', { method: 'POST', body: formData });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error?.message || '上传失败');
@@ -399,6 +412,12 @@ function ClipPane() {
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => { e.preventDefault(); addImages(pickImageFiles(e.dataTransfer)); }}
           className="mt-2.5 w-full resize-none rounded-xl border border-border bg-card px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/60 focus-visible:border-primary focus-visible:outline-none"
+        />
+        <input
+          value={clipTags}
+          onChange={(e) => setClipTags(e.target.value)}
+          placeholder="标签（可选）：逗号分隔，如 灵感, 落地页"
+          className="mt-2 h-9 w-full rounded-xl border border-border bg-card px-3 text-[12px] text-foreground placeholder:text-muted-foreground/60 focus-visible:border-primary focus-visible:outline-none"
         />
         {images.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-2">

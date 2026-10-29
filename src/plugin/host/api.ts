@@ -236,6 +236,29 @@ function parsePositiveInt(value: string | null): number | null {
   return Number.isInteger(n) && n > 0 ? n : null
 }
 
+/** 请求里的标签：JSON 数组或逗号分隔字符串（表单字段），去 # 去空，最多 10 个。 */
+function parseTagsValue(value: unknown): string[] | undefined {
+  let list: unknown[] = [];
+  if (Array.isArray(value)) list = value;
+  else if (typeof value === 'string' && value.trim()) {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) list = parsed;
+      } catch {
+        list = trimmed.split(/[,，]/);
+      }
+    } else list = trimmed.split(/[,，]/);
+  }
+  const tags = list
+    .filter((t): t is string => typeof t === 'string')
+    .map((t) => t.trim().replace(/^#/, ''))
+    .filter(Boolean)
+    .slice(0, 10);
+  return tags.length > 0 ? tags : undefined;
+}
+
 function requireId(raw: string | undefined, label = 'ID'): string {
   if (!raw || !/^\d+$/.test(raw)) {
     throw new ValidationError(`${label}非法`, { id: '必须为正整数' })
@@ -1910,6 +1933,7 @@ const ROUTES: RouteDef[] = [
       sourceTitle: typeof body.sourceTitle === 'string' ? body.sourceTitle : null,
       imageUrls: Array.isArray(body.imageUrls) ? body.imageUrls : undefined,
       note: typeof body.note === 'string' ? body.note : null,
+      tags: parseTagsValue(body.tags),
     });
     const { syncArticleToVault } = await import('@/server/infra/storage/vaultExport');
     if (!result.alreadyExists) void syncArticleToVault(db as never, result.articleId);
@@ -2084,6 +2108,76 @@ const ROUTES: RouteDef[] = [
     }
   }),
 
+  // —— 随记/计划（memos）：flomo 式随手记 + 日历规划（计划先只标记不推送）——
+  route('GET', '/memos', async ({ res, query, session, db }) => {
+    const { listMemos } = await import('@/core/memos/service');
+    const day = query.get('day');
+    let from = query.get('from') ?? undefined;
+    let to = query.get('to') ?? undefined;
+    if (day && /^\d{4}-\d{2}-\d{2}$/.test(day)) {
+      from = `${day}T00:00:00`;
+      const end = new Date(`${day}T00:00:00`);
+      end.setDate(end.getDate() + 1);
+      const p2 = (n: number) => String(n).padStart(2, '0');
+      to = `${end.getFullYear()}-${p2(end.getMonth() + 1)}-${p2(end.getDate())}T00:00:00`;
+    }
+    const items = await listMemos(db as never, {
+      userId: session.userId,
+      from,
+      to,
+      tag: query.get('tag') ?? undefined,
+      kind: query.get('kind') ?? undefined,
+      limit: parsePositiveInt(query.get('limit')) ?? 100,
+      offset: parsePositiveInt(query.get('offset')) ?? 0,
+    });
+    json(res, 200, { ok: true, data: { items } });
+  }),
+
+  route('POST', '/memos', async ({ req, res, session, db }) => {
+    const body = await readJsonBody(req);
+    const content = typeof body.content === 'string' ? body.content.trim() : '';
+    if (!content) throw new ValidationError('内容不能为空', { content: '记点什么吧' });
+    const { createMemo } = await import('@/core/memos/service');
+    const memo = await createMemo(db as never, {
+      userId: session.userId,
+      content,
+      kind: typeof body.kind === 'string' ? body.kind : undefined,
+      dueAt: typeof body.dueAt === 'string' && body.dueAt ? body.dueAt : null,
+      articleId: body.articleId != null ? requireId(String(body.articleId), '收藏 ID') : null,
+      tags: Array.isArray(body.tags) ? (body.tags as unknown[]).filter((t): t is string => typeof t === 'string') : undefined,
+    });
+    json(res, 200, { ok: true, data: memo });
+  }),
+
+  route('PUT', '/memos/:id', async ({ req, res, params, session, db }) => {
+    const body = await readJsonBody(req);
+    const { updateMemo } = await import('@/core/memos/service');
+    const memo = await updateMemo(db as never, {
+      id: requireId(params.id, '随记 ID'),
+      userId: session.userId,
+      content: typeof body.content === 'string' ? body.content : undefined,
+      dueAt: body.dueAt !== undefined ? (typeof body.dueAt === 'string' && body.dueAt ? body.dueAt : null) : undefined,
+      done: typeof body.done === 'boolean' ? body.done : undefined,
+      tags: Array.isArray(body.tags) ? (body.tags as unknown[]).filter((t): t is string => typeof t === 'string') : undefined,
+    });
+    if (!memo) throw new NotFoundError('随记不存在或不属于当前用户');
+    json(res, 200, { ok: true, data: memo });
+  }),
+
+  route('DELETE', '/memos/:id', async ({ res, params, session, db }) => {
+    const { deleteMemo } = await import('@/core/memos/service');
+    const deleted = await deleteMemo(db as never, requireId(params.id, '随记 ID'), session.userId);
+    if (!deleted) throw new NotFoundError('随记不存在或不属于当前用户');
+    json(res, 200, { ok: true, data: { deleted: true } });
+  }),
+
+  route('GET', '/memos/calendar', async ({ res, query, session, db }) => {
+    const { getCalendarMonth } = await import('@/core/memos/service');
+    const month = query.get('month') ?? new Date().toISOString().slice(0, 7);
+    const days = await getCalendarMonth(db as never, session.userId, month);
+    json(res, 200, { ok: true, data: { month, days } });
+  }),
+
   // —— 我的页 · 收藏列表（⭐标记 或 剪贴板收藏）——
   route('GET', '/me/favorites', async ({ res, query, session, db }) => {
     const limit = Math.min(parsePositiveInt(query.get('limit')) ?? 50, 100);
@@ -2183,6 +2277,7 @@ const ROUTES: RouteDef[] = [
     const bb = busboy({ headers: req.headers, limits: { fileSize: 50 * 1024 * 1024, files: 10 } });
     const files: File[] = [];
     let sourceUrl = '';
+    let tagsRaw = '';
 
     bb.on('file', (_name: string, stream: NodeJS.ReadableStream, info: { filename: string; mimeType: string }) => {
       const chunks: Buffer[] = [];
@@ -2194,6 +2289,7 @@ const ROUTES: RouteDef[] = [
     });
     bb.on('field', (name: string, val: string) => {
       if (name === 'sourceUrl') sourceUrl = val;
+      if (name === 'tags') tagsRaw = val;
     });
 
     await new Promise<void>((resolve, reject) => {
@@ -2217,6 +2313,7 @@ const ROUTES: RouteDef[] = [
       sourceUrl: sourceUrl || null,
       sourceTitle: `${files.length} 张图片收藏`,
       imageUrls,
+      tags: parseTagsValue(tagsRaw),
     });
 
     if (!result.alreadyExists) void syncArticleToVault(db as never, result.articleId);
@@ -2229,7 +2326,7 @@ const ROUTES: RouteDef[] = [
     const busboy = (await import('busboy')).default;
 
     const bb = busboy({ headers: req.headers, limits: { fileSize: 500 * 1024 * 1024, files: 1 } });
-    const holder: { videoFile: File | null; sourceUrl: string } = { videoFile: null, sourceUrl: '' };
+    const holder: { videoFile: File | null; sourceUrl: string; tagsRaw: string } = { videoFile: null, sourceUrl: '', tagsRaw: '' };
 
     bb.on('file', (_name: string, stream: NodeJS.ReadableStream, info: { filename: string; mimeType: string }) => {
       const chunks: Buffer[] = [];
@@ -2241,6 +2338,7 @@ const ROUTES: RouteDef[] = [
     });
     bb.on('field', (name: string, val: string) => {
       if (name === 'sourceUrl') holder.sourceUrl = val;
+      if (name === 'tags') holder.tagsRaw = val;
     });
 
     await new Promise<void>((resolve, reject) => {
@@ -2271,6 +2369,7 @@ const ROUTES: RouteDef[] = [
       contentHtml: `<video src="${saved.url}" controls preload="metadata"></video>`,
       sourceUrl: holder.sourceUrl || null,
       sourceTitle: videoFile.name,
+      tags: parseTagsValue(holder.tagsRaw),
     });
 
     if (videoMaterialId) {
@@ -2299,6 +2398,7 @@ const ROUTES: RouteDef[] = [
       contentHtml: article.content,
       sourceUrl: url,
       sourceTitle: article.title || null,
+      tags: parseTagsValue(body.tags),
     });
 
     const { syncArticleToVault } = await import('@/server/infra/storage/vaultExport');
@@ -2334,6 +2434,7 @@ const ROUTES: RouteDef[] = [
           sourceUrl: url,
           sourceTitle: title,
           imageUrls: info.cover ? [info.cover] : [],
+          tags: parseTagsValue(body.tags),
         });
 
         const { syncArticleToVault: syncVault } = await import('@/server/infra/storage/vaultExport');
@@ -2399,6 +2500,7 @@ const ROUTES: RouteDef[] = [
         contentHtml: article.content,
         sourceUrl: url,
         sourceTitle: article.title || null,
+        tags: parseTagsValue(body.tags),
       });
       const { syncArticleToVault } = await import('@/server/infra/storage/vaultExport');
       if (!clip.alreadyExists) void syncArticleToVault(db as never, clip.articleId);
@@ -2423,6 +2525,7 @@ const ROUTES: RouteDef[] = [
       contentText: rawText.trim() || url,
       sourceUrl: url,
       sourceTitle: resolved.title || null,
+      tags: parseTagsValue(body.tags),
     });
     const { syncArticleToVault } = await import('@/server/infra/storage/vaultExport');
     if (!clip.alreadyExists) void syncArticleToVault(db as never, clip.articleId);

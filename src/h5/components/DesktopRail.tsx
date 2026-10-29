@@ -20,7 +20,7 @@ export default function H5DesktopRail({ onOpenPaste }: H5DesktopRailProps) {
   const unreadNotifications = useUnreadNotificationCount();
 
   const items: Array<{ path: string; label: string; Icon: typeof Bell; badge: number }> = [
-    { path: '/reader', label: '收藏', Icon: BookOpen, badge: 0 },
+    { path: '/reader', label: '随记', Icon: BookOpen, badge: 0 },
     { path: '/studio', label: '创作', Icon: PenLine, badge: queueSize },
     { path: '/notifications', label: '消息', Icon: Bell, badge: unreadNotifications },
     { path: '/profile', label: '我的', Icon: User, badge: 0 },
