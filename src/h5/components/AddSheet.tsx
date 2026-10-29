@@ -888,7 +888,9 @@ function SourcePrefPane({ source, hint }: { source: 'hot' | 'github' | 'dsh'; hi
       .then(([items, prefRows]) => {
         if (cancelled) return;
         setCatalog(items);
-        setPicked(prefRows.filter((row) => row.sourceKey === source).map((row) => row.prefKey));
+        const saved = prefRows.filter((row) => row.sourceKey === source).map((row) => row.prefKey);
+        // 默认全选：从没保存过勾选时，平台/分类全勾上（取消勾选才是不采集）
+        setPicked(saved.length > 0 ? saved : items.map((item) => item.key));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

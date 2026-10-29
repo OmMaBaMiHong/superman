@@ -2448,7 +2448,8 @@ export interface TrendRadarPlatformGroup {
 export interface TrendRadarToday {
   date: string;
   total: number;
-  platforms: TrendRadarPlatformGroup[];
+  platforms: TrendRadarPlatformGroup[];  /** 今日数据为空时宿主是否已在后台补采（前端可稍后重试）。 */
+  syncing?: boolean;
 }
 
 export async function getTrendRadarToday(

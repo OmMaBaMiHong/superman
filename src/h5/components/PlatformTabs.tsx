@@ -30,6 +30,9 @@ type TabKey = 'relay' | 'chaos' | AccountPlatform;
 
 const PLATFORM_ORDER: AccountPlatform[] = ['wechat', 'douyin', 'xhs', 'channels', 'kuaishou', 'bilibili', 'weibo'];
 
+/** 非内容平台的 tab 图标（chaos 不是 AccountPlatform，不能从 META 取，否则 undefined.icon 崩整页）。 */
+const TAB_ICON: Partial<Record<TabKey, string>> = { relay: '🌐', chaos: '🛰️' };
+
 /** 发布追踪表的平台键与授权平台键差异：视频号授权叫 channels，发布数据叫 wechat */
 const OVERVIEW_PLATFORM_KEY: Partial<Record<AccountPlatform, string>> = { channels: 'wechat' };
 
@@ -102,7 +105,7 @@ export default function PlatformTabs() {
     void verifyPlatformAccount(account.id)
       .then((result) => {
         if (result.verified) {
-          toast.success(`「${account.accountName || ACCOUNT_PLATFORM_META[account.platform].name}」验证通过`);
+          toast.success(`「${account.accountName || ACCOUNT_PLATFORM_META[account.platform]?.name || account.platform}」验证通过`);
         } else {
           toast.error(result.reason ?? '验证失败');
         }
@@ -181,7 +184,7 @@ export default function PlatformTabs() {
               tab === key ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:text-foreground',
             )}
           >
-            {key === 'relay' ? '🌐' : ACCOUNT_PLATFORM_META[key as AccountPlatform].icon}
+            {TAB_ICON[key] ?? ACCOUNT_PLATFORM_META[key as AccountPlatform]?.icon ?? '🔗'}
             {label}
           </button>
         ))}

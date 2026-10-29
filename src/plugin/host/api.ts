@@ -223,6 +223,9 @@ function route(method: RouteDef['method'], pattern: string, handler: RouteHandle
  * 这些 URL 由 <video> 标签直接发起，带不了 Authorization 头，
  * 且 DSH 桌面壳里 cookie 会被主进程剥掉（见 host/auth.ts 头注）。
  */
+/** 今日热榜空数据时的自动补采（同一进程只跑一轮，避免每次读都打一遍平台接口）。 */
+let hotboardAutoSyncInFlight = false;
+
 const MEDIA_TOKEN_ROUTES = new Set<string>([
   '/reader/items/:id/video',
   '/video/serve/:articleId',
@@ -817,6 +820,33 @@ const ROUTES: RouteDef[] = [
       userId: session.userId,
       date: dateParam || undefined,
     })
+    // 今天还没采集（调度器关着时很常见）：读接口顺手补一轮，用户不用先去勾选面板保存触发
+    let syncing = false
+    if (!dateParam && items.length === 0 && !hotboardAutoSyncInFlight) {
+      hotboardAutoSyncInFlight = true
+      syncing = true
+      void (async () => {
+        try {
+          const { rows: prefRows } = await db.query(
+            `SELECT DISTINCT pref_key FROM user_source_prefs WHERE user_id = $1 AND source_key = 'hot'`,
+            [session.userId],
+          )
+          const platforms = prefRows.map((row) => String(row.pref_key)).filter(Boolean)
+          const { runHotboardSync } = await import('../../hotboard/run.js')
+          // 没勾过任何平台 = 默认全平台（订阅制放开前的老行为），避免新用户看到空看板
+          await runHotboardSync({
+            db,
+            userId: session.userId,
+            ...(platforms.length > 0 ? { platforms } : {}),
+          })
+        } catch {
+          // 采集失败：保持空数据，前端提示稍后重试
+        } finally {
+          hotboardAutoSyncInFlight = false
+        }
+      })()
+    }
+
     const groups: { platform: string; platformName: string; items: TrendRadarItemRow[] }[] = []
     const byPlatform = new Map<string, (typeof groups)[number]>()
     for (const item of items) {
@@ -834,6 +864,7 @@ const ROUTES: RouteDef[] = [
         date: dateParam || items[0]?.sourceDate || todayLocalDateString(),
         total: items.length,
         platforms: groups,
+        syncing,
       },
     })
   }),

@@ -409,6 +409,8 @@ export default function TrendingConsole({
   const [promoting, setPromoting] = useState<Record<string, boolean>>({});
   /** 当前锁定平台列；-1 = 全部（默认，轨道停在最左，不自动跳到第一个平台）。 */
   const [activePlatform, setActivePlatform] = useState(-1);
+  /** 今日空数据时宿主会自动补采；这里最多自动重试 3 次（4s 间隔）。 */
+  const autoRetryRef = useRef(0);
   const [draggingRail, setDraggingRail] = useState(false);
 
   const [detailItem, setDetailItem] = useState<TrendRadarItem | null>(null);
@@ -445,6 +447,15 @@ export default function TrendingConsole({
       if (!silent) setLoading(false);
     }
   }, []);
+
+  // 宿主返回 syncing=true（今日空数据、后台补采中）→ 4s 后静默重拉，最多 3 次
+  useEffect(() => {
+    const syncing = (data as { syncing?: boolean } | null)?.syncing === true;
+    if (!syncing || autoRetryRef.current >= 3) return undefined;
+    autoRetryRef.current += 1;
+    const timer = window.setTimeout(() => { void load(true); }, 4000);
+    return () => window.clearTimeout(timer);
+  }, [data, load]);
 
   // GitHub 仓库（治理后卡片，服务端分页，滚动追加）
   const [repoState, setRepoState] = useState<ChaosGithubPage | null>(null);

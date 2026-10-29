@@ -33,7 +33,8 @@ export function AccountCard({
   onDelete: () => void;
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const meta = ACCOUNT_PLATFORM_META[account.platform];
+  // 兜底：库里出现未知平台键时不能 undefined.icon 崩掉整个「我的」页
+  const meta = ACCOUNT_PLATFORM_META[account.platform] ?? { name: account.platform, icon: '🔗', supported: false };
   const status = STATUS_META[account.status] ?? STATUS_META.error;
 
   return (

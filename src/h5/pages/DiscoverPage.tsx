@@ -117,7 +117,13 @@ export default function DiscoverPage({ initialTab }: DiscoverPageProps = {}) {
         embedded
         initialHotTab={channel}
         // 订阅制：勾了才展示（空数组 = 未勾选任何子类 → 通道显示引导）
-        platformFilter={subTab === 'hot' ? prefs.hot ?? [] : undefined}
+        platformFilter={
+          subTab === 'hot'
+            ? prefs.hot && prefs.hot.length > 0
+              ? prefs.hot
+              : undefined // 没勾过 = 全部平台（默认全选）
+            : undefined
+        }
         categoryFilter={subTab === 'github' || subTab === 'dsh' ? (subTab === 'github' ? prefs.github ?? [] : prefs.dsh ?? []) : undefined}
         onNavUpdate={handleNavUpdate}
       />
