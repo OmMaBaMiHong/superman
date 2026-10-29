@@ -29,6 +29,8 @@ interface AddAccountSheetProps {
   }) => void;
   /** SAU 扫码落库成功（账号已由后端写入，父级只需刷新列表并关闭）。 */
   onDouyinAdded?: () => void;
+  /** 预选平台（平台 Tab 里点「添加账号」时直达该平台）。 */
+  initialPlatform?: AccountPlatform;
 }
 
 interface SauQrState {
@@ -39,8 +41,8 @@ interface SauQrState {
 }
 
 /** 添加平台账号 sheet：五选一平台卡片 → 按平台出对应凭据表单（明文只进不出，password 输入框）。 */
-export default function AddAccountSheet({ open, submitting, onClose, onSubmit, onDouyinAdded }: AddAccountSheetProps) {
-  const [platform, setPlatform] = useState<AccountPlatform>('wechat');
+export default function AddAccountSheet({ open, submitting, onClose, onSubmit, onDouyinAdded, initialPlatform }: AddAccountSheetProps) {
+  const [platform, setPlatform] = useState<AccountPlatform>(initialPlatform ?? 'wechat');
   const [accountName, setAccountName] = useState('');
   const [appid, setAppid] = useState('');
   const [secret, setSecret] = useState('');
@@ -68,6 +70,11 @@ export default function AddAccountSheet({ open, submitting, onClose, onSubmit, o
   useEffect(() => {
     if (!open) stopPolling();
   }, [open, stopPolling]);
+
+  // 平台 Tab 指定平台打开时直达
+  useEffect(() => {
+    if (open && initialPlatform) setPlatform(initialPlatform);
+  }, [open, initialPlatform]);
 
   useEffect(() => stopPolling, [stopPolling]);
 

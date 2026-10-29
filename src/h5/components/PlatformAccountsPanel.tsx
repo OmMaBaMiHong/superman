@@ -21,7 +21,7 @@ const STATUS_META: Record<PlatformAccount['status'], { label: string; dotClass: 
   error: { label: '异常', dotClass: 'bg-error', textClass: 'text-error' },
 };
 
-function AccountCard({
+export function AccountCard({
   account,
   verifying,
   onVerify,

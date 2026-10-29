@@ -13,15 +13,12 @@ import ContentDetailSheet from '@/features/contents/components/ContentDetailShee
 import { toast } from '@/features/toast/toast';
 import { apiFetch, logoutH5 } from '../lib/auth';
 import { navigateTo } from '../lib/router';
-import PlatformAccountsPanel from '../components/PlatformAccountsPanel';
-import PlatformCollectCookies from '../components/PlatformCollectCookies';
-import FreeModelsPanel from '../components/FreeModelsPanel';
 import SubscriptionsPanel from '../components/SubscriptionsPanel';
 import ServicesPanel from '../components/ServicesPanel';
-import RelayPanel from '../components/RelayPanel';
 import MembershipCard from '../components/MembershipCard';
 import FavoriteDirPanel from '../components/FavoriteDirPanel';
 import MyDataPanel from '../components/MyDataPanel';
+import PlatformTabs from '../components/PlatformTabs';
 
 /**
  * 「我的」页面 — 个人数据中心。
@@ -216,20 +213,12 @@ export default function H5ProfilePage({ username }: { username: string | null })
           {subTab === 'stats' && <MyDataPanel />}
         </div>
 
-        {/* 设置平摊（原抽屉改平铺）：中转站 / 服务与同步 / AI 模型 / 收藏目录 / 平台授权 */}
+        {/* 设置平摊：平台与账号（最顶部 Tab，中转站与各平台平级）/ 服务与同步 / 收藏目录 */}
         <div id="profile-settings" className="mt-8 space-y-5 border-t border-border/60 pt-6">
           <h2 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">设置</h2>
-          <RelayPanel />
+          <PlatformTabs />
           <ServicesPanel />
-          <FreeModelsPanel />
           <FavoriteDirPanel />
-          <div className="space-y-3">
-            <h3 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              授权与凭证
-            </h3>
-            <PlatformAccountsPanel />
-            <PlatformCollectCookies />
-          </div>
           <button
             type="button"
             onClick={handleLogout}

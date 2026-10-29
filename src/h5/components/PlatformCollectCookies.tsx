@@ -7,13 +7,13 @@ import type { RssHubCookieProvider, RssHubCookieView } from '@/types';
 import { toast } from '@/features/toast/toast';
 import { cn } from '@/lib/utils';
 
-const PROVIDERS: Array<{ id: RssHubCookieProvider; name: string; hint: string }> = [
+export const PROVIDERS: Array<{ id: RssHubCookieProvider; name: string; hint: string }> = [
   { id: 'douyin', name: '抖音', hint: '抖音订阅抓取 + 视频文案提取（yt-dlp 需登录态 cookie）' },
   { id: 'xiaohongshu', name: '小红书', hint: '小红书订阅抓取' },
   { id: 'weibo', name: '微博', hint: '微博订阅抓取' },
 ];
 
-function ProviderCard({
+export function ProviderCard({
   provider,
   view,
   onSaved,
