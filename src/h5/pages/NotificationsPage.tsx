@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Bell, CheckCheck, Lightbulb, PenLine, RefreshCw, Rss, Stamp } from 'lucide-react';
+import { Bell, CheckCheck, Lightbulb, PenLine, RefreshCw, Rss, Stamp, Trash2 } from 'lucide-react';
 import {
   listNotifications,
   markAllNotificationsRead,
@@ -10,6 +10,8 @@ import {
   type NotificationKind,
 } from '@/lib/api/apiClient';
 import MobileTabBar from '@/features/mobile/components/MobileTabBar';
+import { apiFetch } from '../lib/auth';
+import { toast } from '@/features/toast/toast';
 import { navigateTo } from '../lib/router';
 import { cn } from '@/lib/utils';
 
@@ -22,6 +24,26 @@ const KIND_META: Record<NotificationKind, { label: string; Icon: typeof Bell; do
   redraft_done: { label: '重拟完成', Icon: RefreshCw, dotClass: 'bg-primary' },
   system: { label: '系统', Icon: Bell, dotClass: 'bg-muted-foreground' },
   product_plan: { label: '产品机会', Icon: Lightbulb, dotClass: 'bg-warning' },
+};
+
+/** 消息分组：把 6 种事件收成 3 个大类，方便按来源筛选。 */
+type KindGroup = 'task' | 'collect' | 'system';
+const KIND_GROUP: Record<NotificationKind, KindGroup> = {
+  pipeline_done: 'task',
+  redraft_done: 'task',
+  pending_backlog: 'task',
+  product_plan: 'task',
+  fetch_failed: 'collect',
+  system: 'system',
+};
+
+type FilterKey = 'all' | 'unread' | KindGroup;
+const FILTER_LABEL: Record<FilterKey, string> = {
+  all: '全部',
+  unread: '未读',
+  task: '任务',
+  collect: '采集',
+  system: '系统',
 };
 
 /** 相对时间：x 分钟前 / x 小时前 / x 天前。 */
@@ -51,6 +73,8 @@ export default function NotificationsPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [markingAll, setMarkingAll] = useState(false);
+  const [pruning, setPruning] = useState(false);
+  const [filter, setFilter] = useState<FilterKey>('all');
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -95,7 +119,36 @@ export default function NotificationsPage() {
       .finally(() => setMarkingAll(false));
   }, []);
 
-  const groups = items.reduce<Array<{ day: string; entries: NotificationItem[] }>>((acc, item) => {
+  const pruneRead = useCallback(async () => {
+    setPruning(true);
+    try {
+      const res = await apiFetch('/s/api/notifications/read', { method: 'DELETE' });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error?.message ?? '清理失败');
+      toast.success(`已清空 ${json.data?.deleted ?? 0} 条已读消息`);
+      void load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '清理失败');
+    } finally {
+      setPruning(false);
+    }
+  }, [load]);
+
+  const unreadCount = items.filter((item) => item.readAt === null).length;
+  const counts: Record<FilterKey, number> = {
+    all: items.length,
+    unread: unreadCount,
+    task: items.filter((item) => KIND_GROUP[item.kind] === 'task').length,
+    collect: items.filter((item) => KIND_GROUP[item.kind] === 'collect').length,
+    system: items.filter((item) => KIND_GROUP[item.kind] === 'system').length,
+  };
+  const visibleItems = items.filter((item) => {
+    if (filter === 'all') return true;
+    if (filter === 'unread') return item.readAt === null;
+    return KIND_GROUP[item.kind] === filter;
+  });
+
+  const groups = visibleItems.reduce<Array<{ day: string; entries: NotificationItem[] }>>((acc, item) => {
     const day = dayKey(item.createdAt);
     const last = acc[acc.length - 1];
     if (last && last.day === day) last.entries.push(item);
@@ -111,8 +164,13 @@ export default function NotificationsPage() {
           <div className="flex min-w-0 items-center gap-2">
             <Bell aria-hidden="true" className="h-4 w-4 text-primary" />
             <div className="min-w-0">
-              <h1 className="truncate text-sm font-semibold text-foreground">消息</h1>
-              <p className="text-[11px] text-muted-foreground">Notification Center</p>
+              <h1 className="truncate text-sm font-semibold text-foreground">
+                消息
+                {unreadCount > 0 ? (
+                  <span className="ml-2 rounded-full bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] text-primary">{unreadCount} 未读</span>
+                ) : null}
+              </h1>
+              <p className="text-[11px] text-muted-foreground">任务完成 / 采集异常 / 待批积压 / 产品机会 / 系统通知</p>
             </div>
           </div>
           <button
@@ -128,22 +186,60 @@ export default function NotificationsPage() {
             <CheckCheck aria-hidden="true" className="h-3.5 w-3.5" />
             {markingAll ? '处理中…' : '全部已读'}
           </button>
+          <button
+            type="button"
+            disabled={pruning}
+            onClick={() => void pruneRead()}
+            className={cn(
+              'inline-flex h-9 items-center gap-1.5 rounded-full border border-border px-3.5 text-xs font-medium text-muted-foreground',
+              'transition-colors duration-150 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+              'disabled:pointer-events-none disabled:opacity-50',
+            )}
+          >
+            <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
+            {pruning ? '清理中…' : '清空已读'}
+          </button>
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 pb-28 pt-5 sm:px-6 md:pb-10">
+      {/* 分类筛选：全部 / 未读 / 任务 / 采集 / 系统 */}
+      <div className="mx-auto flex max-w-3xl gap-1.5 overflow-x-auto px-4 pb-1 pt-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:px-6">
+        {(Object.keys(FILTER_LABEL) as FilterKey[]).map((key) => {
+          const active = filter === key;
+          return (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={active}
+              onClick={() => setFilter(key)}
+              className={cn(
+                'flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors duration-150',
+                'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                active ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {FILTER_LABEL[key]}
+              <span className="font-mono text-[10px] tabular-nums opacity-60">{counts[key]}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <main className="mx-auto max-w-3xl px-4 pb-28 pt-3 sm:px-6 md:pb-10">
         {loading ? (
           <div className="space-y-2.5">
             {Array.from({ length: 4 }, (_, index) => (
               <div key={index} className="gov-card h-20 animate-pulse [--gov-accent:var(--glass-border)]" aria-hidden="true" />
             ))}
           </div>
-        ) : items.length === 0 ? (
+        ) : visibleItems.length === 0 ? (
           <div className="rounded-[1.25rem] border border-dashed border-border px-6 py-16 text-center">
             <Bell aria-hidden="true" className="mx-auto h-7 w-7 text-muted-foreground/40" />
-            <p className="mt-3 text-sm font-medium text-foreground">暂无新消息</p>
+            <p className="mt-3 text-sm font-medium text-foreground">
+              {items.length === 0 ? '暂无消息' : `没有「${FILTER_LABEL[filter]}」类消息`}
+            </p>
             <p className="mt-2 text-xs text-muted-foreground">
-              采集失败、改写完成、待批积压都会在这里提醒你。
+              这里不是聊天：任务完成（洗稿/重拟/产品机会）、采集失败、待批积压、系统通知都会落在这里。
             </p>
           </div>
         ) : (
@@ -151,7 +247,7 @@ export default function NotificationsPage() {
             {groups.map((group) => (
               <section key={group.day} aria-label={group.day}>
                 <h2 className="mb-2 px-1 text-[12px] font-semibold text-muted-foreground">{group.day}</h2>
-                <ul className="space-y-2 md:grid md:grid-cols-2 md:gap-2 md:space-y-0">
+                <ul className="space-y-2">
                   {group.entries.map((item) => {
                     const meta = KIND_META[item.kind] ?? KIND_META.system;
                     const unread = item.readAt === null;
@@ -186,7 +282,10 @@ export default function NotificationsPage() {
                               </span>
                             ) : null}
                             <span className="mt-1 flex items-center gap-2 text-[10px] text-muted-foreground/70">
-                              <span>{meta.label}</span>
+                              <span className="inline-flex items-center gap-1">
+                                <span aria-hidden="true" className={cn('h-1.5 w-1.5 rounded-full', meta.dotClass)} />
+                                {meta.label}
+                              </span>
                               <span aria-hidden="true">·</span>
                               <span className="font-mono tabular-nums">{formatRelativeTime(item.createdAt)}</span>
                             </span>
