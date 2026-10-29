@@ -520,7 +520,8 @@ export default function FavoritesPage() {
             </p>
           </button>
         ) : (
-          <div className="columns-1 gap-3 sm:columns-2 lg:columns-3">
+          /* 瀑布流列数：默认 3 列（插件面板宽度约 1000px），超宽屏 4 列，窄屏退 2 列 */
+          <div className="columns-2 gap-2.5 sm:columns-3 xl:columns-4 2xl:columns-5">
             {visible.map((entry) => (
               <Card
                 key={entry.item.id}
